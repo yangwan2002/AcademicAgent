@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.hypothesis/
+
+# 运行时 working copy / 会话状态
+.paper_workspace/
+
+# 转换产出
+output/
+
+# 运行追踪（trace.json / event journal）
+runs/
+
+# 环境
+.env
+.venv/
+venv/

@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "paper-agent"
+version = "0.2.0"
+description = "学术论文写作 Agent（V2：意图驱动 + Diff Gate）"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+# 真实 LLM / 检索 provider 的可选依赖。骨架与测试用 mock，无需安装。
+llm = ["openai>=1.0"]
+retrieval = ["httpx>=0.27"]
+dev = ["pytest>=8", "pytest-cov"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
