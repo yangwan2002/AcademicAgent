@@ -1,7 +1,7 @@
 """Anthropic Messages 协议 LLM provider（与 OpenAICompatibleProvider 并列的适配器）。
 
-与 OpenAI 协议的关键差异，全部在本适配器内消化，对上层（tool_loop / TaskAgent）
-透明——它们只依赖 ``LLMProvider`` 抽象与中立的 ``Message``/``ToolCall``/``LLMResponse``：
+与 OpenAI 协议的关键差异，全部在本适配器内消化，对上层透明——上层只依赖
+``LLMProvider`` 抽象与中立的 ``Message``/``ToolCall``/``LLMResponse``：
 
 - system 提示单独作为顶层 ``system`` 参数，不进 messages；
 - 消息内容用 content block（``text``/``thinking``/``tool_use``/``tool_result``）；
@@ -266,8 +266,7 @@ class AnthropicProvider(LLMProvider):
     ) -> Iterator[StreamChunk]:
         """最小流式实现：一次性 complete 后把正文作为单块产出。
 
-        顶层 TaskAgent 只用 ``complete``；此方法仅为满足 ``LLMProvider`` 协议与
-        少数走 ``stream`` 的封装层，避免 AttributeError。取消令牌被尊重。
+        此方法为满足 ``LLMProvider`` 协议与走 ``stream`` 的封装层而提供。取消令牌被尊重。
         """
         opts.pop("event_sink", None)  # 可选观测 sink：本层不透传给底层 API
         if cancel_token is not None and cancel_token.cancelled:

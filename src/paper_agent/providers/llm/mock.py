@@ -5,10 +5,8 @@
   （作为一次工具调用回合）。
 - 默认（无脚本）：回显最后一条 user 消息，便于断言。
 
-#20：原生实现 ``stream()``，使默认 mock 装配下流式路径亦可走通（此前 Mock
-未实现 ``stream``，``ResilientLLMProvider.stream`` 经 mock 会 AttributeError）。
-``complete`` 保持非流式语义（不触发 ``on_delta``），故经 ``ObservableLLMProvider``
-时仍发 ``LLM_RESPONSE`` 事件——流式增量由 ``stream()`` 独立产出。
+原生实现 ``stream()``，使默认 mock 装配下流式路径亦可走通。``complete`` 保持
+非流式语义（不触发 ``on_delta``）；流式增量由 ``stream()`` 独立产出。
 """
 
 from __future__ import annotations

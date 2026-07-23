@@ -65,10 +65,7 @@ class LLMResponse:
 
 @dataclass
 class StreamChunk:
-    """流式增量（升级 Req 5）。
-
-    与 `workspace.models.StreamChunk` 字段对齐（kind/text），在 provider 层
-    就近定义以避免 providers → workspace 的跨层依赖。
+    """流式增量（升级 Req 5）。在 provider 层就近定义，避免 providers → workspace 的跨层依赖。
 
     kind ∈ {"content", "thinking"}：
     - "content"  ：构成最终 `LLMResponse.content` 的正文增量。
@@ -145,8 +142,8 @@ class LLMProvider(Protocol):
     ) -> Iterator[StreamChunk]:
         """流式补全：逐块产出 `StreamChunk`（可选实现）。
 
-        具体 provider MAY 实现此方法以获得真正的原生流式；未原生实现时可
-        经 `StreamingMixin` 基于 `complete(on_delta=...)` 适配出 `stream()`。
+        具体 provider MAY 实现此方法以获得真正的原生流式（mock/openai/anthropic
+        均已原生实现）。
 
         语义约定（升级 Req 5）：
         - 在每个增量边界检查 `cancel_token.cancelled`，被取消时至多再产出

@@ -1,8 +1,8 @@
 """健壮性装饰器层：`ResilientLLMProvider`（升级 Req 4）。
 
 把重试 / 超时 / 429 限流退避从具体 provider 内部上提为一个可复用的装饰器，
-层叠在任意 `LLMProvider` 之外、`ObservableLLMProvider` 之内。这样所有 provider
-（含未来新增的原生适配器）自动获得统一健壮性，且事件层能观测到「重试中」事件。
+层叠在任意 `LLMProvider` 之外。这样所有 provider（含未来新增的原生适配器）自动
+获得统一健壮性，且可选的 `event_sink` 能让观测层看到「重试中」事件。
 
 本模块实现 `complete()` 与 `stream()` 的健壮重试。重试相关的纯函数
 （`is_retryable` / `backoff_delay` / `retry_after_seconds`）与事件发射逻辑独立，
@@ -249,8 +249,7 @@ def _safe_preview(text: object) -> str:
 class ResilientLLMProvider(LLMProvider):
     """健壮性装饰器：为内层 `LLMProvider` 提供统一的重试 / 退避 / 429 处理。
 
-    层叠位置：`ObservableLLMProvider`（外）→ `ResilientLLMProvider`（本层）
-    → 具体 `LLMProvider`（内）。
+    层叠位置：`ResilientLLMProvider`（本层）→ 具体 `LLMProvider`（内）。
 
     Args:
         inner: 被包装的具体 provider。
@@ -334,8 +333,8 @@ class ResilientLLMProvider(LLMProvider):
     ) -> Iterator[StreamChunk]:
         """带可重试 / 不重试语义的流式补全（算法见 design 时序 3；Req 5.7–5.9 / 4.9）。
 
-        前置：`inner` 实现 `stream`（或经 `StreamingMixin` 适配），在每个增量边界
-        检查 `cancel_token` 并把取消视为正常终态。
+        前置：`inner` 原生实现 `stream`，在每个增量边界检查 `cancel_token` 并把
+        取消视为正常终态。
 
         后置：
         - 尚未向下游产出任何增量、底层失败且错误可重试且仍有重试余量 →

@@ -205,10 +205,8 @@ class OpenAICompatibleProvider(LLMProvider):
     ) -> Iterator[StreamChunk]:
         """原生流式：逐块产出 ``StreamChunk``（content / thinking），增量边界查取消。
 
-        #3：此前本类只有内部 ``_complete_stream``（push 风格 on_delta）而未实现
-        ``stream()`` 协议，导致 ``ResilientLLMProvider.stream`` / ``ObservableLLMProvider.stream``
-        经本类会 AttributeError。此原生实现使真实 provider 的流式协议端到端可用。
-        工具调用回合不支持流式（与 ``complete`` 一致），如传入 tools 则不开启流式。
+        原生实现 ``stream()`` 协议，使 ``ResilientLLMProvider.stream`` 经本类端到端
+        可用。工具调用回合不支持流式（与 ``complete`` 一致），如传入 tools 则不开启流式。
         """
         # stream() 是 pull 风格，直接 yield；忽略可能传入的 push 风格 on_delta。
         opts.pop("on_delta", None)
