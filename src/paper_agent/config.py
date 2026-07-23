@@ -50,6 +50,11 @@ class Config:
     polish_max_retry: int = 2
     polish_max_char_change_ratio: float = 0.30  # 字数变化 ≤ 30%
 
+    # ---- streaming-and-trace 开关（默认全关 → 与既有行为逐字节一致）----
+    trace_enabled: bool = False       # 落 runs/<run_id>/trace.json
+    stream_enabled: bool = False      # 流式呈现候选
+    runs_dir: str = "runs"            # trace 落盘根目录
+
 
 # 向后兼容别名：V2 骨架代码里以 RuntimeConfig 指代同一对象。
 RuntimeConfig = Config
@@ -72,7 +77,17 @@ def load_config() -> Config:
         vlm_api_key_env=os.environ.get("PAPER_VLM_KEY_ENV") or None,
         retrieval_provider=os.environ.get("PAPER_RETRIEVAL", "mock"),
         workspace_root=os.environ.get("PAPER_WORKSPACE_DIR", ".paper_workspace"),
+        trace_enabled=_env_flag("PAPER_TRACE", False),
+        stream_enabled=_env_flag("PAPER_STREAM", False),
+        runs_dir=os.environ.get("PAPER_RUNS_DIR", "runs"),
     )
+
+
+def _env_flag(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "on")
 
 
 __all__ = ["Config", "RuntimeConfig", "load_config"]

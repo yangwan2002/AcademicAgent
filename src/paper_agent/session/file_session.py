@@ -19,9 +19,19 @@ import subprocess
 import uuid
 from dataclasses import dataclass, field
 
+from paper_agent.observability.events import EventKind
+
 
 def _git_available() -> bool:
     return shutil.which("git") is not None
+
+
+def _atomic_write(path: str, text: str) -> None:
+    """原子写文本：tmp + os.replace，保证「全有或全无」（Property 5）。"""
+    tmp = f"{path}.tmp.{uuid.uuid4().hex[:8]}"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        fh.write(text)
+    os.replace(tmp, path)
 
 
 @dataclass
@@ -53,14 +63,29 @@ class FileBackedSession:
         with open(self.working_path, "r", encoding="utf-8") as fh:
             return fh.read()
 
-    def write_working(self, text: str, message: str = "edit") -> None:
-        """写入 working；git 可用则 commit，否则压入快照栈。"""
+    def write_working(self, text: str, message: str = "edit", *, bus=None) -> None:
+        """写入 working（原子）；git 可用则 commit，否则压入快照栈。
+
+        可选 `bus`（按方法传、不长存）：写 working 后发 `WORKING_COPY_UPDATE`，
+        git 快照后发 `WORKSPACE_COMMIT`。不传时行为与既有一致。
+        """
         if not self._git_ok:
             self._snapshots.append(self.read_working())
-        with open(self.working_path, "w", encoding="utf-8") as fh:
-            fh.write(text)
+        _atomic_write(self.working_path, text)
+        if bus is not None:
+            bus.publish(
+                EventKind.WORKING_COPY_UPDATE,
+                path=os.path.basename(self.working_path),
+                status="updated",
+            )
         if self._git_ok:
             self._git_commit(message)
+            if bus is not None:
+                bus.publish(
+                    EventKind.WORKSPACE_COMMIT,
+                    path=os.path.basename(self.session_dir),
+                    status="committed",
+                )
 
     def undo(self) -> bool:
         """回退到上一个版本。无历史返回 False。"""
@@ -95,8 +120,18 @@ class FileBackedSession:
             return False
 
     # ---- 明确落盘到源文件（用户 save 时才调用）----
-    def save_to_source(self) -> None:
-        shutil.copyfile(self.working_path, self.source_path)
+    def save_to_source(self, *, bus=None) -> None:
+        """把 working 原子写回源文件（二进制安全）；可选 `bus` 发 `SOURCE_SAVE`。"""
+        # 先拷到源文件同目录的 tmp 再 os.replace，保证原子且不破坏二进制（docx）。
+        tmp = f"{self.source_path}.tmp.{uuid.uuid4().hex[:8]}"
+        shutil.copyfile(self.working_path, tmp)
+        os.replace(tmp, self.source_path)
+        if bus is not None:
+            bus.publish(
+                EventKind.SOURCE_SAVE,
+                path=os.path.basename(self.source_path),
+                status="saved",
+            )
 
     def read_source(self) -> str:
         with open(self.source_path, "r", encoding="utf-8") as fh:

@@ -52,6 +52,7 @@ def execute_add_section(
     verifier: CitationVerifier,
     confirm: ConfirmNumber,
     max_retry: int = 2,
+    bus=None,
 ) -> AddSectionResult:
     index = SectionIndex(session.read_working(), session.ext)
     if index.find(plan.title) is not None:
@@ -103,7 +104,7 @@ def execute_add_section(
         if result.passed:
             offset = index.insertion_offset(plan.position)
             new_full = index.insert_text(offset, f"\n\n{block}\n")
-            session.write_working(new_full, message=f"add_section {plan.title}")
+            session.write_working(new_full, message=f"add_section {plan.title}", bus=bus)
             _update_claims(facts, plan)
             facts.save()
             return AddSectionResult(

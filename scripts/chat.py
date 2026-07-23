@@ -45,6 +45,11 @@ from paper_agent.intents.convert import execute_convert
 from paper_agent.intents.rewrite import execute_rewrite
 from paper_agent.intents.add_section import execute_add_section
 from paper_agent.intents.format_docx import execute_format
+from paper_agent.coordinator import Coordinator
+from paper_agent.errors import OperationCancelled
+from paper_agent.observability.events import EventKind
+from paper_agent.observability.renderer import ConsoleRenderer
+from paper_agent.providers.llm.base import CancellationToken
 
 _COMMON_SECTIONS = [
     "Introduction", "Related Work", "Method", "Experiments",
@@ -82,14 +87,37 @@ def _confirm_number(value: str, ctx: str) -> bool:
     return ans in ("y", "yes", "是")
 
 
-def _run_add_section(session, facts, llm, retrieval, verifier, title_hint, position_hint):
+def _run_add_section(session, facts, llm, retrieval, verifier, title_hint, position_hint, *, bus=None):
     """执行一次 add_section（供单章与批处理复用）。返回 result。"""
     index = _build_index(session)
     plan = interview_add_section(title_hint, position_hint, index, facts, ask=_ask)
     return execute_add_section(
         session, plan, facts, llm,
         retrieval_provider=retrieval, verifier=verifier, confirm=_confirm_number,
+        bus=bus,
     )
+
+
+def _dispatch(coordinator, intent_name, work, **route_data):
+    """在一次 run 内执行 work(bus, cancel_token)：发 ROUTE_DECISION、统一取消/失败收尾。
+
+    任何意图都经此包裹 → 每条消息都是一次有始有终、有 trace、异常不炸退 REPL 的 run。
+    返回 RunReport；业务结果在 report.value（取消/失败时为 None）。
+    """
+    def fn(bus, ct):
+        bus.publish(EventKind.ROUTE_DECISION, intent=intent_name, **route_data)
+        try:
+            return work(bus, ct)
+        except KeyboardInterrupt:  # Ctrl-C → 统一取消模型
+            raise OperationCancelled()
+
+    report = coordinator.run(fn, cancel_token=CancellationToken())
+    if report.run_status == "cancelled":
+        print("\n已取消，本次操作未改动文档。")
+    elif report.run_status == "failed":
+        cat = report.error.get("category") if report.error else "未知"
+        print(f"\n执行失败（{cat}）。")
+    return report
 
 
 def main(argv: list[str]) -> int:
@@ -110,6 +138,22 @@ def main(argv: list[str]) -> int:
     session = FileBackedSession(source, workspace_root=config.workspace_root)
     retrieval = build_retrieval_provider(config)
     verifier = CitationVerifier(retrieval)
+
+    # 观测编排器：流式开则挂 ConsoleRenderer，追踪开则落 trace.json；两者全关时
+    # Coordinator 内部走 NullEventBus（零开销，行为与既有一致）。
+    coordinator = Coordinator(
+        enable_trace=config.trace_enabled,
+        enable_stream=config.stream_enabled,
+        renderer=ConsoleRenderer() if config.stream_enabled else None,
+        runs_dir=config.runs_dir,
+    )
+    if config.trace_enabled or config.stream_enabled:
+        flags = []
+        if config.stream_enabled:
+            flags.append("流式")
+        if config.trace_enabled:
+            flags.append(f"追踪→{config.runs_dir}/<run_id>/trace.json")
+        print("观测已启用：" + "、".join(flags))
 
     # Facts 按「论文」持久化（claims 跨 chat 复用）；refs/数字每次从源刷新
     facts = SessionFacts.load(project_facts_path(config.workspace_root, source))
@@ -146,7 +190,10 @@ def main(argv: list[str]) -> int:
             _print_sections(index)
             continue
         if msg == ":save":
-            session.save_to_source()
+            def _do_save(bus, _ct):
+                session.save_to_source(bus=bus)
+                return None
+            coordinator.run(_do_save)  # :save 是独立 run
             print(f"已保存到源文件：{session.source_path}")
             continue
         if msg == ":undo":
@@ -162,32 +209,52 @@ def main(argv: list[str]) -> int:
             continue
 
         if route.intent is Intent.FIX_BIBLIOGRAPHY:
-            report = fix_bibliography(session, facts)
-            print("\n" + report.message)
+            report = _dispatch(
+                coordinator, "fix_bibliography",
+                lambda bus, ct: fix_bibliography(session, facts),
+            )
+            if report.value is not None:
+                print("\n" + report.value.message)
             continue
 
         if route.intent is Intent.FORMAT_DOCX:
-            fresult = execute_format(session, msg)
-            print("\n" + fresult.message)
-            if fresult.ok and fresult.applied:
-                print("操作清单：" + "；".join(fresult.applied))
-                print("（:save 落盘到源文件，:undo 撤销）")
+            report = _dispatch(
+                coordinator, "format_docx",
+                lambda bus, ct: execute_format(session, msg),
+            )
+            fresult = report.value
+            if fresult is not None:
+                print("\n" + fresult.message)
+                if fresult.ok and fresult.applied:
+                    print("操作清单：" + "；".join(fresult.applied))
+                    print("（:save 落盘到源文件，:undo 撤销）")
             continue
 
         if route.intent is Intent.ADD_SECTION:
+            # 访谈在 run 外（InterviewError 是用户流程控制，不应被当作 run 失败）
             try:
-                ares = _run_add_section(
-                    session, facts, llm, retrieval, verifier, route.title, None
-                )
+                as_index = _build_index(session)
+                as_plan = interview_add_section(route.title, None, as_index, facts, ask=_ask)
             except InterviewError as exc:
                 print(f"访谈中止：{exc}")
                 continue
-            if ares.search_note:
-                print("\n" + ares.search_note)
-            print("\n" + ares.message)
-            if ares.ok:
-                print("\n--- 预览 ---\n" + ares.preview)
-                print("\n（:save 落盘到源文件，:undo 撤销）")
+            report = _dispatch(
+                coordinator, "add_section",
+                lambda bus, ct: execute_add_section(
+                    session, as_plan, facts, llm,
+                    retrieval_provider=retrieval, verifier=verifier,
+                    confirm=_confirm_number, bus=bus,
+                ),
+                title=route.title or "",
+            )
+            ares = report.value
+            if ares is not None:
+                if ares.search_note:
+                    print("\n" + ares.search_note)
+                print("\n" + ares.message)
+                if ares.ok:
+                    print("\n--- 预览 ---\n" + ares.preview)
+                    print("\n（:save 落盘到源文件，:undo 撤销）")
             continue
 
         if route.intent is Intent.ADD_SECTION_BATCH:
@@ -225,11 +292,17 @@ def main(argv: list[str]) -> int:
             except InterviewError as exc:
                 print(f"访谈中止：{exc}")
                 continue
-            cresult = execute_convert(session, cplan)
-            print("\n" + cresult.message)
-            if cresult.report_lines:
-                print("转换后校验：")
-                print("\n".join(cresult.report_lines))
+            report = _dispatch(
+                coordinator, "convert_format",
+                lambda bus, ct: execute_convert(session, cplan),
+                target_ext=route.target_ext or "",
+            )
+            cresult = report.value
+            if cresult is not None:
+                print("\n" + cresult.message)
+                if cresult.report_lines:
+                    print("转换后校验：")
+                    print("\n".join(cresult.report_lines))
             continue
 
         if route.intent is Intent.REWRITE:
@@ -246,18 +319,24 @@ def main(argv: list[str]) -> int:
                 ).strip().lower()
                 return ans in ("y", "yes", "是")
 
-            rresult = execute_rewrite(
-                session, rplan, facts, llm,
-                retrieval_provider=retrieval, verifier=verifier,
-                confirm=_confirm, max_retry=config.polish_max_retry,
+            report = _dispatch(
+                coordinator, "rewrite",
+                lambda bus, ct: execute_rewrite(
+                    session, rplan, facts, llm,
+                    retrieval_provider=retrieval, verifier=verifier,
+                    confirm=_confirm, max_retry=config.polish_max_retry, bus=bus,
+                ),
+                section_id=route.section_id or "",
             )
-            if rresult.search_note:
-                print("\n" + rresult.search_note)
-            print("\n" + rresult.message)
-            if rresult.ok and rresult.diff:
-                print("\n--- diff ---")
-                print(rresult.diff)
-                print("（:save 落盘到源文件，:undo 撤销）")
+            rresult = report.value
+            if rresult is not None:
+                if rresult.search_note:
+                    print("\n" + rresult.search_note)
+                print("\n" + rresult.message)
+                if rresult.ok and rresult.diff:
+                    print("\n--- diff ---")
+                    print(rresult.diff)
+                    print("（:save 落盘到源文件，:undo 撤销）")
             continue
 
         # polish
@@ -267,11 +346,28 @@ def main(argv: list[str]) -> int:
             print(f"访谈中止：{exc}")
             continue
 
-        result = execute_polish(
-            session, plan, llm,
-            max_char_change_ratio=config.polish_max_char_change_ratio,
-            max_retry=config.polish_max_retry,
-        )
+        section_id = route.section_id
+
+        def _do_polish(bus, ct):
+            bus.publish(EventKind.ROUTE_DECISION, intent="polish", section_id=section_id)
+            try:
+                return execute_polish(
+                    session, plan, llm,
+                    max_char_change_ratio=config.polish_max_char_change_ratio,
+                    max_retry=config.polish_max_retry,
+                    bus=bus, cancel_token=ct, stream=config.stream_enabled,
+                )
+            except KeyboardInterrupt:  # Ctrl-C → 统一取消模型
+                raise OperationCancelled()
+
+        report = coordinator.run(_do_polish, cancel_token=CancellationToken())
+        result = report.value
+        if result is None:
+            if report.run_status == "cancelled":
+                print("\n已取消本次润色，文档未改动。")
+            elif report.error:
+                print(f"\n生成失败（{report.error.get('category')}）。")
+            continue
         print("\n" + result.message)
         if result.ok and result.diff:
             print("\n--- diff ---")

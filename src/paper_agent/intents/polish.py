@@ -43,6 +43,9 @@ def execute_polish(
     *,
     max_char_change_ratio: float = 0.30,
     max_retry: int = 2,
+    bus=None,
+    cancel_token=None,
+    stream: bool = False,
 ) -> PolishResult:
     # 每次基于最新 working 重建索引，保证偏移正确
     index = SectionIndex(session.read_working(), session.ext)
@@ -55,7 +58,10 @@ def execute_polish(
 
     original_body = index.body_of(section)
     gate = PolishGate(session.ext, max_char_change_ratio=max_char_change_ratio)
-    outcome = run_polish(original_body, plan.goal, llm, gate, max_retry=max_retry)
+    outcome = run_polish(
+        original_body, plan.goal, llm, gate,
+        max_retry=max_retry, bus=bus, cancel_token=cancel_token, stream=stream,
+    )
 
     if not outcome.ok:
         return PolishResult(
@@ -71,7 +77,7 @@ def execute_polish(
         )
 
     new_full = index.splice(section, outcome.text or "")
-    session.write_working(new_full)
+    session.write_working(new_full, bus=bus)
     diff = unified_diff(original_body, outcome.text or "", section.title)
     return PolishResult(
         ok=True,

@@ -58,6 +58,7 @@ def execute_rewrite(
     verifier: CitationVerifier,
     confirm: ConfirmNumber,
     max_retry: int = 2,
+    bus=None,
 ) -> RewriteResult:
     index = SectionIndex(session.read_working(), session.ext)
     section = index.find(plan.section_id)
@@ -109,7 +110,7 @@ def execute_rewrite(
         result = gate.check(original, candidate, confirmed)
         if result.passed:
             new_full = index.splice(section, candidate)
-            session.write_working(new_full, message=f"rewrite {section.id}")
+            session.write_working(new_full, message=f"rewrite {section.id}", bus=bus)
             facts.save()
             diff = unified_diff(original, candidate, section.title)
             return RewriteResult(
