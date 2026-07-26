@@ -22,6 +22,10 @@ Ask = Callable[[str], str]
 class PolishPlan:
     section_id: str
     goal: str = ""
+    # 用户显式硬约束（如「不改数字」「保留引用」）。由 intent-planning 的
+    # polish.constraints 槽填入，经 execute_polish → ContextBuilder 真正影响生成。
+    # 旧访谈路径不填 → 空 list → prompt 与改造前逐字节一致。
+    constraints: list[str] = field(default_factory=list)
 
 
 @dataclass

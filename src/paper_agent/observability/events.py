@@ -68,6 +68,19 @@ class EventKind(str, Enum):
     WORKSPACE_COMMIT = "workspace_commit"         # 工作区落盘/快照
     SOURCE_SAVE = "source_save"                   # 用户 :save 写回源文件
 
+    # --- intent-planning 理解层业务事件（复用 WORKFLOW_START/END=Turn、
+    #     span("operation:...")=Operation，不新增生命周期事件）---
+    OPERATION_ANALYSIS = "operation_analysis"     # 多操作拆分结果
+    PRE_EXTRACT = "pre_extract"                   # 单操作槽位抽取结果
+    PLAN_VALIDATION = "plan_validation"           # 计划静态校验结果
+    CLARIFICATION_QA = "clarification_qa"         # 澄清问答（脱敏）
+    UNMAPPED_RESOLUTION = "unmapped_resolution"   # 未映射要求的用户处置
+    PLAN_CONFIRMED = "plan_confirmed"             # 用户确认计划
+    PLAN_REJECTED = "plan_rejected"               # 用户否决计划
+    PLAN_CANCELLED = "plan_cancelled"             # 计划执行中取消（finalize 前发布）
+    OPERATION_RESULT = "operation_result"         # 单操作结果（succeeded/rejected/...）
+    PLAN_RESULT = "plan_result"                   # 计划最终结果（done/partial/...）
+
 
 # 敏感的临时原文事件：允许 ConsoleRenderer 实时显示、TraceRecorder 计算
 # hash/preview，但**禁止**写入完整 trace.json、普通日志、错误报告或第三方

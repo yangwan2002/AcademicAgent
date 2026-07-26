@@ -21,7 +21,14 @@ class FormatResult:
     applied: list[str] = field(default_factory=list)
 
 
-def execute_format(session: FileBackedSession, message: str) -> FormatResult:
+def execute_format(session: FileBackedSession, message: str, *, ops=None) -> FormatResult:
+    """执行排版。
+
+    ``ops``（可选）：已结构化的 `list[FormatOp]`。intent-planning 的
+    `format_docx.operations` 槽经此**直接**落到文档（Task 19 绑定
+    `execute_format.ops`），避免「FormatOp → 中文 → 再解析」的有损往返。
+    不传时行为与旧调用完全一致（用 `parse_format_ops(message)` 规则解析）。
+    """
     if session.ext != "docx":
         return FormatResult(
             ok=False,
@@ -35,7 +42,7 @@ def execute_format(session: FileBackedSession, message: str) -> FormatResult:
             ok=False, message="格式操作需要 git 支持（用于失败回滚），当前不可用。",
         )
 
-    ops = parse_format_ops(message)
+    ops = list(ops) if ops else parse_format_ops(message)
     if not ops:
         return FormatResult(
             ok=False,

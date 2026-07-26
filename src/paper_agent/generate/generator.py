@@ -107,8 +107,13 @@ def run_polish(
     bus=None,
     cancel_token=None,
     stream: bool = False,
+    constraints: list[str] | None = None,
 ) -> PolishOutcome:
-    """生成 → 校验 → 回灌重试。最多 ``1 + max_retry`` 次 LLM 调用。"""
+    """生成 → 校验 → 回灌重试。最多 ``1 + max_retry`` 次 LLM 调用。
+
+    ``constraints``：用户显式硬约束，透传给 ContextBuilder（Task 19 执行绑定）。
+    为空/None 时 prompt 与改造前逐字节一致。
+    """
     bus = bus or NullEventBus()
     generation_id = uuid4().hex
     violations: list[str] = []
@@ -123,7 +128,9 @@ def run_polish(
                     if attempt > 1:
                         bus.publish(EventKind.GATE_RETRY, attempt=attempt)
 
-                    messages = build_polish_messages(original, goal, violations or None)
+                    messages = build_polish_messages(
+                        original, goal, violations or None, constraints or None
+                    )
                     call_id = uuid4().hex
                     candidate_id = uuid4().hex
 

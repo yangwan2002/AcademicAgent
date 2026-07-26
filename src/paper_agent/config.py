@@ -55,6 +55,16 @@ class Config:
     stream_enabled: bool = False      # 流式呈现候选
     runs_dir: str = "runs"            # trace 落盘根目录
 
+    # ---- intent-planning 理解层（默认 off → 完全走现有 Router，行为不变）----
+    intent_planning_mode: str = "off"          # off | shadow | active
+    planning_max_operations: int = 5           # 单 Turn 最多操作数
+    planning_max_revisions: int = 3            # 规划循环最多修订次数
+    planning_max_input_chars: int = 20000      # 单条消息最大字符数
+    planning_timeout_s: float = 60.0           # 单次 provider 调用超时（秒）
+    planning_max_llm_calls: int = 20           # 单 Turn 总 LLM 调用上限
+    planning_provider_time_budget_s: float = 120.0  # 单 Turn provider 累计时间预算
+    shadow_timeout_s: float = 15.0             # shadow 模式严格短超时
+
 
 # 向后兼容别名：V2 骨架代码里以 RuntimeConfig 指代同一对象。
 RuntimeConfig = Config
@@ -80,6 +90,16 @@ def load_config() -> Config:
         trace_enabled=_env_flag("PAPER_TRACE", False),
         stream_enabled=_env_flag("PAPER_STREAM", False),
         runs_dir=os.environ.get("PAPER_RUNS_DIR", "runs"),
+        intent_planning_mode=_env_mode("PAPER_INTENT_PLANNING_MODE", "off"),
+        planning_max_operations=_env_int("PAPER_PLANNING_MAX_OPERATIONS", 5, minimum=1),
+        planning_max_revisions=_env_int("PAPER_PLANNING_MAX_REVISIONS", 3, minimum=1),
+        planning_max_input_chars=_env_int("PAPER_PLANNING_MAX_INPUT_CHARS", 20000, minimum=1),
+        planning_timeout_s=_env_float("PAPER_PLANNING_TIMEOUT", 60.0, minimum=0.0),
+        planning_max_llm_calls=_env_int("PAPER_PLANNING_MAX_LLM_CALLS", 20, minimum=1),
+        planning_provider_time_budget_s=_env_float(
+            "PAPER_PLANNING_PROVIDER_TIME_BUDGET", 120.0, minimum=0.0
+        ),
+        shadow_timeout_s=_env_float("PAPER_SHADOW_TIMEOUT", 15.0, minimum=0.0),
     )
 
 
@@ -88,6 +108,40 @@ def _env_flag(name: str, default: bool) -> bool:
     if raw is None:
         return default
     return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
+def _env_mode(name: str, default: str) -> str:
+    """理解层三态；非法值安全降级为 default。"""
+    raw = (os.environ.get(name) or "").strip().lower()
+    return raw if raw in ("off", "shadow", "active") else default
+
+
+def _env_int(name: str, default: int, *, minimum: int | None = None) -> int:
+    """解析整数环境变量；非法/越界降级为 default。"""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        val = int(raw.strip())
+    except (ValueError, TypeError):
+        return default
+    if minimum is not None and val < minimum:
+        return default
+    return val
+
+
+def _env_float(name: str, default: float, *, minimum: float | None = None) -> float:
+    """解析浮点环境变量；非法/越界降级为 default。"""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        val = float(raw.strip())
+    except (ValueError, TypeError):
+        return default
+    if minimum is not None and val < minimum:
+        return default
+    return val
 
 
 __all__ = ["Config", "RuntimeConfig", "load_config"]

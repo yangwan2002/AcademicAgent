@@ -373,7 +373,8 @@ needs_replan 经 ExecutionOutcome 回到有界规划循环，只对未执行 Ope
 | add_section | structure_desc | 否 | "" | 否 |
 | add_section | subsections | 否 | [] | 否 |
 | add_section | position | 否 | end | 否 |
-| add_section | want_search | 否 | False | 否 |
+| add_section | search_query | 否 | "" | 否 |
+| add_section | want_search | 否 | (search_query 非空 → True) | 否 |
 | add_section | search_limit | 否 | 5 | 否 |
 | convert_format | target_ext | 是 | 无 | 是 |
 | convert_format | presets | 否 | [] | 否 |

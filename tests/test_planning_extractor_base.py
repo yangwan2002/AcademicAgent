@@ -1,0 +1,263 @@
+"""intent-planning Task 9 验收：PreExtractor 公共框架。
+
+覆盖 design D3/D4/Component§4：
+- 调用态/字段态分离：user_absent ≠ unavailable
+- 四态失败：provider/parse/schema 失败标 call_status，槽位全 unavailable
+- requirement 消费：consumed_requirement_ids 汇总自各 slot
+- Fast_Path：产 newly_discovered_requirements（offset 程序定位）
+- 整体失败兜底：Fast_Path 失败把整段原话记为 unparsed，不静默丢失
+- 抽取器不填默认值（无 defaulted）；normalizer→normalized；validator→invalid
+- structured_call 可插拔：prompt / tools 两模式
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import sys
+
+_SRC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")
+if _SRC not in sys.path:
+    sys.path.insert(0, _SRC)
+
+from paper_agent.intents.router import Intent
+from paper_agent.providers.llm.base import LLMProvider, LLMResponse, Message, ToolCall
+from paper_agent.providers.llm.mock import MockLLMProvider
+from paper_agent.tasking.contracts import (
+    AtomicRequirement,
+    CallStatus,
+    FieldStatus,
+    RawOperation,
+    SlotSource,
+)
+from paper_agent.tasking.extractors.base import PreExtractor, structured_call
+from paper_agent.tasking.intent_spec import (
+    BindingKind,
+    ExecutionBinding,
+    IntentSpec,
+    SlotSpec,
+)
+
+
+# --- 测试用最小抽取器：两个槽位（一个带 normalizer，一个带 validator）---
+
+def _b(target: str) -> ExecutionBinding:
+    return ExecutionBinding(kind=BindingKind.PLAN_FIELD, target=target)
+
+
+_TEST_SPEC = IntentSpec(
+    intent=Intent.POLISH,
+    slots={
+        "section_id": SlotSpec(
+            "section_id", required=True, must_ask=True,
+            execution_binding=_b("PolishPlan.section_id"),
+        ),
+        "target_ext": SlotSpec(
+            "target_ext", required=True,
+            normalizer=lambda v: {"word": ".docx", "pdf": ".pdf"}.get(str(v).lower(), v),
+            execution_binding=_b("ConvertPlan.target_ext"),
+        ),
+        "limit": SlotSpec(
+            "limit", required=False,
+            validator=lambda v: isinstance(v, int) and v > 0,
+            execution_binding=_b("X.limit"),
+        ),
+    },
+)
+
+
+class _TestExtractor(PreExtractor):
+    @property
+    def intent(self) -> Intent:
+        return Intent.POLISH
+
+    def _spec(self) -> IntentSpec:
+        return _TEST_SPEC
+
+    def _build_messages(self, operation, canonical_requirements):
+        return [Message(role="user", content=operation.verbatim)]
+
+
+class _ToolExtractor(_TestExtractor):
+    def _tool_schema(self):
+        return {"name": "extract", "parameters": {}}
+
+
+class _FailingLLM(LLMProvider):
+    def complete(self, messages, **opts):
+        raise RuntimeError("network down")
+
+    def stream(self, messages, *, cancel_token=None, **opts):
+        yield from ()
+
+
+def _mock(obj) -> MockLLMProvider:
+    return MockLLMProvider(scripted=[json.dumps(obj, ensure_ascii=False)])
+
+
+_OP = RawOperation(intent=Intent.POLISH, verbatim="把引言润色一下，转成 word")
+
+
+# --- 调用态/字段态分离 ---
+
+def test_user_absent_is_not_unavailable():
+    # section_id 明确给出；target_ext 用户没说 → user_absent（不是 unavailable）
+    ex = _TestExtractor(_mock({
+        "slots": {"section_id": {"value": "sec:intro", "status": "present"}},
+    }))
+    res = ex.pre_extract(_OP, canonical_requirements=())
+    assert res.call_status is CallStatus.SUCCESS
+    assert res.slots["section_id"].field_status is FieldStatus.PRESENT
+    assert res.slots["target_ext"].field_status is FieldStatus.USER_ABSENT
+    assert res.slots["limit"].field_status is FieldStatus.USER_ABSENT
+
+
+def test_provider_failure_marks_all_slots_unavailable():
+    ex = _TestExtractor(_FailingLLM())
+    res = ex.pre_extract(_OP, canonical_requirements=())
+    assert res.call_status is CallStatus.PROVIDER_FAILED
+    assert res.error_category == "RuntimeError"
+    for sv in res.slots.values():
+        assert sv.field_status is FieldStatus.UNAVAILABLE
+
+
+def test_parse_failure_marks_call_status():
+    ex = _TestExtractor(MockLLMProvider(scripted=["not json at all"]))
+    res = ex.pre_extract(_OP, canonical_requirements=())
+    assert res.call_status is CallStatus.PARSE_FAILED
+    assert all(s.field_status is FieldStatus.UNAVAILABLE for s in res.slots.values())
+
+
+def test_schema_failure_when_slots_not_dict():
+    ex = _TestExtractor(_mock({"slots": "oops"}))
+    res = ex.pre_extract(_OP, canonical_requirements=())
+    assert res.call_status is CallStatus.SCHEMA_FAILED
+    assert all(s.field_status is FieldStatus.UNAVAILABLE for s in res.slots.values())
+
+
+# --- requirement 消费 ---
+
+def test_consumed_requirement_ids_collected_from_slots():
+    ex = _TestExtractor(_mock({
+        "slots": {
+            "section_id": {"value": "sec:intro", "status": "present",
+                           "requirement_ids": ["r1"]},
+            "target_ext": {"value": "word", "status": "present",
+                           "requirement_ids": ["r2"]},
+        },
+    }))
+    res = ex.pre_extract(_OP, canonical_requirements=(
+        AtomicRequirement(requirement_id="r1", verbatim="润色引言"),
+        AtomicRequirement(requirement_id="r2", verbatim="转成 word"),
+    ))
+    assert set(res.consumed_requirement_ids) == {"r1", "r2"}
+    # analyzer 路径：不重复造 requirement
+    assert res.newly_discovered_requirements == ()
+
+
+# --- normalizer / validator ---
+
+def test_normalizer_marks_source_normalized():
+    ex = _TestExtractor(_mock({
+        "slots": {"target_ext": {"value": "word", "status": "present"}},
+    }))
+    res = ex.pre_extract(_OP, canonical_requirements=())
+    sv = res.slots["target_ext"]
+    assert sv.value == ".docx"
+    assert sv.field_status is FieldStatus.PRESENT
+    assert sv.source is SlotSource.NORMALIZED
+
+
+def test_validator_failure_marks_invalid():
+    ex = _TestExtractor(_mock({
+        "slots": {"limit": {"value": -3, "status": "present"}},
+    }))
+    res = ex.pre_extract(_OP, canonical_requirements=())
+    sv = res.slots["limit"]
+    assert sv.field_status is FieldStatus.INVALID
+
+
+def test_extractor_never_produces_defaulted():
+    # 用户没说的字段 → user_absent，绝不被抽取器填默认（默认值是 PlanBuilder 的事）
+    ex = _TestExtractor(_mock({"slots": {}}))
+    res = ex.pre_extract(_OP, canonical_requirements=())
+    for sv in res.slots.values():
+        assert sv.source is not SlotSource.DEFAULTED
+
+
+# --- Fast_Path 产 requirement ---
+
+def test_fast_path_produces_discovered_requirements_with_offsets():
+    ex = _TestExtractor(_mock({
+        "slots": {"section_id": {"value": "sec:intro", "status": "present"}},
+        "newly_discovered_requirements": [
+            {"verbatim": "转成 word", "category": "target"},
+        ],
+    }))
+    res = ex.pre_extract(_OP, canonical_requirements=None)  # None → Fast_Path
+    assert len(res.newly_discovered_requirements) == 1
+    req = res.newly_discovered_requirements[0]
+    assert req.verbatim == "转成 word"
+    # offset 由程序在 operation.verbatim 里定位
+    assert _OP.verbatim[req.source_start:req.source_end] == "转成 word"
+    assert req.ambiguous_span is False
+
+
+def test_analyzer_path_does_not_discover_requirements():
+    ex = _TestExtractor(_mock({
+        "slots": {"section_id": {"value": "sec:intro", "status": "present"}},
+        "newly_discovered_requirements": [{"verbatim": "转成 word"}],
+    }))
+    # canonical 非 None → analyzer 路径，忽略 newly_discovered
+    res = ex.pre_extract(_OP, canonical_requirements=())
+    assert res.newly_discovered_requirements == ()
+
+
+# --- 整体失败兜底（Fast_Path）---
+
+def test_fast_path_failure_fallback_unparsed_requirement():
+    ex = _TestExtractor(_FailingLLM())
+    res = ex.pre_extract(_OP, canonical_requirements=None)
+    assert res.call_status is CallStatus.PROVIDER_FAILED
+    assert len(res.newly_discovered_requirements) == 1
+    fb = res.newly_discovered_requirements[0]
+    assert fb.category == "unparsed"
+    assert fb.verbatim == _OP.verbatim  # 整段原话不静默丢失
+
+
+def test_analyzer_path_failure_has_no_fallback_requirement():
+    # analyzer 路径失败：canonical 已存在，未消费者由 PlanBuilder 进 unmapped，
+    # 抽取器不再造 unparsed 兜底（避免重复）。
+    ex = _TestExtractor(_FailingLLM())
+    res = ex.pre_extract(_OP, canonical_requirements=())
+    assert res.newly_discovered_requirements == ()
+
+
+# --- structured_call 可插拔：tools 模式 ---
+
+def test_structured_call_prompt_mode():
+    llm = _mock({"slots": {"section_id": {"value": "x", "status": "present"}}})
+    out = structured_call(llm, [Message(role="user", content="hi")], mode="prompt")
+    assert out.call_status is CallStatus.SUCCESS
+    assert out.payload["slots"]["section_id"]["value"] == "x"
+
+
+def test_structured_call_tools_mode_reads_tool_arguments():
+    call = ToolCall(id="c1", name="extract",
+                    arguments={"slots": {"section_id": {"value": "sec:intro",
+                                                        "status": "present"}}})
+    llm = MockLLMProvider(scripted=[[call]])
+    ex = _ToolExtractor(llm, structured_mode="tools")
+    res = ex.pre_extract(_OP, canonical_requirements=())
+    assert res.call_status is CallStatus.SUCCESS
+    assert res.slots["section_id"].value == "sec:intro"
+
+
+def test_structured_call_tools_mode_no_call_is_schema_failed():
+    # tools 模式但模型没发 tool_call（返回正文）→ schema_failed
+    llm = MockLLMProvider(scripted=["just text, no tool call"])
+    out = structured_call(
+        llm, [Message(role="user", content="hi")],
+        mode="tools", tool_schema={"name": "extract", "parameters": {}},
+    )
+    assert out.call_status is CallStatus.SCHEMA_FAILED

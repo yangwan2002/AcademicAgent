@@ -22,6 +22,19 @@ from dataclasses import dataclass, field
 from paper_agent.observability.events import EventKind
 
 
+@dataclass(frozen=True)
+class SessionBaseline:
+    """计划级可回滚基线：git commit（优先）或文件/二进制快照副本。
+
+    定义在 session 层（可回滚点是会话能力）；`tasking.contracts` 从此 re-export，
+    保持依赖方向 tasking → session。
+    """
+
+    baseline_id: str
+    git_commit: str | None = None
+    fallback_snapshot_path: str | None = None
+
+
 def _git_available() -> bool:
     return shutil.which("git") is not None
 
@@ -118,6 +131,71 @@ class FileBackedSession:
             return self._git("reset", "--hard", "HEAD").returncode == 0
         except (OSError, subprocess.SubprocessError):
             return False
+
+    # ---- 计划级基线（intent-planning Task 7）：可回滚点 ----
+    def create_baseline(self, label: str = "plan") -> "SessionBaseline":
+        """建立当前 working copy 的可回滚基线。
+
+        git 可用 → 记录当前 HEAD commit（回滚走 reset --hard）；
+        否则 → 把 working copy 快照到 `<workspace_root>/.baselines/<sid>/<bid>/`
+        （在 session git 仓库**之外**，不会被 `git add -A` 误提交）。二进制安全。
+        """
+        baseline_id = f"{label}_{uuid.uuid4().hex[:8]}"
+        if self._git_ok:
+            head = self._git_head()
+            if head:
+                return SessionBaseline(baseline_id=baseline_id, git_commit=head)
+        # 降级：文件/二进制快照副本。
+        snap_dir = os.path.join(
+            self.workspace_root, ".baselines", self.session_id, baseline_id
+        )
+        os.makedirs(snap_dir, exist_ok=True)
+        snap_path = os.path.join(snap_dir, os.path.basename(self.working_path))
+        shutil.copyfile(self.working_path, snap_path)
+        return SessionBaseline(
+            baseline_id=baseline_id, fallback_snapshot_path=snap_path
+        )
+
+    def restore_baseline(self, baseline: "SessionBaseline") -> bool:
+        """回滚 working copy 到基线；只影响 working copy，**不动源文件**。"""
+        if baseline.git_commit and self._git_ok:
+            try:
+                return self._git(
+                    "reset", "--hard", baseline.git_commit
+                ).returncode == 0
+            except (OSError, subprocess.SubprocessError):
+                return False
+        if baseline.fallback_snapshot_path and os.path.isfile(
+            baseline.fallback_snapshot_path
+        ):
+            tmp = f"{self.working_path}.tmp.{uuid.uuid4().hex[:8]}"
+            shutil.copyfile(baseline.fallback_snapshot_path, tmp)
+            os.replace(tmp, self.working_path)  # 原子替换
+            return True
+        return False
+
+    def release_baseline(self, baseline: "SessionBaseline") -> None:
+        """成功完成/用户明确保留后清理 fallback 快照，避免工作区堆积。幂等。"""
+        path = baseline.fallback_snapshot_path
+        if not path:
+            return  # git 基线无需清理
+        snap_dir = os.path.dirname(path)
+        try:
+            if os.path.isfile(path):
+                os.remove(path)
+            if os.path.isdir(snap_dir) and not os.listdir(snap_dir):
+                os.rmdir(snap_dir)
+        except OSError:
+            pass
+
+    def _git_head(self) -> str | None:
+        try:
+            res = self._git("rev-parse", "HEAD")
+            if res.returncode == 0:
+                return (res.stdout or "").strip() or None
+        except (OSError, subprocess.SubprocessError):
+            pass
+        return None
 
     # ---- 明确落盘到源文件（用户 save 时才调用）----
     def save_to_source(self, *, bus=None) -> None:

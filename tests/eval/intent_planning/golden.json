@@ -1,0 +1,247 @@
+{
+  "schema_version": 1,
+  "note": "intent-planning 理解层 golden 集（Task 15）。人工标注：期望操作序列、应捕获的约束、原子要求。用于度量意图准确率/操作拆分/约束召回/requirement 漏识别率/Silent_Loss。",
+  "cases": [
+    {
+      "id": "polish_single_numbers",
+      "message": "把引言保守润色一下，别改里面的实验数字",
+      "current_sections": ["introduction", "method", "results", "conclusion"],
+      "current_format": "tex",
+      "expected": {
+        "operations": [{"intent": "polish", "target_hint": "introduction"}],
+        "constraints": ["别改里面的实验数字"],
+        "atomic_requirements": ["把引言保守润色一下", "别改里面的实验数字"]
+      }
+    },
+    {
+      "id": "polish_method",
+      "message": "润色一下方法部分，让表述更清晰",
+      "current_sections": ["introduction", "method", "conclusion"],
+      "current_format": "tex",
+      "expected": {
+        "operations": [{"intent": "polish", "target_hint": "method"}],
+        "constraints": [],
+        "atomic_requirements": ["润色一下方法部分", "让表述更清晰"],
+        "expected_clarification": false
+      }
+    },
+    {
+      "id": "polish_keep_citations",
+      "message": "润色讨论部分，但不要改动任何引用",
+      "current_sections": ["introduction", "discussion", "conclusion"],
+      "current_format": "tex",
+      "expected": {
+        "operations": [{"intent": "polish", "target_hint": "discussion"}],
+        "constraints": ["不要改动任何引用"],
+        "atomic_requirements": ["润色讨论部分", "不要改动任何引用"]
+      }
+    },
+    {
+      "id": "rewrite_related_work",
+      "message": "重写相关工作这一节，换一个叙述角度",
+      "current_sections": ["introduction", "related_work", "method"],
+      "current_format": "tex",
+      "expected": {
+        "operations": [{"intent": "rewrite", "target_hint": "related_work"}],
+        "constraints": [],
+        "atomic_requirements": ["重写相关工作这一节", "换一个叙述角度"],
+        "expected_clarification": false
+      }
+    },
+    {
+      "id": "rewrite_with_search",
+      "message": "把引言重写，补充论证并引用最新文献，搜 diffusion models 相关的工作",
+      "current_sections": ["introduction", "method"],
+      "current_format": "tex",
+      "expected": {
+        "operations": [{"intent": "rewrite", "target_hint": "introduction"}],
+        "constraints": [],
+        "atomic_requirements": ["把引言重写", "补充论证并引用最新文献", "搜 diffusion models 相关的工作"]
+      }
+    },
+    {
+      "id": "add_section_discussion",
+      "message": "在结论前新增一个讨论章节，谈谈结果的意义和局限",
+      "current_sections": ["introduction", "method", "conclusion"],
+      "current_format": "tex",
+      "expected": {
+        "operations": [{"intent": "add_section", "target_hint": "讨论"}],
+        "constraints": [],
+        "atomic_requirements": ["在结论前新增一个讨论章节", "谈谈结果的意义和局限"]
+      }
+    },
+    {
+      "id": "add_section_related_list",
+      "message": "新增一个 Related Work 章节，用列表式给出：研究背景、现有方法、不足",
+      "current_sections": ["introduction", "method"],
+      "current_format": "tex",
+      "expected": {
+        "operations": [{"intent": "add_section", "target_hint": "Related Work"}],
+        "constraints": [],
+        "atomic_requirements": ["新增一个 Related Work 章节", "用列表式给出：研究背景、现有方法、不足"]
+      }
+    },
+    {
+      "id": "convert_word",
+      "message": "把整篇论文转换成 Word",
+      "current_sections": ["introduction", "method", "conclusion"],
+      "current_format": "tex",
+      "expected": {
+        "operations": [{"intent": "convert_format", "target_hint": "docx"}],
+        "constraints": [],
+        "atomic_requirements": ["把整篇论文转换成 Word"],
+        "expected_clarification": false
+      }
+    },
+    {
+      "id": "convert_markdown",
+      "message": "导出成 markdown 格式",
+      "current_sections": ["introduction"],
+      "current_format": "tex",
+      "expected": {
+        "operations": [{"intent": "convert_format", "target_hint": "md"}],
+        "constraints": [],
+        "atomic_requirements": ["导出成 markdown 格式"]
+      }
+    },
+    {
+      "id": "format_font",
+      "message": "把正文字体改成宋体小四，一级标题居中",
+      "current_sections": ["introduction"],
+      "current_format": "docx",
+      "expected": {
+        "operations": [{"intent": "format_docx", "target_hint": ""}],
+        "constraints": [],
+        "atomic_requirements": ["把正文字体改成宋体小四", "一级标题居中"]
+      }
+    },
+    {
+      "id": "format_columns",
+      "message": "把文档排成双栏",
+      "current_sections": ["introduction"],
+      "current_format": "docx",
+      "expected": {
+        "operations": [{"intent": "format_docx", "target_hint": ""}],
+        "constraints": [],
+        "atomic_requirements": ["把文档排成双栏"],
+        "expected_clarification": false
+      }
+    },
+    {
+      "id": "multi_polish_then_convert",
+      "message": "先润色引言，再把整篇转成 Word",
+      "current_sections": ["introduction", "method", "conclusion"],
+      "current_format": "tex",
+      "expected": {
+        "operations": [
+          {"intent": "polish", "target_hint": "introduction"},
+          {"intent": "convert_format", "target_hint": "docx"}
+        ],
+        "constraints": [],
+        "atomic_requirements": ["先润色引言", "再把整篇转成 Word"]
+      }
+    },
+    {
+      "id": "multi_polish_keep_then_convert",
+      "message": "先保守润色 Introduction，保留数字和引用，再转换为 docx",
+      "current_sections": ["introduction", "method", "conclusion"],
+      "current_format": "tex",
+      "expected": {
+        "operations": [
+          {"intent": "polish", "target_hint": "introduction"},
+          {"intent": "convert_format", "target_hint": "docx"}
+        ],
+        "constraints": ["保留数字和引用"],
+        "atomic_requirements": ["先保守润色 Introduction", "保留数字和引用", "再转换为 docx"]
+      }
+    },
+    {
+      "id": "multi_polish_then_add",
+      "message": "把方法部分润色一下，然后新增一个局限性章节",
+      "current_sections": ["introduction", "method", "conclusion"],
+      "current_format": "tex",
+      "expected": {
+        "operations": [
+          {"intent": "polish", "target_hint": "method"},
+          {"intent": "add_section", "target_hint": "局限性"}
+        ],
+        "constraints": [],
+        "atomic_requirements": ["把方法部分润色一下", "新增一个局限性章节"]
+      }
+    },
+    {
+      "id": "multi_rewrite_then_convert",
+      "message": "重写结论，并且把文档转成 docx",
+      "current_sections": ["introduction", "conclusion"],
+      "current_format": "tex",
+      "expected": {
+        "operations": [
+          {"intent": "rewrite", "target_hint": "conclusion"},
+          {"intent": "convert_format", "target_hint": "docx"}
+        ],
+        "constraints": [],
+        "atomic_requirements": ["重写结论", "把文档转成 docx"]
+      }
+    },
+    {
+      "id": "multi_polish_two_sections",
+      "message": "先润色引言，再润色结论",
+      "current_sections": ["introduction", "conclusion"],
+      "current_format": "tex",
+      "expected": {
+        "operations": [
+          {"intent": "polish", "target_hint": "introduction"},
+          {"intent": "polish", "target_hint": "conclusion"}
+        ],
+        "constraints": [],
+        "atomic_requirements": ["先润色引言", "再润色结论"]
+      }
+    },
+    {
+      "id": "polish_abstract_wordlimit",
+      "message": "精简一下摘要，控制在 250 字以内",
+      "current_sections": ["abstract", "introduction"],
+      "current_format": "tex",
+      "expected": {
+        "operations": [{"intent": "polish", "target_hint": "abstract"}],
+        "constraints": ["控制在 250 字以内"],
+        "atomic_requirements": ["精简一下摘要", "控制在 250 字以内"]
+      }
+    },
+    {
+      "id": "polish_with_unmapped",
+      "message": "帮我润色引言，顺便帮我订一张去北京的机票",
+      "current_sections": ["introduction"],
+      "current_format": "tex",
+      "expected": {
+        "operations": [{"intent": "polish", "target_hint": "introduction"}],
+        "constraints": [],
+        "atomic_requirements": ["帮我润色引言"],
+        "expected_unmapped": ["订一张去北京的机票"]
+      }
+    },
+    {
+      "id": "illegal_translate",
+      "message": "把整篇论文翻译成英文",
+      "current_sections": ["introduction"],
+      "current_format": "tex",
+      "expected": {
+        "operations": [],
+        "constraints": [],
+        "atomic_requirements": [],
+        "expected_unmapped": ["把整篇论文翻译成英文"]
+      }
+    },
+    {
+      "id": "add_section_mimic",
+      "message": "在最后加一个未来工作章节，简单描述后续研究方向",
+      "current_sections": ["introduction", "conclusion"],
+      "current_format": "tex",
+      "expected": {
+        "operations": [{"intent": "add_section", "target_hint": "未来工作"}],
+        "constraints": [],
+        "atomic_requirements": ["在最后加一个未来工作章节", "简单描述后续研究方向"]
+      }
+    }
+  ]
+}

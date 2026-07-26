@@ -26,16 +26,25 @@ def build_polish_messages(
     original: str,
     goal: str,
     violations: list[str] | None = None,
+    constraints: list[str] | None = None,
 ) -> list[Message]:
     """构造 polish 的 messages。
 
     - ``original``：目标章节原文。
     - ``goal``：用户对润色程度/方向的说明（可为空）。
     - ``violations``：上一轮 gate 的违规条目；非空表示这是重试。
+    - ``constraints``：用户显式提出的额外硬约束（如「不改数字」「保留引用」）。
+      intent-planning 的 `polish.constraints` 槽由此**真正影响生成**（Task 19 绑定
+      `ContextBuilder.constraints`），而非只存在计划里。为空/None 时消息逐字节不变。
     """
     user_parts: list[str] = []
     if goal:
         user_parts.append(f"润色目标/偏好：{goal}")
+    if constraints:
+        user_parts.append(
+            "用户额外要求的硬约束（必须全部遵守）：\n"
+            + "\n".join(f"- {c}" for c in constraints)
+        )
     user_parts.append("以下是需要润色的章节正文：\n\n" + original)
 
     if violations:

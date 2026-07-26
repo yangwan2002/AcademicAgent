@@ -248,6 +248,17 @@ class SimpleTraceRecorder:
             EventKind.WORKSPACE_COMMIT,
             EventKind.SOURCE_SAVE,
             EventKind.RUN_CANCELLED,
+            # --- intent-planning 业务事件（挂到当前 span 的 events 列表）---
+            EventKind.OPERATION_ANALYSIS,
+            EventKind.PRE_EXTRACT,
+            EventKind.PLAN_VALIDATION,
+            EventKind.CLARIFICATION_QA,
+            EventKind.UNMAPPED_RESOLUTION,
+            EventKind.PLAN_CONFIRMED,
+            EventKind.PLAN_REJECTED,
+            EventKind.PLAN_CANCELLED,
+            EventKind.OPERATION_RESULT,
+            EventKind.PLAN_RESULT,
         ):
             self._record_event(event)
 
