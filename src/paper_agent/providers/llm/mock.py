@@ -50,6 +50,7 @@ class MockLLMProvider(LLMProvider):
         # 非流式语义，忽略回调（流式请用 stream()）。
         opts.pop("on_delta", None)
         opts.pop("event_sink", None)  # 可选观测 sink：Mock 不发事件，吸收即可
+        opts.pop("forced_tool_name", None)  # 结构化调用的中立参数：Mock 吸收即可
         self.calls.append(messages)
         return self._decide(messages)
 

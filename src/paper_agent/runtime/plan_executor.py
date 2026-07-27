@@ -119,7 +119,8 @@ def aggregate_plan_status(
 ) -> tuple[PlanStatus, FailureCategory | None]:
     """按 design 状态聚合表算出 (plan_status, failure_category)。"""
     if not results:
-        return PlanStatus.DONE, None
+        # 没有任何操作 → NO_ACTION，**不是** done（P0：空计划曾被报成执行成功）
+        return PlanStatus.NO_ACTION, None
 
     succeeded = [r for r in results if r.status is OperationStatus.SUCCEEDED]
     cancelled = [r for r in results if r.status is OperationStatus.CANCELLED]
@@ -198,13 +199,17 @@ def _slot(op: Operation, name: str):
 
 # --- Task 22：产物快照与清理 -----------------------------------------------
 
-def _snapshot_outputs(plan: Task_Plan, ctx: HandlerContext) -> dict[str, bool]:
-    """执行前记录各 convert 目标产物是否**已存在**，供失败时只清理本轮新建的。"""
-    existed: dict[str, bool] = {}
+def _snapshot_outputs(plan: Task_Plan, ctx: HandlerContext) -> dict[str, dict]:
+    """执行前记录各 convert 目标产物的归属与是否已存在。
+
+    返回 `{operation_id: {path, existed_before}}`——**按操作归属记账**，这样失败清理
+    才能只碰「失败操作」的残留，不动「已成功操作」的正式产物（P0）。
+    """
+    info: dict[str, dict] = {}
     session = getattr(ctx, "session", None)
     source = str(getattr(session, "source_path", "") or "")
     if not source:
-        return existed
+        return info
     stem = os.path.splitext(os.path.basename(source))[0]
     for op in plan.operations:
         if op.intent is not Intent.CONVERT_FORMAT:
@@ -213,18 +218,37 @@ def _snapshot_outputs(plan: Task_Plan, ctx: HandlerContext) -> dict[str, bool]:
         if not ext:
             continue
         path = os.path.join(ctx.output_dir, f"{stem}.{ext}")
-        existed[path] = os.path.exists(path)
-    return existed
+        info[op.operation_id] = {
+            "path": path,
+            "existed_before": os.path.exists(path),
+        }
+    return info
 
 
-def _cleanup_new_outputs(existed: dict[str, bool]) -> list[str]:
-    """best-effort 清理**本轮新建**的产物；执行前已存在的用户文件绝不删。"""
+def _cleanup_failed_outputs(
+    outputs: dict[str, dict],
+    results: list[OperationResult],
+) -> list[str]:
+    """只清理**失败/未完成操作**留下的、且执行前不存在的产物。
+
+    绝不删：
+    - 执行前已存在的用户文件（`existed_before=True`）；
+    - **已成功操作**的正式产物——哪怕整个计划最终 partially_completed。
+      （历史 bug：转换成功、后续步骤失败 → docx 被删，而报告仍显示第一步成功
+      并给出已不存在的路径。）
+    """
+    succeeded = {
+        r.operation_id for r in results if r.status is OperationStatus.SUCCEEDED
+    }
     removed: list[str] = []
-    for path, was_there in existed.items():
-        if was_there:
-            continue  # 执行前就存在 → 用户文件，不动
+    for op_id, meta in outputs.items():
+        if op_id in succeeded:
+            continue                      # 成功操作的产物是正式结果，保留
+        if meta.get("existed_before"):
+            continue                      # 执行前就在 → 用户文件，不动
+        path = meta.get("path") or ""
         try:
-            if os.path.isfile(path):
+            if path and os.path.isfile(path):
                 os.remove(path)
                 removed.append(path)
         except OSError:
@@ -315,6 +339,14 @@ def execute_plan(
     `state` 由调用方（TurnService）在 coordinator.run **之外**持有，使取消/异常后仍能
     出报告（D7）。取消经 `OperationCancelled` 上抛前先发 `PLAN_CANCELLED`（Task 21）。
     """
+    # P0：空计划不得进入执行器（否则「什么都没做」会被聚合成 done）。
+    # 不建基线、不发 span，直接返回 NO_ACTION，由上层如实告知用户。
+    if not plan.operations:
+        report = PlanExecutionReport(plan_status=PlanStatus.NO_ACTION)
+        _publish(bus, "PLAN_RESULT", plan_status=PlanStatus.NO_ACTION.value,
+                 completed=0, skipped=0)
+        return ExecutionOutcome(report=report, plan_status=PlanStatus.NO_ACTION)
+
     if state.baseline is None:
         state.baseline = _create_baseline(ctx)
     outputs_existed = _snapshot_outputs(plan, ctx)
@@ -393,9 +425,9 @@ def execute_plan(
     state.current_operation_id = None
     plan_status, category = aggregate_plan_status(results)
 
-    # Task 22：convert 失败时 best-effort 清理本轮新产物（不删既有用户文件）
+    # Task 22：只清理**失败操作**的残留产物；已成功操作的正式产物与既有用户文件都保留
     if plan_status in (PlanStatus.FAILED, PlanStatus.PARTIALLY_COMPLETED):
-        _cleanup_new_outputs(outputs_existed)
+        _cleanup_failed_outputs(outputs_existed, results)
 
     report = PlanExecutionReport(
         plan_status=plan_status,

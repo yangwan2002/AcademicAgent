@@ -30,7 +30,11 @@ from paper_agent.tasking.contracts import (
     SlotSource,
     SlotValue,
 )
-from paper_agent.tasking.plan_builder import build_plan, build_revision
+from paper_agent.tasking.plan_builder import (
+    build_plan,
+    build_revision,
+    operation_target,
+)
 
 
 def _present(value, req_ids=()):
@@ -170,8 +174,10 @@ def test_add_section_forward_reference_suggests_reorder_without_reordering():
               "structure_kind": _present("desc")}),
     ]
     plan = build_plan("t", raws, exts, canonical_requirements=())
-    # 顺序未被改动（保序）
-    assert [op.target for op in plan.operations] == ["Discussion", "Conclusion"]
+    # 顺序未被改动（保序）；展示标识从 slots 实时派生
+    assert [operation_target(op.intent, op.slots) for op in plan.operations] == [
+        "Discussion", "Conclusion"
+    ]
     # 但给出重排建议
     assert len(plan.reorder_suggestions) == 1
     sug = plan.reorder_suggestions[0]
@@ -241,3 +247,105 @@ def test_build_revision_excludes_completed_ops():
     # 不含已完成 add_section
     assert all(op.intent is not Intent.ADD_SECTION for op in new_plan.operations)
     assert new_plan.plan_version == 2
+
+
+# --- dispositions 账本（结构化处置记录）---
+
+def test_dispositions_record_mapped_with_operation_and_slot():
+    from paper_agent.tasking.contracts import DispositionStatus
+
+    reqs = (
+        AtomicRequirement(requirement_id="r1", verbatim="润色引言"),
+        AtomicRequirement(requirement_id="r2", verbatim="别改数字"),
+    )
+    raws = [RawOperation(intent=Intent.POLISH, verbatim="润色引言，别改数字")]
+    exts = [_ext({
+        "section_id": _present("sec:intro", req_ids=["r1"]),
+        "constraints": _present(["不改数字"], req_ids=["r2"]),
+    })]
+    plan = build_plan("t", raws, exts, canonical_requirements=reqs)
+
+    by_id = {d.requirement_id: d for d in plan.dispositions}
+    assert by_id["r1"].status is DispositionStatus.MAPPED
+    assert by_id["r1"].operation_id == plan.operations[0].operation_id
+    assert by_id["r1"].slot_names == ("section_id",)
+    assert by_id["r2"].slot_names == ("constraints",)
+    assert plan.unmapped_requirements == ()
+
+
+def test_dispositions_record_unmapped():
+    from paper_agent.tasking.contracts import DispositionStatus
+
+    reqs = (
+        AtomicRequirement(requirement_id="r1", verbatim="润色引言"),
+        AtomicRequirement(requirement_id="r2", verbatim="翻译成英文"),
+    )
+    raws = [RawOperation(intent=Intent.POLISH, verbatim="润色引言")]
+    exts = [_ext({"section_id": _present("sec:intro", req_ids=["r1"])})]
+    plan = build_plan("t", raws, exts, canonical_requirements=reqs)
+
+    by_id = {d.requirement_id: d for d in plan.dispositions}
+    assert by_id["r2"].status is DispositionStatus.UNMAPPED
+    assert by_id["r2"].operation_id is None
+    assert by_id["r2"].verbatim == "翻译成英文"
+    # 派生视图与账本一致
+    assert plan.unmapped_requirements == ("翻译成英文",)
+
+
+def test_dispositions_mark_unparsed_fallback():
+    from paper_agent.tasking.contracts import DispositionStatus
+
+    reqs = (AtomicRequirement(requirement_id="r1", verbatim="整段原话",
+                              category="unparsed"),)
+    plan = build_plan("t", [], [], canonical_requirements=reqs)
+    assert plan.dispositions[0].status is DispositionStatus.UNPARSED
+
+
+def test_dispositions_ignore_phantom_requirement_ids():
+    """模型引用了不存在的 requirement id → 不污染账本（该 req 仍算 unmapped）。"""
+    from paper_agent.tasking.contracts import DispositionStatus
+
+    reqs = (AtomicRequirement(requirement_id="r1", verbatim="润色引言"),)
+    raws = [RawOperation(intent=Intent.POLISH, verbatim="润色引言")]
+    exts = [_ext({"section_id": _present("sec:intro", req_ids=["r_ghost"])})]
+    plan = build_plan("t", raws, exts, canonical_requirements=reqs)
+    assert plan.dispositions[0].status is DispositionStatus.UNMAPPED
+
+
+# --- P0：needs_replan 只重规划未执行步骤，绝不重跑已成功的 ---
+
+def test_build_revision_truncates_to_remaining_operations():
+    """重规划的输入是**原始请求**，理解层会重新拆出全部步骤；
+    必须按 remaining_operation_ids 截断，否则已成功的 polish 会被再执行一次。
+    """
+    raws0 = [
+        RawOperation(intent=Intent.POLISH, verbatim="润色引言"),
+        RawOperation(intent=Intent.ADD_SECTION, verbatim="加 Discussion"),
+    ]
+    exts0 = [
+        _ext({"section_id": _present("sec:intro")}),
+        _ext({"title": _present("Discussion"), "purpose": _present("讨论"),
+              "structure_kind": _present("desc")}),
+    ]
+    plan0 = build_plan("turnC", raws0, exts0, canonical_requirements=())
+    remaining_id = plan0.operations[1].operation_id      # 只剩 add_section 没做
+
+    # 重规划：理解层基于原始请求又拆出了两个操作
+    req = PlanRevisionRequest(previous_plan=plan0, revision_text="原始请求：…",
+                              revision_reason=RevisionReason.NEEDS_REPLAN)
+    new_plan = build_revision(plan0, req, raws0, exts0, canonical_requirements=(),
+                              remaining_operation_ids=[remaining_id])
+
+    assert len(new_plan.operations) == 1                 # 截断到未执行步骤数
+    assert new_plan.operations[0].intent is Intent.ADD_SECTION
+    assert new_plan.plan_version == 2
+
+
+def test_build_revision_without_remaining_ids_keeps_all():
+    raws = [RawOperation(intent=Intent.POLISH, verbatim="润色引言")]
+    exts = [_ext({"section_id": _present("sec:intro")})]
+    plan0 = build_plan("t", raws, exts, canonical_requirements=())
+    req = PlanRevisionRequest(previous_plan=plan0, revision_text="改改",
+                              revision_reason=RevisionReason.USER_MODIFY)
+    new_plan = build_revision(plan0, req, raws, exts, canonical_requirements=())
+    assert len(new_plan.operations) == 1

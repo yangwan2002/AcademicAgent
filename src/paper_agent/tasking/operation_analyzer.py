@@ -92,6 +92,8 @@ _ANALYZE_TOOL = {
                                 "description": "本操作覆盖的 requirement 的 id。",
                             },
                         },
+                        # intent/verbatim 是操作项的**结构性**必填（没有它们这一项就
+                        # 无意义），与「业务槽位必填」不同，故保留。
                         "required": ["intent", "verbatim"],
                     },
                 },
@@ -136,7 +138,9 @@ _ANALYZE_TOOL = {
                     ),
                 },
             },
-            "required": ["operations"],
+            # 不设顶层 required：请求可能整体落在五意图之外，此时 operations 应为空
+            # 而全部原话进 unmapped_text；强制 operations 会逼模型硬凑一个操作。
+            "required": [],
         },
     },
 }

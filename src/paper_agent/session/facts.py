@@ -96,6 +96,46 @@ class SessionFacts:
         self.known_refs.append(ref)
         return True
 
+    def merge_refs(self, scanned: list[KnownRef]) -> int:
+        """把从源文件扫出的引用**合并**进已有文献库，返回新增条数。
+
+        **绝不覆盖**（P0/#18）：直接 `known_refs = extract_refs(...)` 会把此前经检索
+        + 核验入库的文献整批丢掉，`verified` 也被重置。合并规则：
+        - 已存在（按 bibkey 或 id 命中）→ 保留原记录，只在原标题为空时补标题；
+          **不下调 verified**（已核验过的不会因为源文件里只有个 key 就变未核验）。
+        - 不存在 → 追加。
+        """
+        added = 0
+        by_bibkey = {r.bibkey: r for r in self.known_refs if r.bibkey}
+        by_id = {r.id: r for r in self.known_refs if r.id}
+        for ref in scanned:
+            existing = by_bibkey.get(ref.bibkey) if ref.bibkey else None
+            if existing is None and ref.id:
+                existing = by_id.get(ref.id)
+            if existing is not None:
+                if not existing.title and ref.title:
+                    existing.title = ref.title
+                continue          # 不动 verified：已核验状态不可被源文件扫描降级
+            self.known_refs.append(ref)
+            if ref.bibkey:
+                by_bibkey[ref.bibkey] = ref
+            if ref.id:
+                by_id[ref.id] = ref
+            added += 1
+        return added
+
+    def merge_numbers(self, scanned: list[KnownNumber]) -> int:
+        """合并源文件扫出的数字；已存在的保留原 source/confirmed（同上，不覆盖）。"""
+        added = 0
+        known = self.number_values()
+        for num in scanned:
+            if num.value in known:
+                continue
+            self.known_numbers.append(num)
+            known.add(num.value)
+            added += 1
+        return added
+
     # ---- 数字查询 / 变更 ----
     def number_values(self) -> set[str]:
         return {n.value for n in self.known_numbers}

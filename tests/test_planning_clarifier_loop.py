@@ -58,6 +58,7 @@ class FakeInteractor:
         self._unmapped = list(unmapped or [])
         self._confirm = list(confirm or [])
         self.prompts: list[str] = []
+        self.confirm_calls = 0
 
     def ask_field(self, prompt: str) -> str:
         self.prompts.append(prompt)
@@ -67,6 +68,7 @@ class FakeInteractor:
         return self._unmapped.pop(0) if self._unmapped else UnmappedDisposition("ignore")
 
     def confirm_plan(self, summary: str) -> ConfirmDecision:
+        self.confirm_calls += 1
         return self._confirm.pop(0) if self._confirm else ConfirmDecision("accept")
 
 
@@ -333,11 +335,108 @@ def test_clarify_format_operations_parsed_to_format_ops():
     assert all(isinstance(o, FormatOp) for o in ops)
 
 
-def test_clarify_refreshes_target_after_fill():
-    # section_id 缺失、澄清补上后，op.target 应刷新为该章节（不再陈旧为空）
+def test_display_fields_derived_from_slots_after_fill():
+    """slots 是唯一真相源：澄清回填后，展示字段自然是新值（无需同步任何副本）。
+
+    历史上 Operation 存过 target/goal/constraints 的快照，回填后不更新 → 确认摘要
+    显示「目标=空」。现已删除这些字段，改为实时派生。
+    """
+    from paper_agent.tasking.clarifier import summarize_plan
+    from paper_agent.tasking.plan_builder import operation_target
+
     plan = build_plan("t", [RawOperation(Intent.POLISH, "润色")],
                       [_ext({})], canonical_requirements=())
-    assert plan.operations[0].target == ""      # 建计划时缺 section_id → target 空
+    assert operation_target(plan.operations[0].intent, plan.operations[0].slots) == ""
     it = FakeInteractor(field_answers=["introduction"])
     out = clarify(plan, ask=it.ask_field)
-    assert out.plan.operations[0].target == "introduction"   # 已刷新
+    op = out.plan.operations[0]
+    assert operation_target(op.intent, op.slots) == "introduction"
+    # 确认摘要里也是新值
+    assert "introduction" in summarize_plan(out.plan)
+
+
+# --- 忽略未映射要求时，账本记 ignored（不是凭空消失）---
+
+def test_ignored_unmapped_recorded_in_dispositions():
+    from paper_agent.tasking.contracts import (
+        AtomicRequirement,
+        DispositionStatus,
+    )
+
+    reqs = (
+        AtomicRequirement(requirement_id="r1", verbatim="润色引言"),
+        AtomicRequirement(requirement_id="r2", verbatim="帮我订机票"),
+    )
+    plan = build_plan(
+        "t", [RawOperation(Intent.POLISH, "润色引言")],
+        [_ext({"section_id": _present("introduction", req_ids=["r1"])})],
+        canonical_requirements=reqs,
+    )
+    assert plan.unmapped_requirements == ("帮我订机票",)
+
+    it = FakeInteractor(unmapped=[UnmappedDisposition("ignore")])
+    out = resolve_unmapped(plan, it)
+    assert out.action == "proceed"
+    by_id = {d.requirement_id: d for d in out.plan.dispositions}
+    assert by_id["r2"].status is DispositionStatus.IGNORED   # 有据可查
+    assert by_id["r1"].status is DispositionStatus.MAPPED
+    assert out.plan.unmapped_requirements == ()
+
+
+# ============ P0：请求全部落在五意图之外 → NO_ACTION，不确认不执行 ============
+
+def test_loop_returns_no_action_when_nothing_executable():
+    """「帮我查重」这类请求：如实告知做不了，绝不走确认→空执行→报 done。"""
+    llm = MockLLMProvider(scripted=[json.dumps({
+        "operations": [],
+        "requirements": [],
+        "unmapped_text": ["帮我查一下这篇论文的重复率"],
+    }, ensure_ascii=False)])
+    it = FakeInteractor()
+    out = run_planning_loop("帮我查一下这篇论文的重复率", llm=llm, interactor=it,
+                            current_sections=["introduction"], current_format="tex")
+    assert isinstance(out, PlanningExit)
+    assert out.status is PlanStatus.NO_ACTION
+    assert "重复率" in out.message          # 说清为什么做不了
+    assert it.confirm_calls == 0            # 不该请求确认
+
+
+def test_no_action_message_without_unmapped():
+    llm = MockLLMProvider(scripted=[json.dumps({
+        "operations": [], "requirements": [], "unmapped_text": [],
+    }, ensure_ascii=False)])
+    out = run_planning_loop("???", llm=llm, interactor=FakeInteractor(),
+                            current_sections=[], current_format="tex")
+    assert out.status is PlanStatus.NO_ACTION
+    assert "未做任何改动" in out.message
+
+
+# --- P0：重规划保留原始请求（不把失效原因当成新请求）---
+
+def test_replan_context_carries_original_request():
+    from paper_agent.tasking.contracts import ExecutionReplanContext
+
+    llm = MockLLMProvider(scripted=[
+        _analyze_json([("polish", "润色引言")]),
+        _extract_json({"section_id": "introduction"}),
+    ])
+    plan0 = build_plan("t", [RawOperation(Intent.POLISH, "润色引言")],
+                       [_ext({"section_id": _present("introduction")})],
+                       canonical_requirements=())
+    replan = ExecutionReplanContext(
+        original_request="先润色引言，再加 Discussion",
+        previous_plan=plan0,
+        remaining_operations=plan0.operations,
+        completed_operation_ids=(),
+        replan_reason="章节「Discussion」已不存在",
+    )
+    it = FakeInteractor(confirm=[ConfirmDecision("accept")])
+    out = run_planning_loop("先润色引言，再加 Discussion", llm=llm, interactor=it,
+                            current_sections=["introduction"], current_format="tex",
+                            replan=replan)
+    assert isinstance(out, ConfirmedPlan)
+    # 送给理解层的文本包含原始请求与失效原因，而不是只有 replan_reason
+    prompt = "\n".join(m.content for call in llm.calls for m in call)
+    assert "先润色引言，再加 Discussion" in prompt
+    assert "章节「Discussion」已不存在" in prompt
+    assert out.plan.plan_version == 2         # 基于旧计划的新版本

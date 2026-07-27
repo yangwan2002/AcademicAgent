@@ -149,6 +149,9 @@ def _print_plan_outcome(out) -> None:
     if report is None:
         print("\n本轮没有产生可执行计划。")
         return
+    if report.plan_status.value == "no_action":
+        print("\n未做任何改动（没有可执行的操作）。")
+        return
     print(f"\n计划结果：{report.plan_status.value}")
     for i, r in enumerate(report.operations, 1):
         line = f"  {i}. {r.status.value}"
@@ -223,8 +226,9 @@ def main(argv: list[str]) -> int:
     # Facts 按「论文」持久化（claims 跨 chat 复用）；refs/数字每次从源刷新
     facts = SessionFacts.load(project_facts_path(config.workspace_root, source))
     if session.ext in _TEXT_EXT:
-        facts.known_refs = extract_refs(session.read_source(), session.ext)
-        facts.known_numbers = extract_numbers(session.read_source(), session.ext)
+        # **合并**而非覆盖：此前经检索+核验入库的文献不能被源文件扫描抹掉（#18）
+        facts.merge_refs(extract_refs(session.read_source(), session.ext))
+        facts.merge_numbers(extract_numbers(session.read_source(), session.ext))
     facts.save()
     _remembered = len(facts.claims.get("section_intents", {}))
 

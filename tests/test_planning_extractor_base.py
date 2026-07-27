@@ -330,3 +330,35 @@ def test_unmatched_requirement_stays_unconsumed():
     res = ex.pre_extract(_OP, canonical_requirements=reqs)
     assert "r1" in res.consumed_requirement_ids
     assert "r2" not in res.consumed_requirement_ids   # 无处可去 → 由 PlanBuilder 落 unmapped
+
+
+# --- P0：schema 的 required 不得等同业务 required ---
+
+def test_tool_schema_has_no_required_fields():
+    """业务必填 ≠ 协议必填。
+
+    若把 required_slots 放进 JSON schema 的 required，模型就**无法合法省略**
+    section_id，只能猜一个/给空串 —— 缺口永远不会暴露给 Clarifier，整套澄清机制
+    被架空（曾导致 zero_ask 虚高）。
+    """
+    from paper_agent.tasking.extractors.base import build_tool_schema
+
+    schema = build_tool_schema(_TEST_SPEC, "测试")
+    assert schema["function"]["parameters"]["required"] == []
+    # 业务必填仍在 spec 层保留（供 PlanBuilder/Clarifier 用）
+    assert "section_id" in _TEST_SPEC.required_slots()
+
+
+def test_omitted_required_slot_stays_user_absent_for_clarifier():
+    # 模型省略 section_id（schema 允许）→ user_absent → 交给 Clarifier 追问
+    ex = _TestExtractor(_mock({"target_ext": "docx"}))
+    res = ex.pre_extract(_OP, canonical_requirements=())
+    assert res.slots["section_id"].field_status is FieldStatus.USER_ABSENT
+    assert res.slots["section_id"].value is None      # 没有被迫编造
+
+
+def test_analyzer_schema_allows_empty_operations():
+    """请求整体不属于五意图时 operations 应可为空，不该被 required 逼着硬凑。"""
+    from paper_agent.tasking.operation_analyzer import _ANALYZE_TOOL
+
+    assert _ANALYZE_TOOL["function"]["parameters"]["required"] == []

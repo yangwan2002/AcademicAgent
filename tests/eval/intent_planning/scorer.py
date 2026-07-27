@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from paper_agent.tasking.contracts import AnalyzeResult, Task_Plan
+from paper_agent.tasking.plan_builder import operation_constraints
 
 
 # --- golden 数据模型 -------------------------------------------------------
@@ -99,7 +100,8 @@ def _collect_constraint_texts(plan: Task_Plan) -> list[str]:
     """从计划里收集所有「可能承载约束」的文本：op.constraints + 各槽 verbatim/值。"""
     texts: list[str] = []
     for op in plan.operations:
-        texts.extend(op.constraints)
+        # slots 是唯一真相源；约束从 slots 实时派生（不再有 Operation.constraints 副本）
+        texts.extend(operation_constraints(op.slots))
         for sv in op.slots.values():
             if sv.verbatim:
                 texts.append(sv.verbatim)

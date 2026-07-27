@@ -64,6 +64,9 @@ class OperationStatus(str, Enum):
 class PlanStatus(str, Enum):
     DRAFT = "draft"
     NEEDS_INPUT = "needs_input"
+    # 计划里没有任何可执行操作（如全部要求被忽略/不支持）。**绝不可报成 done**——
+    # 「什么都没做」与「都做成了」不是同一件事，折叠二者等于对用户撒谎。
+    NO_ACTION = "no_action"
     READY = "ready"
     CONFIRMED = "confirmed"
     RUNNING = "running"
@@ -125,14 +128,18 @@ class RawOperation:
 
 @dataclass(frozen=True)
 class Operation:
-    """计划中的一个可执行步骤。"""
+    """计划中的一个可执行步骤。
+
+    **`slots` 是唯一真相源**：执行（Handler）、校验、展示全部从它派生。历史上这里还
+    有 `target/goal/constraints` 三个反规范化副本，但它们是「生成时算一次、之后不
+    更新」的有损快照——澄清回填后就会陈旧（曾导致确认摘要显示「目标=空」），且
+    `constraints` 丢掉了 SlotValue 的 source/requirement_ids。故已删除，展示改用
+    `plan_builder.operation_target()/operation_goal()/operation_constraints()` 实时派生。
+    """
 
     operation_id: str
     intent: Intent
-    target: str = ""                 # section_id / target_ext 等
-    goal: str = ""
     slots: dict[str, SlotValue] = field(default_factory=dict)
-    constraints: tuple[str, ...] = ()
     requirement_ids: tuple[str, ...] = ()
     status: OperationStatus = OperationStatus.PENDING
 
@@ -176,6 +183,32 @@ class Rule_Analysis:
 
 
 # --- 校验（值对象，frozen）---
+
+class DispositionStatus(str, Enum):
+    """一条 AtomicRequirement 的去向（可验证零静默丢失的账本口径，D4）。"""
+
+    MAPPED = "mapped"          # 已被某个具体 Slot 消费（真的会影响执行）
+    UNMAPPED = "unmapped"      # 未被任何 Slot 消费 → 必须由用户处置
+    IGNORED = "ignored"        # 用户明确选择忽略
+    CLARIFIED = "clarified"    # 经澄清回填后落到 Slot
+    REJECTED = "rejected"      # 系统明确拒绝（如不支持的意图）
+    UNPARSED = "unparsed"      # 理解整体失败的兜底（原话留痕，不静默丢）
+
+
+@dataclass(frozen=True)
+class RequirementDisposition:
+    """requirement → 去向的结构化记录。
+
+    取代原先 `Task_Plan.unmapped_requirements: tuple[str, ...]`——那只有文本，丢了
+    requirement_id、丢了「被哪个操作的哪个槽位消费」，无法审计也无法在 trace 里对账。
+    """
+
+    requirement_id: str
+    status: DispositionStatus
+    verbatim: str = ""
+    operation_id: str | None = None
+    slot_names: tuple[str, ...] = ()
+
 
 @dataclass(frozen=True)
 class ValidationIssue:
@@ -222,6 +255,9 @@ class Task_Plan:
     plan_id: str
     source_turn_id: str
     operations: tuple[Operation, ...] = ()
+    # 每条已识别 requirement 的去向（唯一账本）。`unmapped_requirements` 是它的
+    # 派生视图，供 UI/校验按原文使用。
+    dispositions: tuple[RequirementDisposition, ...] = ()
     unmapped_requirements: tuple[str, ...] = ()
     missing_fields: tuple[str, ...] = ()
     reorder_suggestions: tuple[ReorderSuggestion, ...] = ()
@@ -260,6 +296,21 @@ class PlanExecutionReport:
     rollback_scope: str = "working_copy_only"
     rollback_available: bool = False
     completed_operation_ids: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class ExecutionReplanContext:
+    """执行期失效后重规划所需的完整上下文（Property 11）。
+
+    只把 `replan_reason` 当成新用户请求是不够的——那会丢掉原始意图、旧计划和「哪些
+    步骤已经成功」，导致重建出的计划可能重跑已完成的润色/新增章节。故显式携带：
+    """
+
+    original_request: str
+    previous_plan: "Task_Plan"
+    remaining_operations: tuple["Operation", ...] = ()
+    completed_operation_ids: tuple[str, ...] = ()
+    replan_reason: str = ""
 
 
 @dataclass(frozen=True)

@@ -177,6 +177,8 @@ class OpenAICompatibleProvider(LLMProvider):
         on_delta = opts.pop("on_delta", None)
         opts.pop("event_sink", None)  # 可选观测 sink：本层不透传给底层 API
         tools = opts.pop("tools", None)
+        # 中立参数 → OpenAI 的 tool_choice 形态（各厂商语法差异在 provider 内消化）
+        forced_tool_name = opts.pop("forced_tool_name", None)
         call_opts = {**self._default_options, **opts}
         if self._extra_body:
             # 合并调用方传入的 extra_body（若有）。
@@ -188,6 +190,11 @@ class OpenAICompatibleProvider(LLMProvider):
         # 工具调用回合不走流式（tool_calls 在流式下需额外拼装，从简）。
         if tools:
             call_opts["tools"] = tools
+            if forced_tool_name:
+                call_opts["tool_choice"] = {
+                    "type": "function",
+                    "function": {"name": forced_tool_name},
+                }
             call_opts.pop("stream", None)
             call_opts.pop("stream_options", None)
         streaming = bool(call_opts.get("stream")) and not tools

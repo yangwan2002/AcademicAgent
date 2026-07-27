@@ -25,11 +25,13 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Sequence
+from dataclasses import replace
 
 from paper_agent.intents.router import Intent
 from paper_agent.session.section_index import slugify
 from paper_agent.tasking.contracts import (
     AtomicRequirement,
+    DispositionStatus,
     ExtractionResult,
     FieldStatus,
     Operation,
@@ -38,6 +40,7 @@ from paper_agent.tasking.contracts import (
     PlanStatus,
     RawOperation,
     ReorderSuggestion,
+    RequirementDisposition,
     SlotSource,
     SlotValue,
     Task_Plan,
@@ -107,12 +110,22 @@ def operation_target(intent: Intent, slots: dict[str, SlotValue]) -> str:
 
 
 def operation_goal(slots: dict[str, SlotValue]) -> str:
-    """从槽位实时派生 Operation.goal。"""
+    """从槽位实时派生「目标描述」（展示/trace 用）。"""
     for key in ("goal", "direction"):
         sv = slots.get(key)
         if sv is not None and sv.field_status is FieldStatus.PRESENT and sv.value:
             return str(sv.value)
     return ""
+
+
+def operation_constraints(slots: dict[str, SlotValue]) -> tuple[str, ...]:
+    """从槽位实时派生约束列表（展示/trace 用；执行读 slots["constraints"]）。"""
+    sv = slots.get("constraints")
+    if sv is None or sv.field_status is not FieldStatus.PRESENT:
+        return ()
+    if isinstance(sv.value, (list, tuple)):
+        return tuple(str(x) for x in sv.value)
+    return ()
 
 
 def _build_operation(
@@ -147,18 +160,10 @@ def _build_operation(
         if is_gap:
             missing.append(f"{op_id}:{name}")
 
-    constraints: tuple[str, ...] = ()
-    csv = final_slots.get("constraints")
-    if csv is not None and csv.field_status is FieldStatus.PRESENT and isinstance(csv.value, (list, tuple)):
-        constraints = tuple(str(x) for x in csv.value)
-
     op = Operation(
         operation_id=op_id,
         intent=raw.intent,
-        target=operation_target(raw.intent, final_slots),
-        goal=operation_goal(final_slots),
         slots=final_slots,
-        constraints=constraints,
         requirement_ids=tuple(dict.fromkeys(consumed)),
         status=OperationStatus.PENDING,
     )
@@ -208,9 +213,13 @@ def _collect_reorder_suggestions(operations: Sequence[Operation]) -> tuple[Reord
             new_order = [oid for oid in order if oid != operations[creator].operation_id]
             insert_at = new_order.index(op.operation_id)
             new_order.insert(insert_at, operations[creator].operation_id)
+            here = operation_target(op.intent, op.slots)
+            there = operation_target(
+                operations[creator].intent, operations[creator].slots
+            )
             suggestions.append(ReorderSuggestion(
                 reason=(
-                    f"「{operations[i].target}」要放在「{operations[creator].target}」旁，"
+                    f"「{here}」要放在「{there}」旁，"
                     f"但后者在本计划里排在其后创建；建议先创建被引用章节。"
                 ),
                 suggested_order=tuple(new_order),
@@ -262,8 +271,11 @@ def build_plan(
         consumed_all.update(consumed)
         missing_all.extend(missing)
 
-    # 未被任何 in-spec 绑定槽位消费的 requirement → unmapped（保序）
-    unmapped_reqs = [canon[rid].verbatim for rid in canon if rid not in consumed_all]
+    # 每条 requirement 的去向账本（保序）：被某具体槽位消费 → mapped，否则 unmapped。
+    dispositions = _build_dispositions(canon, operations)
+    unmapped_reqs = [
+        d.verbatim for d in dispositions if d.status is DispositionStatus.UNMAPPED
+    ]
     unmapped_all = tuple(unmapped_reqs) + tuple(leftover_text)
 
     reorder = _collect_reorder_suggestions(operations)
@@ -272,12 +284,59 @@ def build_plan(
         plan_id=plan_id or new_plan_id(),
         source_turn_id=source_turn_id,
         operations=tuple(operations),
+        dispositions=dispositions,
         unmapped_requirements=unmapped_all,
         missing_fields=tuple(missing_all),
         reorder_suggestions=reorder,
         status=PlanStatus.DRAFT,
         plan_version=plan_version,
     )
+
+
+def _build_dispositions(
+    canon: dict[str, AtomicRequirement],
+    operations: Sequence[Operation],
+) -> tuple[RequirementDisposition, ...]:
+    """为每条 requirement 记录去向：被哪个操作的哪些槽位消费，或未映射。
+
+    覆盖判定按 **Slot 消费粒度**（D4/Property 2）：只有落进某个具体
+    `SlotValue.requirement_ids` 才算 mapped；「仅挂在 Operation 上」不算。
+    """
+    # requirement_id → (operation_id, [slot_name...])
+    consumers: dict[str, tuple[str, list[str]]] = {}
+    for op in operations:
+        for slot_name, sv in op.slots.items():
+            for rid in sv.requirement_ids:
+                if rid not in canon:
+                    continue          # 引用了不存在的 id → 忽略（防幻觉污染账本）
+                if rid in consumers:
+                    consumers[rid][1].append(slot_name)
+                else:
+                    consumers[rid] = (op.operation_id, [slot_name])
+
+    out: list[RequirementDisposition] = []
+    for rid, req in canon.items():
+        if req.category == "unparsed":
+            # 理解整体失败的兜底原话：留痕但不算已处理
+            out.append(RequirementDisposition(
+                requirement_id=rid, status=DispositionStatus.UNPARSED,
+                verbatim=req.verbatim,
+            ))
+            continue
+        hit = consumers.get(rid)
+        if hit is None:
+            out.append(RequirementDisposition(
+                requirement_id=rid, status=DispositionStatus.UNMAPPED,
+                verbatim=req.verbatim,
+            ))
+        else:
+            op_id, slot_names = hit
+            out.append(RequirementDisposition(
+                requirement_id=rid, status=DispositionStatus.MAPPED,
+                verbatim=req.verbatim, operation_id=op_id,
+                slot_names=tuple(dict.fromkeys(slot_names)),
+            ))
+    return tuple(out)
 
 
 def build_revision(
@@ -294,13 +353,13 @@ def build_revision(
 
     - **不丢原请求**：`raw_operations`/`extractions` 由调用方对「旧计划摘要 + 修订文本」
       重新分析得到（含原始意图），本函数据其整体重建，不把修订当全新请求。
-    - **不含已完成 op**：needs_replan 时调用方只传**未执行**的工作作为 raw_operations，
-      本函数从零重建，故已完成的 op 不会出现在新版本里（`remaining_operation_ids`
-      为调用方的记账，仅作文档/校验参考）。
+    - **不含已完成 op**：`remaining_operation_ids` 非空时，新计划的操作数被**截断**到
+      未执行步骤的数量（防止理解层把原始请求整体重新拆出已完成的步骤，导致重跑已成功
+      的润色/新增章节，Property 11）。
     - 版本与血缘：`plan_version = previous.plan_version + 1`，保留 `plan_id` 与
       `source_turn_id`。
     """
-    return build_plan(
+    plan = build_plan(
         previous_plan.source_turn_id,
         raw_operations,
         extractions,
@@ -309,9 +368,16 @@ def build_revision(
         plan_id=previous_plan.plan_id,
         plan_version=previous_plan.plan_version + 1,
     )
+    if remaining_operation_ids:
+        # 只保留与「未执行步骤数」相符的尾部操作：重规划的输入是原始请求，理解层可能
+        # 重新拆出全部步骤，但已成功的那些绝不能再执行一次。
+        keep = len(tuple(remaining_operation_ids))
+        if keep < len(plan.operations):
+            plan = replace(plan, operations=plan.operations[-keep:])
+    return plan
 
 
 __all__ = [
     "build_plan", "build_revision", "new_plan_id",
-    "operation_target", "operation_goal",
+    "operation_target", "operation_goal", "operation_constraints",
 ]

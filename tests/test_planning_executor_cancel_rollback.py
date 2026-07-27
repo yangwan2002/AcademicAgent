@@ -275,9 +275,16 @@ def test_cleanup_only_removes_new_outputs(tmp_path, monkeypatch):
     pre_existing = out / "p.docx"
     pre_existing.write_text("user's own file", encoding="utf-8")
 
-    existed = {str(pre_existing): True, str(out / "p.md"): False}
     (out / "p.md").write_text("this round's output", encoding="utf-8")
-    removed = PE._cleanup_new_outputs(existed)
+    outputs = {
+        "op_a": {"path": str(pre_existing), "existed_before": True},
+        "op_b": {"path": str(out / "p.md"), "existed_before": False},
+    }
+    results = [
+        OperationResult("op_a", OperationStatus.FAILED),
+        OperationResult("op_b", OperationStatus.FAILED),
+    ]
+    removed = PE._cleanup_failed_outputs(outputs, results)
 
     assert pre_existing.exists()                      # 既有用户输出保住
     assert str(out / "p.md") in removed               # 只删本轮新建的
@@ -375,3 +382,54 @@ def test_pre_op_does_not_reclarify(tmp_path, monkeypatch):
                            ask_disposition=lambda ids: asked.append(ids) or KEEP)
     assert outcome.plan_status is PlanStatus.NEEDS_REPLAN
     assert asked == []                   # 没有任何用户交互
+
+
+# ============ P0：失败清理不得删掉「已成功操作」的正式产物 ============
+
+def test_cleanup_keeps_successful_operation_outputs(tmp_path):
+    """转换成功 + 后续失败 → docx 必须保留（历史 bug：整轮产物被一并删除）。"""
+    out = tmp_path / "output"
+    out.mkdir()
+    good = out / "paper.docx"          # 由已成功的 convert 操作产生
+    good.write_text("converted", encoding="utf-8")
+    bad = out / "paper.md"             # 由失败的 convert 操作产生的残留
+    bad.write_text("partial", encoding="utf-8")
+
+    outputs = {
+        "op_ok": {"path": str(good), "existed_before": False},
+        "op_bad": {"path": str(bad), "existed_before": False},
+    }
+    results = [
+        OperationResult("op_ok", OperationStatus.SUCCEEDED),
+        OperationResult("op_bad", OperationStatus.FAILED),
+    ]
+    removed = PE._cleanup_failed_outputs(outputs, results)
+
+    assert good.exists()                      # 成功产物保留
+    assert not bad.exists()                   # 失败残留清掉
+    assert removed == [str(bad)]
+
+
+def test_cleanup_never_touches_preexisting_user_files(tmp_path):
+    out = tmp_path / "output"
+    out.mkdir()
+    mine = out / "paper.docx"
+    mine.write_text("user's own file", encoding="utf-8")
+    outputs = {"op_bad": {"path": str(mine), "existed_before": True}}
+    results = [OperationResult("op_bad", OperationStatus.FAILED)]
+    removed = PE._cleanup_failed_outputs(outputs, results)
+    assert mine.exists() and removed == []
+
+
+def test_snapshot_outputs_keyed_by_operation(tmp_path):
+    from paper_agent.session.file_session import FileBackedSession
+
+    src = tmp_path / "paper.tex"
+    src.write_text("\\section{X}\nbody\n", encoding="utf-8")
+    session = FileBackedSession(str(src), workspace_root=str(tmp_path / "ws"))
+    ctx = HandlerContext(session=session, output_dir=str(tmp_path / "out"))
+    plan = _plan(_op("c1", Intent.CONVERT_FORMAT, target_ext="docx"))
+    info = PE._snapshot_outputs(plan, ctx)
+    assert "c1" in info
+    assert info["c1"]["existed_before"] is False
+    assert info["c1"]["path"].endswith("paper.docx")

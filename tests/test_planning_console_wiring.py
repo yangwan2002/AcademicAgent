@@ -196,3 +196,103 @@ def test_cancel_is_handled_as_taken_over(capsys):
                                        legacy_intent="polish")
     assert handled is True             # 取消是明确终态，不重跑旧链路
     assert "已取消" in capsys.readouterr().out
+
+
+# ============ #15：嵌套提问里的中止 ============
+
+def _raising_interactor(exc):
+    printed: list[str] = []
+
+    def _ask(_prompt):
+        raise exc
+
+    return ConsolePlanningInteractor(ask=_ask, out=printed.append), printed
+
+
+def test_ctrl_c_in_clarify_becomes_operation_cancelled():
+    """KeyboardInterrupt 不是 Exception，Coordinator 捕获不到 → 会杀掉 REPL。
+    必须在交互层转成 OperationCancelled，走既有取消路径。
+    """
+    import pytest
+
+    from paper_agent.errors import OperationCancelled
+
+    it, _ = _raising_interactor(KeyboardInterrupt())
+    with pytest.raises(OperationCancelled):
+        it.ask_field("要润色哪一章？")
+
+
+def test_eof_in_confirm_becomes_operation_cancelled():
+    import pytest
+
+    from paper_agent.errors import OperationCancelled
+
+    it, _ = _raising_interactor(EOFError())
+    with pytest.raises(OperationCancelled):
+        it.confirm_plan("摘要")
+
+
+def test_quit_command_in_nested_prompt_is_abort_not_answer():
+    """:quit 在嵌套提问里不能被当成章节名/约束文本。"""
+    import pytest
+
+    from paper_agent.errors import OperationCancelled
+
+    it, _ = _interactor([":quit"])
+    with pytest.raises(OperationCancelled):
+        it.ask_field("要润色哪一章？")
+
+    it2, _ = _interactor([":q"])
+    with pytest.raises(OperationCancelled):
+        it2.resolve_unmapped("帮我订机票")
+
+
+def test_disposition_defaults_to_keep_on_interrupt():
+    """处置询问发生在已出错之后：中止就按「保留已完成」，不丢用户成果。"""
+    it, printed = _raising_interactor(KeyboardInterrupt())
+    assert it.ask_disposition(["o1"]) == KEEP
+    assert any("保留已完成" in p for p in printed)
+
+
+# ============ #18：facts 合并而非覆盖 ============
+
+def test_merge_refs_keeps_verified_retrieved_entries(tmp_path):
+    from paper_agent.session.facts import KnownRef, SessionFacts
+
+    facts = SessionFacts(path=str(tmp_path / "facts.json"))
+    # 此前经检索 + 核验入库的文献
+    facts.add_ref(KnownRef(id="1", bibkey="smith2020deep", title="Deep Nets",
+                           verified=True))
+    # 源文件扫描只能看到 \cite{key}，标题空、verified=False
+    scanned = [
+        KnownRef(id="", bibkey="smith2020deep", title="", verified=False),
+        KnownRef(id="2", bibkey="jones2021", title="Another", verified=False),
+    ]
+    added = facts.merge_refs(scanned)
+
+    by_key = {r.bibkey: r for r in facts.known_refs}
+    assert added == 1                                   # 只新增 jones2021
+    assert by_key["smith2020deep"].verified is True     # 核验状态未被降级
+    assert by_key["smith2020deep"].title == "Deep Nets"  # 标题未被清空
+    assert "jones2021" in by_key
+
+
+def test_merge_refs_fills_missing_title():
+    from paper_agent.session.facts import KnownRef, SessionFacts
+
+    facts = SessionFacts(path="x")
+    facts.add_ref(KnownRef(id="1", bibkey="k", title="", verified=False))
+    facts.merge_refs([KnownRef(id="1", bibkey="k", title="From Source")])
+    assert facts.known_refs[0].title == "From Source"
+
+
+def test_merge_numbers_preserves_confirmed_flag():
+    from paper_agent.session.facts import KnownNumber, SessionFacts
+
+    facts = SessionFacts(path="x")
+    facts.add_number("0.87", source="user_confirmed", confirmed=True)
+    added = facts.merge_numbers([KnownNumber(value="0.87", confirmed=False),
+                                 KnownNumber(value="0.92")])
+    assert added == 1
+    by_val = {n.value: n for n in facts.known_numbers}
+    assert by_val["0.87"].confirmed is True     # 不被源文件扫描降级

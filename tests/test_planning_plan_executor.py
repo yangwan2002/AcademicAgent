@@ -127,8 +127,9 @@ def test_aggregate_partial_when_earlier_succeeded():
     assert cat is FailureCategory.VALIDATION_REJECTED
 
 
-def test_aggregate_empty_is_done():
-    assert aggregate_plan_status([]) == (PlanStatus.DONE, None)
+def test_aggregate_empty_is_no_action_not_done():
+    # 历史上这里返回 DONE —— 「什么都没做」被报成「成功」（P0 已修）
+    assert aggregate_plan_status([]) == (PlanStatus.NO_ACTION, None)
 
 
 # ============ execute_plan ============
@@ -249,3 +250,35 @@ def test_integration_with_real_polish_handler(tmp_path):
     outcome = execute_plan(_plan(_op("o1")), state, ctx)
     assert outcome.plan_status is PlanStatus.DONE
     assert outcome.report.operations[0].changed_working_copy is True
+
+
+# ============ P0：空计划绝不报成 done ============
+
+def test_empty_results_aggregate_to_no_action():
+    assert aggregate_plan_status([]) == (PlanStatus.NO_ACTION, None)
+
+
+def test_empty_plan_does_not_execute_and_reports_no_action(monkeypatch):
+    """「什么都没做」不得报成「都做成了」——这是对用户撒谎。"""
+    called = {"handler": 0}
+
+    def _never(intent):
+        called["handler"] += 1
+        return _AlwaysOkStub()
+
+    class _AlwaysOkStub:
+        intent = Intent.POLISH
+
+        def execute(self, op, ctx, bus=None, cancel_token=None):
+            return OperationResult(op.operation_id, OperationStatus.SUCCEEDED)
+
+    monkeypatch.setattr(PE, "handler_for", _never)
+    session = _FakeSession()
+    state = Plan_Execution_State()
+    outcome = execute_plan(_plan(), state, HandlerContext(session=session))
+
+    assert outcome.plan_status is PlanStatus.NO_ACTION
+    assert outcome.report.operations == ()
+    assert called["handler"] == 0          # 压根没进执行循环
+    assert session.baselines == []         # 也不该建基线
+    assert state.baseline is None

@@ -208,6 +208,9 @@ class AnthropicProvider(LLMProvider):
         on_delta = opts.pop("on_delta", None)
         opts.pop("event_sink", None)  # 可选观测 sink：本层不透传给底层 API
         tools = opts.pop("tools", None)
+        # 中立参数 → Anthropic 的 tool_choice 形态（协议适配在 provider 内，调用方
+        # 不需要知道各厂商语法差异）。
+        forced_tool_name = opts.pop("forced_tool_name", None)
         max_tokens = int(opts.pop("max_tokens", self._max_tokens))
 
         system, conv = _to_anthropic_messages(messages)
@@ -229,6 +232,8 @@ class AnthropicProvider(LLMProvider):
             kwargs["system"] = system
         if tools:
             kwargs["tools"] = _to_anthropic_tools(tools)
+            if forced_tool_name:
+                kwargs["tool_choice"] = {"type": "tool", "name": forced_tool_name}
 
         if on_delta is not None:
             return self._complete_streaming(kwargs, on_delta)

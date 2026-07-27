@@ -15,15 +15,25 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from paper_agent.errors import OperationCancelled
 from paper_agent.runtime.plan_executor import KEEP, ROLLBACK
 from paper_agent.tasking.clarifier import ConfirmDecision, UnmappedDisposition
 
 _YES = ("y", "yes", "是", "确认", "好", "ok")
 _NO = ("n", "no", "否", "不")
+# 嵌套提问中用户想中止整轮，而不是把这些当成答案
+_ABORT = (":quit", ":q", ":exit", ":cancel", ":abort")
 
 
 class ConsolePlanningInteractor:
-    """终端交互实现。`ask` 返回用户输入的一行；`out` 输出提示。"""
+    """终端交互实现。`ask` 返回用户输入的一行；`out` 输出提示。
+
+    **中止语义（#15）**：规划期的每次提问都可能被用户中止——
+    - `Ctrl-C` / `Ctrl-D`：`KeyboardInterrupt`/`EOFError` **不是** `Exception` 的子类，
+      Coordinator 捕获不到，会直接杀掉 REPL。故在此统一转成 `OperationCancelled`，
+      走既有取消路径（保留已完成步骤 + 回滚选项）。
+    - `:quit` 等命令：在嵌套提问里不能被当成普通答案（否则会变成章节名/约束文本）。
+    """
 
     def __init__(
         self,
@@ -33,20 +43,32 @@ class ConsolePlanningInteractor:
         self._ask = ask or input
         self._out = out or print
 
+    def _prompt(self, text: str) -> str:
+        """读一行；Ctrl-C/Ctrl-D 与 :quit 一律转为 OperationCancelled。"""
+        try:
+            answer = self._ask(text)
+        except (KeyboardInterrupt, EOFError):
+            self._out("\n（已中止本轮）")
+            raise OperationCancelled() from None
+        if answer.strip().lower() in _ABORT:
+            self._out("（已中止本轮）")
+            raise OperationCancelled()
+        return answer
+
     # --- Clarifier ---
 
     def ask_field(self, prompt: str) -> str:
-        return self._ask(f"\n{prompt}\n> ").strip()
+        return self._prompt(f"\n{prompt}\n> ").strip()
 
     # --- 未映射要求处置 ---
 
     def resolve_unmapped(self, item: str) -> UnmappedDisposition:
         self._out(f"\n有一条要求我没能安排进任何操作：「{item}」")
-        answer = self._ask(
+        answer = self._prompt(
             "怎么处理？(1=补充说明 / 2=忽略这条 / 3=取消本次)\n> "
         ).strip()
         if answer.startswith("1"):
-            text = self._ask("请补充说明：\n> ").strip()
+            text = self._prompt("请补充说明：\n> ").strip()
             return UnmappedDisposition("supplement", text or item)
         if answer.startswith("3"):
             return UnmappedDisposition("cancel")
@@ -56,7 +78,7 @@ class ConsolePlanningInteractor:
 
     def confirm_plan(self, summary: str) -> ConfirmDecision:
         self._out("\n" + summary)
-        answer = self._ask(
+        answer = self._prompt(
             "\n执行这个计划吗？(回车/y=执行 / n=放弃 / 直接输入修改意见=改计划)\n> "
         ).strip()
         low = answer.lower()
@@ -74,7 +96,13 @@ class ConsolePlanningInteractor:
             f"\n计划未全部完成，已成功 {len(completed_ids)} 步。"
             "可以保留这些已完成的改动，或把工作副本整体回滚到本次执行前。"
         )
-        answer = self._ask("(回车=保留已完成 / r=全部回滚)\n> ").strip().lower()
+        # 处置询问发生在「已经出错/已取消」之后：此时再抛 OperationCancelled 无意义，
+        # 中止即按默认「保留已完成」处理，绝不因为读不到输入就丢掉用户的成果。
+        try:
+            answer = self._ask("(回车=保留已完成 / r=全部回滚)\n> ").strip().lower()
+        except (KeyboardInterrupt, EOFError):
+            self._out("\n（未选择，默认保留已完成的改动）")
+            return KEEP
         return ROLLBACK if answer.startswith("r") else KEEP
 
 

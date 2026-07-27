@@ -18,11 +18,13 @@ Clarifier/confirm 不做静态章节校验（那是 validator 的事，由规划
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, replace
 from typing import Protocol
 
 from paper_agent.intents.router import Intent
 from paper_agent.tasking.contracts import (
+    DispositionStatus,
     FieldStatus,
     Operation,
     SlotSource,
@@ -30,7 +32,11 @@ from paper_agent.tasking.contracts import (
     Task_Plan,
 )
 from paper_agent.tasking.intent_spec import SlotSpec, spec_for
-from paper_agent.tasking.plan_builder import operation_goal, operation_target
+from paper_agent.tasking.plan_builder import (
+    operation_constraints,
+    operation_goal,
+    operation_target,
+)
 
 try:  # 观测事件（可选，None-safe）
     from paper_agent.observability.events import EventKind
@@ -134,15 +140,6 @@ _QUESTIONS: dict[tuple[Intent, str], _Question] = {
     (Intent.FORMAT_DOCX, "operations"): _Question(
         "排版要求", "需要哪些排版？（如 正文宋体小四、标题居中、双栏、三线表）"),
 }
-
-
-def _refresh(op: Operation, slots: dict[str, SlotValue]) -> Operation:
-    """回填后重算派生展示字段 target/goal，避免陈旧（Q2 bug）。"""
-    return replace(
-        op, slots=slots,
-        target=operation_target(op.intent, slots),
-        goal=operation_goal(slots),
-    )
 
 
 def _parse_format_ops(text: str):
@@ -252,7 +249,8 @@ def clarify(
                      field_status=sv.field_status.value)
             new_slots = dict(op.slots)
             new_slots[slot_name] = sv
-            ops_by_id[op_id] = _refresh(op, new_slots)  # 刷新 target/goal，防陈旧
+            # slots 是唯一真相源：展示字段按需实时派生，无需在此同步任何副本。
+            ops_by_id[op_id] = replace(op, slots=new_slots)
         plan = replace(plan, operations=tuple(ops_by_id.values()))
 
     remaining = _recompute_missing(plan)
@@ -292,12 +290,24 @@ def resolve_unmapped(plan: Task_Plan, interactor: PlanningInteractor, *, bus=Non
 
     if supplements:
         return UnmappedOutcome(action="supplement", supplement_text="；".join(supplements))
-    # 全部忽略 → 清空 unmapped，proceed
+    # 全部忽略 → 账本记 ignored（不是凭空消失），清空 unmapped 视图后 proceed
+    ignored_set = {_norm_verbatim(x) for x in ignored}
+    new_disp = tuple(
+        replace(d, status=DispositionStatus.IGNORED)
+        if (d.status is DispositionStatus.UNMAPPED
+            and _norm_verbatim(d.verbatim) in ignored_set)
+        else d
+        for d in plan.dispositions
+    )
     return UnmappedOutcome(
         action="proceed",
         ignored=tuple(ignored),
-        plan=replace(plan, unmapped_requirements=()),
+        plan=replace(plan, unmapped_requirements=(), dispositions=new_disp),
     )
+
+
+def _norm_verbatim(s: str) -> str:
+    return re.sub(r"\s+", "", str(s)).lower()
 
 
 # --- Confirmation ----------------------------------------------------------
@@ -306,13 +316,17 @@ def summarize_plan(plan: Task_Plan) -> str:
     """执行序摘要（供用户确认；展示用户级标识，非文档原文）。"""
     lines = [f"计划包含 {len(plan.operations)} 个操作（按执行序）："]
     for i, op in enumerate(plan.operations, 1):
+        # 展示字段一律从 slots 实时派生（唯一真相源，永不陈旧）
         bits = [op.intent.value]
-        if op.target:
-            bits.append(f"目标={op.target}")
-        if op.goal:
-            bits.append(f"目标描述={op.goal}")
-        if op.constraints:
-            bits.append("约束=" + "/".join(op.constraints))
+        target = operation_target(op.intent, op.slots)
+        if target:
+            bits.append(f"目标={target}")
+        goal = operation_goal(op.slots)
+        if goal:
+            bits.append(f"目标描述={goal}")
+        constraints = operation_constraints(op.slots)
+        if constraints:
+            bits.append("约束=" + "/".join(constraints))
         lines.append(f"  {i}. " + "，".join(bits))
     if plan.unmapped_requirements:
         lines.append("未映射（需处置）：" + "；".join(plan.unmapped_requirements))

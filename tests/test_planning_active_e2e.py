@@ -318,3 +318,72 @@ def test_active_trace_covers_whole_turn(tmp_path):
     assert out.run_report.run_status == "completed"
     # 原始用户文本不落盘
     assert "润色引言" not in trace_path.read_text(encoding="utf-8")
+
+
+# ============ P0：系统异常不得报成「用户取消」 ============
+
+class _BoomInteractor(_Interactor):
+    def confirm_plan(self, summary):
+        raise RuntimeError("interactor exploded")
+
+
+def test_system_exception_reported_as_failed_not_cancelled(tmp_path):
+    """Coordinator 区分 cancelled/failed，TurnService 必须分流。
+
+    历史 bug：只要 run_report.value is None 就调 to_cancelled_report()，
+    真实代码异常会被用户看成「已取消」。
+    """
+    session = _session(tmp_path)
+    llm = MockLLMProvider(scripted=[
+        _analyze([("polish", "润色引言", [])]),
+        _extract({"section_id": "introduction"}),
+    ])
+    ctx = HandlerContext(session=session, llm=llm)
+    svc = _svc("active", llm, ctx, _BoomInteractor(), coordinator=Coordinator())
+
+    out = svc.handle_turn("润色引言", session=session, facts=None, legacy=lambda: None)
+
+    assert out.run_report.run_status == "failed"
+    assert out.report is not None
+    assert out.report.plan_status is PlanStatus.FAILED          # 不是 cancelled
+    assert out.report.failure_category is not None              # 保留失败类别
+    assert any("执行异常" in w for w in out.warnings)
+
+
+def test_cancel_still_reported_as_cancelled(tmp_path):
+    from paper_agent.errors import OperationCancelled
+
+    class _CancelInteractor(_Interactor):
+        def confirm_plan(self, summary):
+            raise OperationCancelled()
+
+    session = _session(tmp_path)
+    llm = MockLLMProvider(scripted=[
+        _analyze([("polish", "润色引言", [])]),
+        _extract({"section_id": "introduction"}),
+    ])
+    ctx = HandlerContext(session=session, llm=llm)
+    svc = _svc("active", llm, ctx, _CancelInteractor(), coordinator=Coordinator())
+    out = svc.handle_turn("润色引言", session=session, facts=None, legacy=lambda: None)
+
+    assert out.run_report.run_status == "cancelled"
+    assert out.report.plan_status is PlanStatus.CANCELLED
+    assert out.warnings == []
+
+
+# ============ P0：空计划端到端不报 done ============
+
+def test_unsupported_request_reports_no_action(tmp_path):
+    session = _session(tmp_path)
+    before = session.read_working()
+    llm = MockLLMProvider(scripted=[
+        _analyze([], unmapped=["帮我查一下这篇论文的重复率"]),
+    ])
+    ctx = HandlerContext(session=session, llm=llm)
+    svc = _svc("active", llm, ctx, _Interactor(), coordinator=Coordinator())
+    out = svc.handle_turn("帮我查一下这篇论文的重复率", session=session, facts=None,
+                          legacy=lambda: None)
+
+    assert out.report is None
+    assert out.planning_exit.status is PlanStatus.NO_ACTION
+    assert session.read_working() == before        # 逐字节未变

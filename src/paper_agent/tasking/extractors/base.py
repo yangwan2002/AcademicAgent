@@ -82,10 +82,27 @@ def _extract_json_object(text: str) -> dict:
     return obj
 
 
-def _tool_choice(tool_schema: dict) -> dict:
-    """强制调用指定工具（Anthropic Messages 形态；OpenAI 兼容层亦接受同名参数）。"""
+def _forced_tool_name(tool_schema: dict) -> str:
+    """要强制调用的工具名。**协议形态由各 provider 自行适配**（#8）——
+    统一层只传 `forced_tool_name`，不拼 Anthropic/OpenAI 各异的 `tool_choice` 结构。
+    """
     fn = tool_schema.get("function", tool_schema) if isinstance(tool_schema, dict) else {}
-    return {"type": "tool", "name": fn.get("name", "")}
+    return str(fn.get("name", "") or "")
+
+
+# 只有「参数不被支持」才值得去掉 forced_tool_name 重试一次；
+# 超时/限流/网络错误重试会造成重复请求与延迟翻倍（由 Resilient 层负责退避）。
+_UNSUPPORTED_HINTS = (
+    "forced_tool_name", "tool_choice", "unexpected keyword", "unknown parameter",
+    "unsupported parameter", "invalid_request_error", "extra fields not permitted",
+)
+
+
+def _looks_unsupported(exc: Exception) -> bool:
+    text = f"{type(exc).__name__}: {exc}".lower()
+    if isinstance(exc, TypeError):
+        return True          # provider 签名不认识该参数
+    return any(h in text for h in _UNSUPPORTED_HINTS)
 
 
 def structured_call(
@@ -106,16 +123,17 @@ def structured_call(
     use_tools = tool_schema is not None
     try:
         if use_tools:
-            # `tool_choice` 强制模型走工具（否则它有时直接回文本）。不同网关语法各异，
-            # 故仍保留下面的正文兜底；provider 不认识该参数时会被其自身忽略/上抛。
+            # 只传中立的 forced_tool_name；具体 tool_choice 形态由 provider 适配。
             resp = llm.complete(
-                messages, tools=[tool_schema], tool_choice=_tool_choice(tool_schema)
+                messages, tools=[tool_schema],
+                forced_tool_name=_forced_tool_name(tool_schema),
             )
         else:
             resp = llm.complete(messages)
     except Exception as exc:  # noqa: BLE001
-        if use_tools:
-            # tool_choice 可能不被支持 → 退一步只传 tools 再试一次。
+        # **只**在「该参数不被支持」时降级重试一次；超时/限流等一律直接失败，
+        # 交由 Resilient 层退避，避免重复请求与延迟翻倍（#8）。
+        if use_tools and _looks_unsupported(exc):
             try:
                 resp = llm.complete(messages, tools=[tool_schema])
             except Exception as exc2:  # noqa: BLE001
@@ -454,8 +472,10 @@ def build_tool_schema(spec: IntentSpec, label: str) -> dict:
     - **扁平**结构（槽名直接是参数），对模型最友好；解析侧 `_parse_payload` 已容忍。
     - 每个字段的 `description` 直接取自 `SlotSpec.description`——「规矩」挂在字段上，
       而非堆在 system prompt 里。
-    - `required` 只放 IntentSpec 的必填槽；**其余一律不填**，「用户没提就不要给」，
-      从而保留 `user_absent` 语义（不伪造）。
+    - **`required` 恒为空**（P0）：JSON schema 的 required 与业务 required 是两个层。
+      业务必填的含义是「缺了要问用户」（由 PlanBuilder 记 missing_fields、Clarifier
+      追问），而 schema 的 required 会**禁止模型省略**，逼它为没说的字段编造取值 —— 
+      那样缺口永远不会暴露给 Clarifier，整套澄清机制被架空。故这里一律不设。
     """
     props = {name: _slot_property(s) for name, s in spec.slots.items()}
     props["newly_discovered_requirements"] = {
@@ -475,7 +495,8 @@ def build_tool_schema(spec: IntentSpec, label: str) -> dict:
             "parameters": {
                 "type": "object",
                 "properties": props,
-                "required": spec.required_slots(),
+                # 恒为空：业务必填由 PlanBuilder/Clarifier 处理，不在协议层强迫模型编造
+                "required": [],
             },
         },
     }

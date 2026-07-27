@@ -82,6 +82,26 @@ def _facts_summary(facts) -> dict:
         return {}
 
 
+def _failed_report(state, run_report):
+    """系统异常（非取消）的报告：保留已完成步骤 + 失败类别，不冒充「取消」。"""
+    from paper_agent.tasking.contracts import (
+        FailureCategory,
+        PlanExecutionReport,
+        PlanStatus,
+    )
+
+    completed = list(state.completed_operations)
+    return PlanExecutionReport(
+        plan_status=(
+            PlanStatus.PARTIALLY_COMPLETED if completed else PlanStatus.FAILED
+        ),
+        operations=tuple(completed),
+        failure_category=FailureCategory.EXECUTION_FAILED,
+        rollback_available=state.rollback_available,
+        completed_operation_ids=tuple(state.completed_ids),
+    )
+
+
 def capture_snapshot(session, facts=None) -> PlanningSnapshot:
     """在 legacy 执行**之前**捕获只读快照（不改任何状态）。"""
     return PlanningSnapshot(
@@ -197,9 +217,12 @@ class TurnService:
         from paper_agent.runtime.plan_executor import execute_plan
         from paper_agent.tasking.contracts import (
             ConfirmedPlan,
+            ExecutionReplanContext,
             Plan_Execution_State,
+            PlanningExit,
             PlanStatus,
         )
+        from paper_agent.tasking.budget import budget_from_config
         from paper_agent.tasking.planning_loop import run_planning_loop
 
         snapshot = capture_snapshot(session, facts)
@@ -208,16 +231,22 @@ class TurnService:
         state = Plan_Execution_State()
         ctx = self._handler_context
         result = TurnResult(mode="active", turn_id=turn_id, state=state)
+        max_revisions = max(1, getattr(self._config, "planning_max_revisions", 3))
+        # **一个 Turn 一份预算**：跨修订累计调用数与 provider 耗时（#9）——
+        # 只限"单次"挡不住 3 次修订 × N 个抽取器的总量。
+        budget = budget_from_config(self._config)
 
         def _journey(bus, cancel_token):
-            revision_text = text
-            for _ in range(max(1, getattr(self._config, "planning_max_revisions", 3))):
+            # 重规划上下文：**保留原始请求**，只重规划未执行步骤（Property 11）。
+            # 历史 bug：把 replan_reason 当成全新用户请求，丢了 original_request /
+            # previous_plan / remaining_operations，导致可能重跑已成功的操作。
+            replan: ExecutionReplanContext | None = None
+            for _ in range(max_revisions):
                 outcome = run_planning_loop(
-                    revision_text, llm=self._llm, interactor=self._interactor,
+                    text, llm=self._llm, interactor=self._interactor,
                     current_sections=sections, current_format=snapshot.file_type,
-                    turn_id=turn_id,
-                    max_plan_revisions=getattr(self._config, "planning_max_revisions", 3),
-                    bus=bus,
+                    turn_id=turn_id, max_plan_revisions=max_revisions,
+                    replan=replan, budget=budget, bus=bus,
                 )
                 if not isinstance(outcome, ConfirmedPlan):
                     return ("exit", outcome)
@@ -226,11 +255,20 @@ class TurnService:
                     ask_disposition=getattr(self._interactor, "ask_disposition", None),
                 )
                 if exec_outcome.plan_status is PlanStatus.NEEDS_REPLAN:
-                    # 只重规划未执行步骤（Property 11）
-                    revision_text = exec_outcome.replan_reason or revision_text
+                    replan = ExecutionReplanContext(
+                        original_request=text,
+                        previous_plan=outcome.plan,
+                        remaining_operations=exec_outcome.remaining_operations,
+                        completed_operation_ids=tuple(state.completed_ids),
+                        replan_reason=exec_outcome.replan_reason,
+                    )
                     continue
                 return ("report", exec_outcome.report)
-            return ("exit", None)
+            # 修订次数耗尽：明确出口，不返回 None（否则上层看不出发生了什么）
+            return ("exit", PlanningExit(
+                status=PlanStatus.REVISION_LIMIT_EXCEEDED,
+                message=f"重规划超过 {max_revisions} 次仍无法继续",
+            ))
 
         if self._coordinator is None:
             kind, payload = _journey(None, None)
@@ -238,8 +276,15 @@ class TurnService:
             run_report = self._coordinator.run(_journey)
             result.run_report = run_report
             if run_report.value is None:
-                # 取消/异常：用 run 外的 state 出报告（D7）
-                result.report = state.to_cancelled_report()
+                # P0：Coordinator 已区分 cancelled / failed，此处必须分流——
+                # 否则真实的代码异常会被当成「用户取消」报给用户。
+                if run_report.run_status == "cancelled":
+                    result.report = state.to_cancelled_report()
+                else:
+                    result.report = _failed_report(state, run_report)
+                    result.warnings.append(
+                        f"执行异常（{(run_report.error or {}).get('category', '未知')}）"
+                    )
                 return result
             kind, payload = run_report.value
 
