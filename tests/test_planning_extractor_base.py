@@ -74,13 +74,12 @@ class _TestExtractor(PreExtractor):
     def _spec(self) -> IntentSpec:
         return _TEST_SPEC
 
-    def _build_messages(self, operation, canonical_requirements):
-        return [Message(role="user", content=operation.verbatim)]
-
 
 class _ToolExtractor(_TestExtractor):
+    """显式给一个最小 schema（默认由 IntentSpec 自动生成）。"""
+
     def _tool_schema(self):
-        return {"name": "extract", "parameters": {}}
+        return {"function": {"name": "extract", "parameters": {}}}
 
 
 class _FailingLLM(LLMProvider):
@@ -235,11 +234,23 @@ def test_analyzer_path_failure_has_no_fallback_requirement():
 
 # --- structured_call 可插拔：tools 模式 ---
 
-def test_structured_call_prompt_mode():
+def test_structured_call_without_schema_parses_content_json():
+    # 无 tool_schema → 退化为解析正文 JSON
     llm = _mock({"slots": {"section_id": {"value": "x", "status": "present"}}})
-    out = structured_call(llm, [Message(role="user", content="hi")], mode="prompt")
+    out = structured_call(llm, [Message(role="user", content="hi")])
     assert out.call_status is CallStatus.SUCCESS
     assert out.payload["slots"]["section_id"]["value"] == "x"
+
+
+def test_structured_call_tools_falls_back_to_content_json():
+    # tools 模式但模型回了正文 JSON（未走工具）→ 兜底解析，不塌成失败
+    llm = _mock({"slots": {"section_id": {"value": "y", "status": "present"}}})
+    out = structured_call(
+        llm, [Message(role="user", content="hi")],
+        tool_schema={"function": {"name": "extract", "parameters": {}}},
+    )
+    assert out.call_status is CallStatus.SUCCESS
+    assert out.payload["slots"]["section_id"]["value"] == "y"
 
 
 def test_structured_call_tools_mode_reads_tool_arguments():
@@ -247,17 +258,75 @@ def test_structured_call_tools_mode_reads_tool_arguments():
                     arguments={"slots": {"section_id": {"value": "sec:intro",
                                                         "status": "present"}}})
     llm = MockLLMProvider(scripted=[[call]])
-    ex = _ToolExtractor(llm, structured_mode="tools")
+    ex = _ToolExtractor(llm)
     res = ex.pre_extract(_OP, canonical_requirements=())
     assert res.call_status is CallStatus.SUCCESS
     assert res.slots["section_id"].value == "sec:intro"
 
 
-def test_structured_call_tools_mode_no_call_is_schema_failed():
-    # tools 模式但模型没发 tool_call（返回正文）→ schema_failed
+def test_structured_call_tools_mode_no_call_and_no_json_is_parse_failed():
+    # 既没发 tool_call、正文也不是 JSON → parse_failed（尝试解析且失败）
     llm = MockLLMProvider(scripted=["just text, no tool call"])
     out = structured_call(
         llm, [Message(role="user", content="hi")],
-        mode="tools", tool_schema={"name": "extract", "parameters": {}},
+        tool_schema={"function": {"name": "extract", "parameters": {}}},
+    )
+    assert out.call_status is CallStatus.PARSE_FAILED
+
+
+def test_structured_call_tool_args_not_dict_is_schema_failed():
+    from paper_agent.providers.llm.base import ToolCall
+
+    llm = MockLLMProvider(scripted=[[ToolCall(id="c", name="extract", arguments="oops")]])
+    out = structured_call(
+        llm, [Message(role="user", content="hi")],
+        tool_schema={"function": {"name": "extract", "parameters": {}}},
     )
     assert out.call_status is CallStatus.SCHEMA_FAILED
+
+
+# --- requirement 消费关系由程序推断（FC 扁平 schema 不带 per-slot ids）---
+
+def test_consumption_inferred_when_model_omits_requirement_ids():
+    """真机回归：扁平 FC payload 没有 requirement_ids，消费关系须由程序补全。
+
+    否则每条 requirement 都会被判「未消费」→ 全部落 unmapped（用户会被反复追问
+    明明已经理解了的东西）。
+    """
+    ex = _TestExtractor(_mock({
+        "section_id": "sec:intro",
+        "target_ext": "docx",
+    }))
+    reqs = (
+        AtomicRequirement(requirement_id="r1", verbatim="sec:intro"),
+        AtomicRequirement(requirement_id="r2", verbatim="docx"),
+    )
+    res = ex.pre_extract(_OP, canonical_requirements=reqs)
+    assert res.call_status is CallStatus.SUCCESS
+    assert set(res.consumed_requirement_ids) == {"r1", "r2"}
+    # 各自挂到对应槽位上
+    assert "r1" in res.slots["section_id"].requirement_ids
+
+
+def test_explicit_requirement_ids_take_precedence():
+    ex = _TestExtractor(_mock({
+        "slots": {
+            "section_id": {"value": "sec:intro", "status": "present",
+                           "requirement_ids": ["r9"]},
+        },
+    }))
+    reqs = (AtomicRequirement(requirement_id="r9", verbatim="完全不匹配的原话"),)
+    res = ex.pre_extract(_OP, canonical_requirements=reqs)
+    assert res.slots["section_id"].requirement_ids == ("r9",)
+    assert "r9" in res.consumed_requirement_ids
+
+
+def test_unmatched_requirement_stays_unconsumed():
+    ex = _TestExtractor(_mock({"section_id": "sec:intro"}))
+    reqs = (
+        AtomicRequirement(requirement_id="r1", verbatim="sec:intro"),
+        AtomicRequirement(requirement_id="r2", verbatim="帮我订机票"),
+    )
+    res = ex.pre_extract(_OP, canonical_requirements=reqs)
+    assert "r1" in res.consumed_requirement_ids
+    assert "r2" not in res.consumed_requirement_ids   # 无处可去 → 由 PlanBuilder 落 unmapped

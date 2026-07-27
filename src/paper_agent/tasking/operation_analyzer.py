@@ -15,6 +15,7 @@ locate 定位**（不让 LLM 算字符位）。失败分四态（provider/parse/
 from __future__ import annotations
 
 import json
+import os
 import uuid
 
 from paper_agent.intents.router import Intent
@@ -32,57 +33,119 @@ _SUPPORTED = {
     Intent.CONVERT_FORMAT, Intent.FORMAT_DOCX,
 }
 
-_SYSTEM = (
-    "你是学术论文写作助手的意图分解器。把用户消息按其表达顺序切分为若干操作，"
-    "并识别其中的原子要求。只输出 JSON，不要解释。格式：\n"
-    '{"operations":[{"intent":"polish|rewrite|add_section|convert_format|format_docx",'
-    '"verbatim":"该操作对应的用户原话","requirement_ids":["r1"]}],'
-    '"requirements":[{"requirement_id":"r1","verbatim":"用户原话中的一条要求",'
-    '"category":"target|constraint|goal|evidence|other"}],'
-    '"unmapped_text":["无法归类的原话片段"]}\n'
-    "\n"
-    "【五种意图的判别】\n"
-    "- polish：只改语言表达（更通顺/更简洁/更学术），不动事实与结构。\n"
+# --- function calling schema（字段级规矩，与 _SYSTEM 同源）-------------------
+
+_INTENT_RULE = (
+    "该操作的意图，只能取五者之一：\n"
+    "- polish：只改语言表达（更通顺/简洁/学术），不动事实与结构。\n"
     "- rewrite：改内容或组织（补充论证、调整结构、更换叙述角度）。\n"
     "- add_section：新增一个当前不存在的章节。\n"
-    "- convert_format：**换文件格式**——把文档转成/导出为 Word、docx、PDF、"
-    "LaTeX、Markdown 等。关键词：转成、转换为、导出为、另存为某格式。\n"
-    "- format_docx：**只调排版属性**，不换文件格式——字体、字号、行距、对齐、"
-    "缩进、分栏、页边距、页面方向、三线表。\n"
-    "  区分要点：「转成 Word / 转换为 docx / 导出成 markdown」是 convert_format，"
-    "**不是** format_docx；「正文宋体小四、标题居中、双栏」才是 format_docx。\n"
-    "\n"
-    "【切分粒度】\n"
-    "- 一个动作 = 一个操作。**按动作切，不要按诉求条数切。**\n"
-    "- 同一个动作下的多个细节（如「正文宋体小四、标题居中、全文双栏」都是排版）"
-    "必须合并成**一个** format_docx 操作，不要拆成多个。\n"
-    "- 同理，「改写某章并补充论证、引用文献」是**一个** rewrite 操作，"
-    "不要因为提到文献就额外产生 add_section。\n"
-    "- 只有出现明确的先后连接（先…再…、然后、接着、并且再）且动作确实不同时，"
-    "才切分为多个操作。\n"
-    "\n"
-    "【不要硬凑意图】\n"
-    "- 只能使用上面五种意图。用户要求的事情若不属于这五种"
-    "（如翻译、查重、投稿、生成图表、订机票），**必须**把该片段放进 "
-    'unmapped_text，**不要**勉强映射到最接近的意图。宁可留空也不要猜。\n'
-    "\n"
-    "不要计算字符位置；requirement 只给 verbatim 原文。"
+    "- convert_format：**换文件格式**（转成/转换为/导出为 Word、docx、PDF、"
+    "LaTeX、Markdown 等）。\n"
+    "- format_docx：**只调排版属性**，不换文件格式（字体、字号、行距、对齐、"
+    "缩进、分栏、页边距、页面方向、三线表）。\n"
+    "区分要点：「转成 Word / 导出成 markdown」是 convert_format，不是 format_docx。"
 )
 
+_ANALYZE_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "decompose_request",
+        "description": (
+            "把用户消息按其表达顺序拆解为若干操作，并识别其中的原子要求。"
+            "只拆解用户确实表达过的内容，不要臆造。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "operations": {
+                    "type": "array",
+                    "description": (
+                        "按用户表达顺序排列的操作列表。\n"
+                        "切分标准是「(意图, 作用目标) 组合」：组合相同则合并成一个操作，"
+                        "不同则切分。\n"
+                        "- 同一目标上的多个细节要合并：如「正文宋体小四、标题居中、双栏」"
+                        "是对同一文档的排版 → **一个** format_docx。\n"
+                        "- 作用目标不同必须切分（即使意图相同）：如「先润色引言，"
+                        "再润色结论」→ **两个** polish。\n"
+                        "- 意图不同必须切分：如「先润色引言，再转成 docx」→ "
+                        "polish + convert_format。"
+                    ),
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "intent": {"type": "string", "description": _INTENT_RULE},
+                            "verbatim": {
+                                "type": "string",
+                                "description": (
+                                    "该操作对应的用户原话片段，**逐字连续摘取**。\n"
+                                    "必须包含这个操作的**全部**修饰语——目标、程度、"
+                                    "以及所有限制/禁止/须保留类要求（如「别改数字」"
+                                    "「保留引用」「不超过 300 字」）。\n"
+                                    "宁长勿短：后续环节只能看到这段文字，被裁掉的内容"
+                                    "就等于丢失。不要压缩成关键词。"
+                                ),
+                            },
+                            "requirement_ids": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "本操作覆盖的 requirement 的 id。",
+                            },
+                        },
+                        "required": ["intent", "verbatim"],
+                    },
+                },
+                "requirements": {
+                    "type": "array",
+                    "description": (
+                        "消息中各条**原子要求**。一条要求 = 一个独立、可判定是否被满足的"
+                        "诉求；把复合句拆成多条，但每条要**语义完整**"
+                        "（如「别改里面的实验数字」，不要碎成「数字」）。"
+                        "不要计算字符位置。"
+                    ),
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "requirement_id": {
+                                "type": "string",
+                                "description": "本次调用内自定的临时唯一 id，如 r1/r2。",
+                            },
+                            "verbatim": {
+                                "type": "string",
+                                "description": "该要求在用户原话中的**逐字**片段。",
+                            },
+                            "category": {
+                                "type": "string",
+                                "description": (
+                                    "要求类别：target（作用对象）/ constraint（边界约束，"
+                                    "限定不能做什么或须维持什么）/ goal（要达成什么）/ "
+                                    "evidence（证据来源）/ other。"
+                                ),
+                            },
+                        },
+                        "required": ["requirement_id", "verbatim"],
+                    },
+                },
+                "unmapped_text": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "无法归入上述五种意图的原话片段。用户要求的事情若不属于五种意图"
+                        "（如翻译、查重、投稿、生成图表），**必须**放这里，"
+                        "不要勉强映射到最接近的意图。宁可留空也不要猜。"
+                    ),
+                },
+            },
+            "required": ["operations"],
+        },
+    },
+}
 
-def _extract_json(text: str) -> dict:
-    """从模型输出里取第一段 JSON 对象；失败抛 ValueError。"""
-    s = text.strip()
-    # 容忍 ```json ... ``` 包裹
-    if s.startswith("```"):
-        s = s.split("```", 2)[1]
-        if s.startswith("json"):
-            s = s[4:]
-    start = s.find("{")
-    end = s.rfind("}")
-    if start == -1 or end == -1 or end < start:
-        raise ValueError("no json object")
-    return json.loads(s[start:end + 1])
+
+_TOOL_SYSTEM = (
+    "调用工具 decompose_request 拆解用户消息，不要输出正文。"
+    "只拆解用户确实表达过的内容；不属于五种意图的部分放进 unmapped_text，不要硬凑。"
+)
 
 
 def _coerce_result(raw: dict, text: str) -> AnalyzeResult:
@@ -133,35 +196,26 @@ def _coerce_result(raw: dict, text: str) -> AnalyzeResult:
 
 
 def analyze(text: str, llm: LLMProvider) -> AnalyzeResult:
-    """调用 LLM 拆分操作；四态失败分类，绝不塌成空。"""
+    """调用 LLM 拆分操作；四态失败分类，绝不塌成空。
+
+    结构化输出经 `extractors.base.structured_call` 统一收口（与 PreExtractor 同一路径），
+    统一走 function calling：字段规矩写在 `_ANALYZE_TOOL` 的 description 里。
+    """
+    # 延迟导入：避免 operation_analyzer ↔ extractors 的模块级循环依赖。
+    from paper_agent.tasking.extractors.base import structured_call
+
     messages = [
-        Message(role="system", content=_SYSTEM),
+        Message(role="system", content=_TOOL_SYSTEM),
         Message(role="user", content=text),
     ]
-
-    # 1) provider 调用
-    try:
-        resp = llm.complete(messages)
-    except Exception as exc:  # noqa: BLE001
+    call = structured_call(llm, messages, tool_schema=_ANALYZE_TOOL)
+    if call.call_status is not CallStatus.SUCCESS:
         return AnalyzeResult(
-            call_status=CallStatus.PROVIDER_FAILED,
-            error_category=type(exc).__name__,
+            call_status=call.call_status, error_category=call.error_category,
         )
 
-    content = (resp.content or "").strip()
-
-    # 2) JSON 解析
     try:
-        raw = _extract_json(content)
-    except (ValueError, json.JSONDecodeError) as exc:
-        return AnalyzeResult(
-            call_status=CallStatus.PARSE_FAILED,
-            error_category=type(exc).__name__,
-        )
-
-    # 3) 结构组装
-    try:
-        return _coerce_result(raw, text)
+        return _coerce_result(call.payload or {}, text)
     except (KeyError, TypeError, ValueError) as exc:
         return AnalyzeResult(
             call_status=CallStatus.SCHEMA_FAILED,

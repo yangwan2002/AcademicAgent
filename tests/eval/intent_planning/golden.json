@@ -242,6 +242,171 @@
         "constraints": [],
         "atomic_requirements": ["在最后加一个未来工作章节", "简单描述后续研究方向"]
       }
+    },
+    {
+      "id": "constraint_keep_formulas",
+      "message": "润色方法部分，公式一个都不要动",
+      "current_sections": ["introduction", "method"],
+      "current_format": "tex",
+      "expected": {
+        "operations": [{"intent": "polish", "target_hint": "method"}],
+        "constraints": ["公式一个都不要动"],
+        "atomic_requirements": ["润色方法部分", "公式一个都不要动"]
+      }
+    },
+    {
+      "id": "constraint_keep_length",
+      "message": "润色结论，篇幅要和现在差不多",
+      "current_sections": ["introduction", "conclusion"],
+      "current_format": "tex",
+      "expected": {
+        "operations": [{"intent": "polish", "target_hint": "conclusion"}],
+        "constraints": ["篇幅要和现在差不多"],
+        "atomic_requirements": ["润色结论", "篇幅要和现在差不多"]
+      }
+    },
+    {
+      "id": "constraint_no_new_terms",
+      "message": "润色引言，不要引入新的专业术语",
+      "current_sections": ["introduction"],
+      "current_format": "tex",
+      "expected": {
+        "operations": [{"intent": "polish", "target_hint": "introduction"}],
+        "constraints": ["不要引入新的专业术语"],
+        "atomic_requirements": ["润色引言", "不要引入新的专业术语"]
+      }
+    },
+    {
+      "id": "constraint_two_at_once",
+      "message": "润色实验部分，保留所有数字，也别动表格的引用",
+      "current_sections": ["introduction", "experiments"],
+      "current_format": "tex",
+      "expected": {
+        "operations": [{"intent": "polish", "target_hint": "experiments"}],
+        "constraints": ["保留所有数字", "别动表格的引用"],
+        "atomic_requirements": ["润色实验部分", "保留所有数字", "别动表格的引用"]
+      }
+    },
+    {
+      "id": "constraint_word_budget",
+      "message": "精简引言，压到 300 字以内",
+      "current_sections": ["introduction"],
+      "current_format": "tex",
+      "expected": {
+        "operations": [{"intent": "polish", "target_hint": "introduction"}],
+        "constraints": ["压到 300 字以内"],
+        "atomic_requirements": ["精简引言", "压到 300 字以内"]
+      }
+    },
+    {
+      "id": "constraint_keep_structure",
+      "message": "润色相关工作，不要改动段落顺序",
+      "current_sections": ["introduction", "related_work"],
+      "current_format": "tex",
+      "expected": {
+        "operations": [{"intent": "polish", "target_hint": "related_work"}],
+        "constraints": ["不要改动段落顺序"],
+        "atomic_requirements": ["润色相关工作", "不要改动段落顺序"]
+      }
+    },
+    {
+      "id": "constraint_keep_tone",
+      "message": "润色摘要，保持原有的谨慎语气，别把结论说得太强",
+      "current_sections": ["abstract", "introduction"],
+      "current_format": "tex",
+      "expected": {
+        "operations": [{"intent": "polish", "target_hint": "abstract"}],
+        "constraints": ["保持原有的谨慎语气", "别把结论说得太强"],
+        "atomic_requirements": ["润色摘要", "保持原有的谨慎语气", "别把结论说得太强"]
+      }
+    },
+    {
+      "id": "constraint_multi_then_convert",
+      "message": "先润色方法部分、不要改公式和数字，然后导出成 markdown",
+      "current_sections": ["introduction", "method"],
+      "current_format": "tex",
+      "expected": {
+        "operations": [
+          {"intent": "polish", "target_hint": "method"},
+          {"intent": "convert_format", "target_hint": "md"}
+        ],
+        "constraints": ["不要改公式和数字"],
+        "atomic_requirements": ["先润色方法部分", "不要改公式和数字", "然后导出成 markdown"]
+      }
+    },
+    {
+      "id": "constraint_colloquial",
+      "message": "帮我把引言顺一下，读着别扭的地方改改就行，数字千万别碰",
+      "current_sections": ["introduction"],
+      "current_format": "tex",
+      "expected": {
+        "operations": [{"intent": "polish", "target_hint": "introduction"}],
+        "constraints": ["数字千万别碰"],
+        "atomic_requirements": ["把引言顺一下", "读着别扭的地方改改就行", "数字千万别碰"]
+      }
+    },
+    {
+      "id": "multi_three_ops",
+      "message": "先润色引言，再新增一个局限性章节，最后转成 docx",
+      "current_sections": ["introduction", "method", "conclusion"],
+      "current_format": "tex",
+      "expected": {
+        "operations": [
+          {"intent": "polish", "target_hint": "introduction"},
+          {"intent": "add_section", "target_hint": "局限性"},
+          {"intent": "convert_format", "target_hint": "docx"}
+        ],
+        "constraints": [],
+        "atomic_requirements": ["先润色引言", "再新增一个局限性章节", "最后转成 docx"]
+      }
+    },
+    {
+      "id": "format_multi_details_one_op",
+      "message": "正文设成宋体小四、行距 1.5 倍、首行缩进两个字符",
+      "current_sections": ["introduction"],
+      "current_format": "docx",
+      "expected": {
+        "operations": [{"intent": "format_docx", "target_hint": ""}],
+        "constraints": [],
+        "atomic_requirements": ["正文设成宋体小四", "行距 1.5 倍", "首行缩进两个字符"]
+      }
+    },
+    {
+      "id": "convert_pdf_colloquial",
+      "message": "给我导出一份 PDF",
+      "current_sections": ["introduction"],
+      "current_format": "tex",
+      "expected": {
+        "operations": [{"intent": "convert_format", "target_hint": "pdf"}],
+        "constraints": [],
+        "atomic_requirements": ["给我导出一份 PDF"]
+      }
+    },
+    {
+      "id": "illegal_plagiarism_check",
+      "message": "帮我查一下这篇论文的重复率",
+      "current_sections": ["introduction"],
+      "current_format": "tex",
+      "expected": {
+        "operations": [],
+        "constraints": [],
+        "atomic_requirements": [],
+        "expected_unmapped": ["帮我查一下这篇论文的重复率"]
+      }
+    },
+    {
+      "id": "rewrite_two_sections",
+      "message": "先改写引言，再改写结论",
+      "current_sections": ["introduction", "conclusion"],
+      "current_format": "tex",
+      "expected": {
+        "operations": [
+          {"intent": "rewrite", "target_hint": "introduction"},
+          {"intent": "rewrite", "target_hint": "conclusion"}
+        ],
+        "constraints": [],
+        "atomic_requirements": ["先改写引言", "再改写结论"]
+      }
     }
   ]
 }

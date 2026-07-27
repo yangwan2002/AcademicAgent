@@ -47,6 +47,9 @@ from paper_agent.intents.add_section import execute_add_section
 from paper_agent.intents.format_docx import execute_format
 from paper_agent.coordinator import Coordinator
 from paper_agent.errors import OperationCancelled
+from paper_agent.application.console_interactor import ConsolePlanningInteractor
+from paper_agent.application.turn_service import TurnService
+from paper_agent.runtime.handlers import HandlerContext
 from paper_agent.observability.events import EventKind
 from paper_agent.observability.renderer import ConsoleRenderer
 from paper_agent.providers.llm.base import CancellationToken
@@ -96,6 +99,68 @@ def _run_add_section(session, facts, llm, retrieval, verifier, title_hint, posit
         retrieval_provider=retrieval, verifier=verifier, confirm=_confirm_number,
         bus=bus,
     )
+
+
+def _handle_planned_turn(turn_service, msg, *, session, facts, legacy_intent) -> bool:
+    """走 intent-planning 理解层。返回 True 表示本轮已接管（跳过旧链路）。
+
+    - shadow：只读旁路（`legacy` 传 no-op，真正的旧链路仍由调用方在其后执行），
+      打印一行差异对比，返回 False。
+    - active：规划层接管并执行，打印计划结果，返回 True。
+    """
+    try:
+        out = turn_service.handle_turn(
+            msg, session=session, facts=facts,
+            legacy=lambda: None, legacy_intent=legacy_intent,
+        )
+    except OperationCancelled:
+        print("\n已取消。")
+        return True
+    except Exception as exc:  # noqa: BLE001 - 理解层异常绝不拖垮 REPL
+        print(f"\n理解层出错（{type(exc).__name__}），本轮改用原有流程。")
+        return False
+
+    if out.mode == "shadow":
+        s = out.shadow
+        if s is None:
+            return False
+        if s.ok:
+            same = "一致" if s.matches_legacy else "不同"
+            print(
+                f"[shadow] 理解为 {list(s.operation_intents)}（与原路由{same}）；"
+                f"校验={s.validation_result}；耗时 {s.added_latency_ms:.0f}ms"
+            )
+        else:
+            print(f"[shadow] 未完成（{s.analyze_status or s.error}），不影响本次执行")
+        return False   # 旧链路照常继续
+
+    # active
+    _print_plan_outcome(out)
+    return True
+
+
+def _print_plan_outcome(out) -> None:
+    """打印 active 模式的结果（计划出口 或 执行报告）。"""
+    if out.planning_exit is not None:
+        print(f"\n未执行：{out.planning_exit.status.value}"
+              + (f"（{out.planning_exit.message}）" if out.planning_exit.message else ""))
+        return
+    report = out.report
+    if report is None:
+        print("\n本轮没有产生可执行计划。")
+        return
+    print(f"\n计划结果：{report.plan_status.value}")
+    for i, r in enumerate(report.operations, 1):
+        line = f"  {i}. {r.status.value}"
+        if r.message:
+            line += f" — {r.message.splitlines()[0]}"
+        print(line)
+        for path in r.generated_outputs:
+            print(f"     产物：{path}")
+    if report.rollback_available:
+        print("（如需回滚已完成的改动，可用 :undo 逐步撤销）")
+    if any(r.changed_working_copy for r in report.operations):
+        print("（:save 落盘到源文件，:undo 撤销）")
 
 
 def _dispatch(coordinator, intent_name, work, **route_data):
@@ -163,6 +228,31 @@ def main(argv: list[str]) -> int:
     facts.save()
     _remembered = len(facts.claims.get("section_intents", {}))
 
+    # intent-planning 理解层装配（PAPER_INTENT_PLANNING_MODE=off|shadow|active）
+    turn_service = None
+    if config.intent_planning_mode != "off":
+        handler_ctx = HandlerContext(
+            session=session, llm=llm, facts=facts,
+            retrieval_provider=retrieval, verifier=verifier,
+            confirm_number=_confirm_number,
+            max_retry=config.polish_max_retry,
+            max_char_change_ratio=config.polish_max_char_change_ratio,
+            stream=config.stream_enabled,
+        )
+        turn_service = TurnService(
+            config=config, llm=llm,
+            coordinator=coordinator,
+            shadow_coordinator=Coordinator(
+                enable_trace=config.trace_enabled, runs_dir=config.runs_dir
+            ),
+            handler_context=handler_ctx,
+            interactor=ConsolePlanningInteractor(),
+        )
+        print(f"理解层模式：{config.intent_planning_mode}"
+              + ("（接管自然语言请求，支持多操作规划）"
+                 if config.intent_planning_mode == "active"
+                 else "（只旁路记录，执行仍走原流程）"))
+
     index = _build_index(session)
     print(f"已载入 {source}（working: {session.working_path}）")
     print(f"抽取到 {len(facts.known_refs)} 条文献引用、{len(facts.known_numbers)} 个表格数字。")
@@ -203,6 +293,16 @@ def main(argv: list[str]) -> int:
         # 自然语言意图
         index = _build_index(session)
         route = Router(index).route(msg)
+
+        # intent-planning 理解层（默认 off，行为与既有逐字节一致）：
+        # - active：接管整条自然语言链路（多操作规划 → 澄清 → 未映射处置 → 确认 → 有序执行）
+        # - shadow：只旁路分析并记录差异，随后仍走下面的旧链路（旧行为不变）
+        if turn_service is not None and turn_service.mode != "off":
+            if _handle_planned_turn(
+                turn_service, msg, session=session, facts=facts,
+                legacy_intent=route.intent.value,
+            ):
+                continue
 
         if route.intent is Intent.UNCLEAR:
             print(route.note)

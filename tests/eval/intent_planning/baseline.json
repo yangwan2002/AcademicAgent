@@ -1,18 +1,18 @@
 {
   "understanding": {
-    "n_cases": 20,
-    "operation_split_accuracy": 0.95,
+    "n_cases": 34,
+    "operation_split_accuracy": 1.0,
     "single_intent_accuracy": 1.0,
     "constraint_recall": 1.0,
-    "requirement_miss_rate": 0.0,
+    "requirement_miss_rate": 0.0149,
     "silent_loss_total": 0
   },
   "clarification": {
-    "n_cases": 20,
-    "total_asks": 4,
-    "avg_clarification_rounds": 0.15,
+    "n_cases": 34,
+    "total_asks": 1,
+    "avg_clarification_rounds": 0.0294,
     "unnecessary_ask_rate": 0.0,
     "repeat_ask_rate": 0.0,
-    "zero_ask_case_rate": 0.85
+    "zero_ask_case_rate": 0.9706
   }
 }

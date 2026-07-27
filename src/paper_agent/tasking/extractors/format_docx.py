@@ -18,29 +18,11 @@ from __future__ import annotations
 from typing import Any
 
 from paper_agent.intents.router import Intent
-from paper_agent.providers.llm.base import Message
-from paper_agent.tasking.contracts import (
-    AtomicRequirement,
-    FieldStatus,
-    RawOperation,
-    SlotSource,
-    SlotValue,
-)
-from paper_agent.tasking.extractors.base import (
-    PreExtractor,
-    build_extraction_messages,
-)
+from paper_agent.tasking.contracts import FieldStatus, SlotSource, SlotValue
+from paper_agent.tasking.extractors.base import PreExtractor
 from paper_agent.tasking.intent_spec import FORMAT_DOCX_SPEC, IntentSpec, SlotSpec
 
 _LEGAL_SCOPES = ("all", "body", "headings", "heading1")
-
-_SLOT_LINES = [
-    "operations：排版操作数组，每项 {name, value, scope}。name 只能取："
-    "set_font_family/set_font_size/set_bold/set_italic/set_alignment/"
-    "set_line_spacing/set_first_line_indent/set_columns/set_margins/"
-    "set_page_orientation/apply_three_line_tables；scope 取 all/body/headings/heading1。",
-    "scope：文档级作用域（一般 document）；无则 user_absent。",
-]
 
 
 def _legal_op_names() -> set[str]:
@@ -78,18 +60,6 @@ class FormatDocxExtractor(PreExtractor):
 
     def _spec(self) -> IntentSpec:
         return FORMAT_DOCX_SPEC
-
-    def _build_messages(
-        self,
-        operation: RawOperation,
-        canonical_requirements: tuple[AtomicRequirement, ...] | None,
-    ) -> list[Message]:
-        return build_extraction_messages(
-            operation,
-            canonical_requirements,
-            intent_label="排版",
-            slot_lines=_SLOT_LINES,
-        )
 
     def _coerce_slot(self, name: str, slot_spec: SlotSpec, raw: Any) -> SlotValue:
         # 只有 operations 槽走受限 FormatOp 转换；其余槽走通用逻辑。

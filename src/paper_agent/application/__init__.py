@@ -6,10 +6,14 @@
 - active：由 Task 24 接管（本模块预留分派点）。
 """
 
+from paper_agent.application.console_interactor import ConsolePlanningInteractor
 from paper_agent.application.turn_service import (
     PlanningShadowResult,
     TurnService,
     capture_snapshot,
 )
 
-__all__ = ["TurnService", "PlanningShadowResult", "capture_snapshot"]
+__all__ = [
+    "TurnService", "PlanningShadowResult", "capture_snapshot",
+    "ConsolePlanningInteractor",
+]
