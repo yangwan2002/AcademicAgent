@@ -1,0 +1,23 @@
+.kiro/specs/literature-evidence/requirements.md
+  s_f042924d4f2907::t_2ccd3c18a095d2 437-440
+  s_f042924d4f2907::t_de6125cef0979c 924-926
+  s_f042924d4f2907::t_6cbb28cf0be23d 252-254
+.kiro/specs/literature-evidence/design.md
+  s_f042924d4f2907::t_4c95aa905832ae 689
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.38-trip",
+  "base_commit_sha": "d703ba6f4ce3a4820f98a23a6ac378af8bb5d360",
+  "prompts": {},
+  "sessions": {
+    "s_f042924d4f2907": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f8d98-7499-7351-aec9-029b9ee1e142",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "yangwan <yangwan@trip.com>"
+    }
+  }
+}
