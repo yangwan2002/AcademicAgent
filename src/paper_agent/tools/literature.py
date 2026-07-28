@@ -8,9 +8,9 @@
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 
+from paper_agent.literature.bibkey import make_bibkey as _make_bibkey
 from paper_agent.providers.retrieval.base import RetrievalError, RetrievalProvider
 from paper_agent.session.facts import KnownRef, SessionFacts
 from paper_agent.tools.citation import CitationVerifier
@@ -23,25 +23,6 @@ class SearchOutcome:
     requested: int = 0
     verified: int = 0
     error: str = ""
-
-
-def _make_bibkey(entry: ReferenceEntry, taken: set[str]) -> str:
-    author = ""
-    if entry.authors:
-        author = re.sub(r"[^a-zA-Z]", "", entry.authors[0].split()[-1]).lower()
-    year = str(entry.year) if entry.year else ""
-    word = ""
-    for tok in re.findall(r"[a-zA-Z]+", entry.title or ""):
-        if len(tok) > 3:
-            word = tok.lower()
-            break
-    base = (author + year + word) or "ref"
-    key = base
-    n = 2
-    while key in taken:
-        key = f"{base}{n}"
-        n += 1
-    return key
 
 
 def search_and_verify(
