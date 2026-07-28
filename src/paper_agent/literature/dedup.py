@@ -111,8 +111,8 @@ def find_duplicate(
 
     low_hit: DedupMatch | None = None
     for rec in existing:
-        if rec.reference_id == incoming.reference_id:
-            continue
+        if rec is incoming:          # 只跳过同一对象，不按 id 相等跳过
+            continue                 # （同 DOI 的候选会算出相同 id，那正是重复信号）
         # high：任一 work identifier 归一化同值
         shared = incoming_keys & _work_key_set(rec)
         if shared:

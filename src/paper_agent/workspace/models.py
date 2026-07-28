@@ -43,6 +43,15 @@ class ReferenceEntry:
     abstract_sections: dict[str, str] = field(default_factory=dict)
     citation_aliases: list[str] = field(default_factory=list)
     full_text: str = ""
+    # A1：作品级 / 载体级多标识符。默认空 dict → 向后兼容，反射式构造不受影响。
+    # source_id 保留不动（核验/路由/facts 仍用它）；这两个字段供 Ledger 精确去重。
+    work_identifiers: dict[str, str] = field(default_factory=dict)
+    container_identifiers: dict[str, str] = field(default_factory=dict)
+
+
+#: A1 起用语义正确的名字指代「检索候选（无身份、非持久化）」。
+#: 现为 ReferenceEntry 的别名（四个 provider 零改名）；A2 起转正为主名。
+RetrievalCandidate = ReferenceEntry
 
 
 @dataclass

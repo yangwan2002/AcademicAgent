@@ -65,6 +65,13 @@ class Config:
     planning_provider_time_budget_s: float = 120.0  # 单 Turn provider 累计时间预算
     shadow_timeout_s: float = 15.0             # shadow 模式严格短超时
 
+    # ---- literature-evidence / A1（默认值保证行为不变）----
+    literature_strict_verification: bool = False        # 仅 VERIFIED 可引用（不含 legacy）
+    literature_title_similarity: float = 0.85           # 标题相似度阈值
+    literature_dedup_suggestions_enabled: bool = True   # 是否产出低置信去重建议
+    literature_require_final_verification: bool = False  # 是否要求最终核验源（A2 接 Crossref 后开）
+    literature_source_priority: str = "openalex,semantic_scholar,arxiv"  # 同层级源排序
+
 
 # 向后兼容别名：V2 骨架代码里以 RuntimeConfig 指代同一对象。
 RuntimeConfig = Config
@@ -100,6 +107,15 @@ def load_config() -> Config:
             "PAPER_PLANNING_PROVIDER_TIME_BUDGET", 120.0, minimum=0.0
         ),
         shadow_timeout_s=_env_float("PAPER_SHADOW_TIMEOUT", 15.0, minimum=0.0),
+        literature_strict_verification=_env_flag("PAPER_LIT_STRICT_VERIFY", False),
+        literature_title_similarity=_env_float("PAPER_LIT_TITLE_SIM", 0.85, minimum=0.0),
+        literature_dedup_suggestions_enabled=_env_flag("PAPER_LIT_DEDUP_SUGGEST", True),
+        literature_require_final_verification=_env_flag(
+            "PAPER_LIT_REQUIRE_FINAL_VERIFY", False
+        ),
+        literature_source_priority=os.environ.get(
+            "PAPER_LIT_SOURCE_PRIORITY", "openalex,semantic_scholar,arxiv"
+        ),
     )
 
 

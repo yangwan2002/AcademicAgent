@@ -15,7 +15,13 @@ import time
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 
-from paper_agent.providers.retrieval.base import RetrievalError, RetrievalProvider
+from paper_agent.literature.verification import EventKind
+from paper_agent.providers.retrieval.base import (
+    RetrievalError,
+    RetrievalNotFound,
+    RetrievalUnavailable,
+    RetrievalProvider,
+)
 from paper_agent.workspace.models import ReferenceEntry
 
 
@@ -35,6 +41,23 @@ class VerificationResult:
     matched: ReferenceEntry | None = None      # 真实记录（若找到）
     title_score: float = 0.0
     year_matches: bool | None = None            # 年份是否一致（None=无法判断）
+    note: str = ""
+
+
+@dataclass(frozen=True)
+class VerificationAttempt:
+    """一次核验尝试的**带类型**结果（A1）。
+
+    把「查无此文」与「调用失败」区分开（Req 2.7）：``outcome`` 取
+    ``EventKind`` 的四个核验尝试值之一。``verify()`` 的布尔语义 = outcome is VERIFIED，
+    与旧实现逐字节一致（存在即 VERIFIED）。
+    """
+
+    outcome: EventKind
+    matched: ReferenceEntry | None = None
+    title_score: float = 0.0
+    year_matches: bool | None = None
+    error_kind: str = ""       # unavailable | error（仅 PROVIDER_ERROR 时有值）
     note: str = ""
 
 
@@ -76,11 +99,16 @@ class CitationVerifier:
         return result
 
     def _with_retry(self, call):
-        """执行 provider 调用，对 ``RetrievalError`` 有界重试退避；耗尽后重新抛出。"""
+        """执行 provider 调用，对可重试失败有界退避；耗尽后重新抛出。
+
+        ``RetrievalNotFound`` 是**确定性**结果（查无此文），不重试、立即抛出。
+        """
         attempt = 0
         while True:
             try:
                 return call()
+            except RetrievalNotFound:
+                raise
             except RetrievalError:
                 if attempt >= self._max_retries:
                     raise
@@ -90,15 +118,45 @@ class CitationVerifier:
 
     # --- 按 source_id 的存在性核验（Req 4） ---
 
-    def verify(self, entry: ReferenceEntry) -> bool:
-        """核验单条文献是否真实存在（按 source_id 回查）。"""
+    def verify_detailed(self, entry: ReferenceEntry) -> VerificationAttempt:
+        """带类型的存在性核验：区分 VERIFIED / NOT_FOUND / PROVIDER_ERROR。
+
+        A1 保持「存在即 VERIFIED」的口径（不做标题一致性判 CONFLICT，那属 A2），
+        使 :meth:`verify` 的布尔结果与旧实现逐字节一致。
+        """
         if not entry.source_id:
-            return False
+            return VerificationAttempt(EventKind.NOT_FOUND, note="缺少可核验的标识符")
         try:
             found = self._fetch_metadata_cached(entry.source_id)
-        except RetrievalError:
-            return False
-        return found is not None
+        except RetrievalNotFound:
+            return VerificationAttempt(EventKind.NOT_FOUND, note="标识符查无此文")
+        except RetrievalUnavailable as exc:
+            return VerificationAttempt(
+                EventKind.PROVIDER_ERROR, error_kind="unavailable", note=str(exc)
+            )
+        except RetrievalError as exc:
+            return VerificationAttempt(
+                EventKind.PROVIDER_ERROR, error_kind="error", note=str(exc)
+            )
+        if found is None:
+            return VerificationAttempt(EventKind.NOT_FOUND, note="标识符查无此文")
+        score = (
+            title_similarity(entry.title, found.title)
+            if entry.title and found.title
+            else 0.0
+        )
+        year_matches: bool | None
+        if entry.year is None or found.year is None:
+            year_matches = None
+        else:
+            year_matches = entry.year == found.year
+        return VerificationAttempt(
+            EventKind.VERIFIED, matched=found, title_score=score, year_matches=year_matches
+        )
+
+    def verify(self, entry: ReferenceEntry) -> bool:
+        """核验单条文献是否真实存在（按 source_id 回查）。"""
+        return self.verify_detailed(entry).outcome == EventKind.VERIFIED
 
     def verify_and_mark(self, entry: ReferenceEntry) -> ReferenceEntry:
         """返回带 verified 标记的新条目（不原地修改入参）。"""

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import os
 
-from paper_agent.providers.retrieval.base import RetrievalProvider
+from paper_agent.providers.retrieval.base import RetrievalNotFound, RetrievalProvider
 from paper_agent.providers.retrieval.http_util import get_with_retry
 from paper_agent.workspace.models import ReferenceEntry
 
@@ -69,9 +69,11 @@ class OpenAlexRetrievalProvider(RetrievalProvider):
         if "/" in identifier and not identifier.startswith("W"):
             ident = f"https://doi.org/{identifier}"
         url = f"{_WORKS}/{ident}"
+        # 契约（Req 2.7）：返回 None 仅表示查无此文；调用失败一律向上抛
+        # RetrievalUnavailable，绝不用 None 掩盖失败。
         try:
             resp = get_with_retry(url, params=self._base_params(), timeout=self._timeout)
-        except Exception:
+        except RetrievalNotFound:
             return None
         data = resp.json()
         return self._to_entry(data) if data else None
@@ -85,6 +87,19 @@ class OpenAlexRetrievalProvider(RetrievalProvider):
             (a.get("author") or {}).get("display_name", "")
             for a in work.get("authorships", [])
         ]
+        # A1：保留全部标识符（数据本就在响应里，不增加网络调用）。
+        work_ids: dict[str, str] = {}
+        if doi:
+            work_ids["doi"] = doi
+        if openalex_id:
+            work_ids["openalex_work"] = openalex_id
+        container_ids: dict[str, str] = {}
+        primary = work.get("primary_location") or {}
+        src = primary.get("source") if isinstance(primary, dict) else None
+        if isinstance(src, dict):
+            issn_l = src.get("issn_l")
+            if issn_l:
+                container_ids["issn"] = issn_l
         # Round 6：保留 PDF 全文 URL（之前被丢弃）。优先 open_access.oa_url，
         # 其次 primary_location.pdf_url——前者更稳定（OpenAlex 已聚合 OA 来源）。
         pdf_url = ""
@@ -104,4 +119,6 @@ class OpenAlexRetrievalProvider(RetrievalProvider):
             source="openalex",
             abstract=reconstruct_abstract(work.get("abstract_inverted_index")),
             pdf_url=pdf_url,
+            work_identifiers=work_ids,
+            container_identifiers=container_ids,
         )

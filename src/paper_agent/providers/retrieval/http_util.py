@@ -8,14 +8,18 @@ from __future__ import annotations
 
 import time
 
-from paper_agent.providers.retrieval.base import RetrievalError
+from paper_agent.providers.retrieval.base import (
+    RetrievalError,
+    RetrievalNotFound,
+    RetrievalUnavailable,
+)
 
 
 def get_httpx():
     try:
         import httpx  # noqa: WPS433
     except ImportError as exc:  # pragma: no cover - 环境相关
-        raise RetrievalError(
+        raise RetrievalUnavailable(
             "真实检索 provider 需要 httpx：pip install '.[api]'"
         ) from exc
     return httpx
@@ -29,7 +33,13 @@ def get_with_retry(
     max_retries: int = 3,
     backoff: float = 1.5,
 ):
-    """带退避重试的 GET。返回 httpx.Response（已 raise_for_status）。"""
+    """带退避重试的 GET。返回 httpx.Response（已 raise_for_status）。
+
+    异常分层（Req 2.7）：HTTP 404 → :class:`RetrievalNotFound`（查无此文）；
+    429 / 5xx / 超时 / 连接失败（重试耗尽后）以及其余 4xx →
+    :class:`RetrievalUnavailable`（调用失败，非「不存在」）。二者均为
+    :class:`RetrievalError` 子类，既有 ``except RetrievalError`` 调用点不受影响。
+    """
     httpx = get_httpx()
     last_exc: Exception | None = None
     for attempt in range(max_retries + 1):
@@ -37,23 +47,28 @@ def get_with_retry(
             resp = httpx.get(
                 url, params=params, headers=headers or {}, timeout=timeout
             )
+            # 404 立即判「查无此文」，不重试。
+            if resp.status_code == 404:
+                raise RetrievalNotFound(f"HTTP 404: {url}")
             # 429/5xx 视为可重试。
             if resp.status_code == 429 or resp.status_code >= 500:
                 raise _Transient(f"HTTP {resp.status_code}")
             resp.raise_for_status()
             return resp
+        except RetrievalNotFound:
+            raise                       # 不重试、不降级
         except _Transient as exc:
             last_exc = exc
         except Exception as exc:  # noqa: BLE001
-            # 连接/超时类视为可重试；其余直接抛出。
+            # 连接/超时类视为可重试；其余（含非 404 的 4xx）判不可用、直接抛。
             name = type(exc).__name__
             if "Timeout" in name or "Connect" in name or "Read" in name:
                 last_exc = exc
             else:
-                raise RetrievalError(str(exc)) from exc
+                raise RetrievalUnavailable(str(exc)) from exc
         if attempt < max_retries:
             time.sleep(backoff * (2**attempt))
-    raise RetrievalError(f"请求失败（已重试 {max_retries} 次）：{last_exc}")
+    raise RetrievalUnavailable(f"请求失败（已重试 {max_retries} 次）：{last_exc}")
 
 
 class _Transient(Exception):

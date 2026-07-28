@@ -18,6 +18,7 @@ _SAMPLE = [
         year=2023,
         source_id="2301.10140",
         source="arxiv",
+        work_identifiers={"arxiv": "2301.10140"},
     ),
     ReferenceEntry(
         id="arxiv:1706.03762",
@@ -26,6 +27,7 @@ _SAMPLE = [
         year=2017,
         source_id="1706.03762",
         source="arxiv",
+        work_identifiers={"arxiv": "1706.03762"},
     ),
 ]
 

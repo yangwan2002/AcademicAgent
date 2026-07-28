@@ -14,7 +14,12 @@ import os
 import re
 import xml.etree.ElementTree as ET
 
-from paper_agent.providers.retrieval.base import RetrievalError, RetrievalProvider
+from paper_agent.providers.retrieval.base import (
+    RetrievalError,
+    RetrievalNotFound,
+    RetrievalUnavailable,
+    RetrievalProvider,
+)
 from paper_agent.providers.retrieval.http_util import get_with_retry
 from paper_agent.providers.retrieval.openalex import OpenAlexRetrievalProvider
 from paper_agent.workspace.models import ReferenceEntry
@@ -22,6 +27,7 @@ from paper_agent.workspace.models import ReferenceEntry
 _ARXIV_API = "https://export.arxiv.org/api/query"
 _S2_API = "https://api.semanticscholar.org/graph/v1"
 _ATOM = "{http://www.w3.org/2005/Atom}"
+_ARXIV_NS = "{http://arxiv.org/schemas/atom}"   # arXiv 扩展字段（含可选 <arxiv:doi>）
 _VERSION_SUFFIX = re.compile(r"v\d+$")
 
 
@@ -78,6 +84,10 @@ class ArxivRetrievalProvider(RetrievalProvider):
                 for a in entry.findall(f"{_ATOM}author")
             ]
             summary = " ".join((entry.findtext(f"{_ATOM}summary") or "").split())
+            work_ids = {"arxiv": arxiv_id}
+            doi = (entry.findtext(f"{_ARXIV_NS}doi") or "").strip()
+            if doi:
+                work_ids["doi"] = doi
             results.append(
                 ReferenceEntry(
                     id=f"arxiv:{arxiv_id}",
@@ -87,6 +97,7 @@ class ArxivRetrievalProvider(RetrievalProvider):
                     source_id=arxiv_id,
                     source="arxiv",
                     abstract=summary,
+                    work_identifiers=work_ids,
                 )
             )
         return results
@@ -115,26 +126,40 @@ class SemanticScholarRetrievalProvider(RetrievalProvider):
     def fetch_metadata(self, identifier: str) -> ReferenceEntry | None:
         url = f"{_S2_API}/paper/{identifier}"
         params = {"fields": "title,authors,year,externalIds,abstract"}
+        # 契约（Req 2.7）：只吞「查无此文」，调用失败向上抛。
         try:
             resp = get_with_retry(
                 url, params=params, headers=self._headers(), timeout=self._timeout
             )
-        except RetrievalError:
+        except RetrievalNotFound:
             return None
         return self._to_entry(resp.json())
 
     @staticmethod
     def _to_entry(paper: dict) -> ReferenceEntry:
         ext = paper.get("externalIds") or {}
-        source_id = ext.get("DOI") or paper.get("paperId", "")
+        paper_id = paper.get("paperId", "")
+        source_id = ext.get("DOI") or paper_id
+        # A1：保留全部标识符。semantic_scholar_paper 用 paperId（**不用 CorpusId 代替**，
+        # 二者是不同标识符体系）。
+        work_ids: dict[str, str] = {}
+        if paper_id:
+            work_ids["semantic_scholar_paper"] = paper_id
+        if ext.get("DOI"):
+            work_ids["doi"] = ext["DOI"]
+        if ext.get("ArXiv"):
+            work_ids["arxiv"] = ext["ArXiv"]
+        if ext.get("PubMed"):
+            work_ids["pmid"] = ext["PubMed"]
         return ReferenceEntry(
-            id=f"s2:{paper.get('paperId', source_id)}",
+            id=f"s2:{paper_id or source_id}",
             title=paper.get("title", ""),
             authors=[a.get("name", "") for a in paper.get("authors", [])],
             year=paper.get("year"),
             source_id=source_id,
             source="semantic_scholar",
             abstract=paper.get("abstract") or "",
+            work_identifiers=work_ids,
         )
 
 
@@ -179,13 +204,24 @@ class ApiRetrievalProvider(RetrievalProvider):
     def fetch_metadata(self, identifier: str) -> ReferenceEntry | None:
         # #6：按 identifier 形态路由——arxiv id 直接走 arxiv，避免对每个 arxiv id
         # 都白打一次 OpenAlex 404（既慢又消耗限额）。其余按原顺序尝试所有源。
+        #
+        # 契约（Req 2.7）：区分「都说没有」与「都没问到」。某源返回 None（查无此文）
+        # → 继续问下一个源；某源抛 RetrievalUnavailable → 记下但继续；命中即返回。
+        # 全部源都返回 None → None；无命中但有源不可用 → 抛 RetrievalUnavailable，
+        # 绝不把「没问到」伪装成「不存在」。
+        saw_unavailable: RetrievalUnavailable | None = None
         for provider in self._route_order(identifier):
             try:
                 found = provider.fetch_metadata(identifier)
+            except RetrievalUnavailable as exc:
+                saw_unavailable = exc
+                continue
             except RetrievalError:
                 continue
             if found is not None:
                 return found
+        if saw_unavailable is not None:
+            raise saw_unavailable
         return None
 
     def _route_order(self, identifier: str) -> list[RetrievalProvider]:

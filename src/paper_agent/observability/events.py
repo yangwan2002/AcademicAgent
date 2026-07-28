@@ -81,6 +81,11 @@ class EventKind(str, Enum):
     OPERATION_RESULT = "operation_result"         # 单操作结果（succeeded/rejected/...）
     PLAN_RESULT = "plan_result"                   # 计划最终结果（done/partial/...）
 
+    # --- 文献账本（literature-evidence / A1）---
+    # 单条文献 upsert 的脱敏摘要（action / dedup 依据与置信 / 冲突数 / 核验状态 /
+    # legacy 标记）。A1 登记事件种类；实际发布待 A2 检索 Loop 接入 bus。
+    REFERENCE_LEDGER_UPSERT = "reference_ledger_upsert"
+
 
 # 敏感的临时原文事件：允许 ConsoleRenderer 实时显示、TraceRecorder 计算
 # hash/preview，但**禁止**写入完整 trace.json、普通日志、错误报告或第三方
