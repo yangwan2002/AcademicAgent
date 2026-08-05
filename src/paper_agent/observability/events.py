@@ -75,6 +75,7 @@ class EventKind(str, Enum):
     PLAN_VALIDATION = "plan_validation"           # 计划静态校验结果
     CLARIFICATION_QA = "clarification_qa"         # 澄清问答（脱敏）
     UNMAPPED_RESOLUTION = "unmapped_resolution"   # 未映射要求的用户处置
+    PROJECT_FACT_RECORDED = "project_fact_recorded"  # 项目级陈述写入 claims（X-11）
     PLAN_CONFIRMED = "plan_confirmed"             # 用户确认计划
     PLAN_REJECTED = "plan_rejected"               # 用户否决计划
     PLAN_CANCELLED = "plan_cancelled"             # 计划执行中取消（finalize 前发布）

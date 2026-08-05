@@ -1,0 +1,136 @@
+{
+  "schema_version": "retrieval-throughput-b2-gate-report-v1",
+  "network_used": false,
+  "profile_id": "literature-20-zh5-en15-v1",
+  "profile_hash": "d2b8d03f12e78cfa445b9021d42503179af8cc8f69c3cb092f522e08f44a0c23",
+  "runs_per_mode": 30,
+  "workload": {
+    "candidates": 30,
+    "expected_accepted": 20,
+    "expected_languages": {
+      "en": 15,
+      "zh": 5
+    },
+    "raw_text_persisted": false,
+    "timing_basis": "deterministic_simulated_monotonic"
+  },
+  "modes": {
+    "legacy": {
+      "runs": 30,
+      "active_elapsed_s": {
+        "p50": 14.6,
+        "p95": 14.6
+      },
+      "calls_per_run": {
+        "search": 1,
+        "llm": 26,
+        "verify": 28
+      },
+      "candidates_per_run": 30,
+      "accepted_per_run": 20,
+      "accepted_languages": {
+        "en": 15,
+        "zh": 5
+      },
+      "quota_completion_rate": 1.0,
+      "attrition_per_run": {
+        "filter": 2,
+        "relevance": 6,
+        "verify": 2,
+        "other": 0
+      },
+      "survivors_per_run": 20,
+      "relevance_errors": 0,
+      "provider_errors": 0,
+      "timeouts": 0,
+      "budget_stops": 0
+    },
+    "b1": {
+      "runs": 30,
+      "active_elapsed_s": {
+        "p50": 4.6,
+        "p95": 4.6
+      },
+      "calls_per_run": {
+        "search": 1,
+        "llm": 6,
+        "verify": 28
+      },
+      "candidates_per_run": 30,
+      "accepted_per_run": 20,
+      "accepted_languages": {
+        "en": 15,
+        "zh": 5
+      },
+      "quota_completion_rate": 1.0,
+      "attrition_per_run": {
+        "filter": 2,
+        "relevance": 6,
+        "verify": 2,
+        "other": 0
+      },
+      "survivors_per_run": 20,
+      "relevance_errors": 0,
+      "provider_errors": 0,
+      "timeouts": 0,
+      "budget_stops": 0
+    },
+    "b1_b2": {
+      "runs": 30,
+      "active_elapsed_s": {
+        "p50": 4.3,
+        "p95": 4.3
+      },
+      "calls_per_run": {
+        "search": 1,
+        "llm": 6,
+        "verify": 22
+      },
+      "candidates_per_run": 30,
+      "accepted_per_run": 20,
+      "accepted_languages": {
+        "en": 15,
+        "zh": 5
+      },
+      "quota_completion_rate": 1.0,
+      "attrition_per_run": {
+        "filter": 2,
+        "relevance": 6,
+        "verify": 2,
+        "other": 0
+      },
+      "survivors_per_run": 22,
+      "relevance_errors": 0,
+      "provider_errors": 0,
+      "timeouts": 0,
+      "budget_stops": 0
+    }
+  },
+  "paired": {
+    "final_semantics_equal": true,
+    "b1_verify_calls": 28,
+    "b1_b2_verify_calls": 22,
+    "verify_calls_saved": 6,
+    "verify_reduction_ratio": 0.214286,
+    "active_time_reduction_ratio_vs_b1": 0.065217,
+    "zero_survivor_verify_calls": 0
+  },
+  "checks": {
+    "paired_final_semantics_equal": true,
+    "b2_verify_calls_not_above_survivors": true,
+    "b2_verify_calls_reduced": true,
+    "zero_survivor_zero_verify": true,
+    "strict_quota_complete_all_modes": true,
+    "no_relevance_errors_or_budget_stops": true,
+    "rollback_restores_b1_order_and_key": true,
+    "legacy_golden_unchanged": true,
+    "b2_default_off": true,
+    "replay_minimum_met": true
+  },
+  "engineering_gate": "B2_ENGINEERING_GO_DEFAULT_OFF",
+  "release_gate": {
+    "status": "NO_GO_B1_HUMAN_ADJUDICATION_PENDING",
+    "human_adjudicated_cases": 0,
+    "required_cases": 40
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "schema_version": "retrieval-throughput-legacy-golden-v1",
+  "snapshot_sha256": "9e80fc6d7d40bd5904a28e4be577d764f731907ab8c1403fdf43d29069d4f16a",
+  "semantic_summary": {
+    "budget_stop": {
+      "calls": {"reviewer": 0, "search": 1, "verify": 0, "verify_budget": 0},
+      "dispositions": [],
+      "stats": {"accept_new": 0, "budget_stopped": true, "candidates": 1, "failed_sources": 0, "merge": 0, "reject": 0, "relevance_calls": 0, "reuse": 0}
+    },
+    "cache_reuse": {
+      "first": {
+        "calls": {"reviewer": 1, "search": 1, "verify": 1, "verify_budget": 1},
+        "dispositions": ["accept_new"],
+        "stats": {"accept_new": 1, "budget_stopped": false, "candidates": 1, "failed_sources": 0, "merge": 0, "reject": 0, "relevance_calls": 1, "reuse": 0}
+      },
+      "second": {
+        "calls": {"reviewer": 0, "search": 1, "verify": 1, "verify_budget": 1},
+        "dispositions": ["accept_new"],
+        "stats": {"accept_new": 1, "budget_stopped": false, "candidates": 1, "failed_sources": 0, "merge": 0, "reject": 0, "relevance_calls": 1, "reuse": 0}
+      }
+    },
+    "mixed_pipeline": {
+      "calls": {"reviewer": 5, "search": 1, "verify": 7, "verify_budget": 7},
+      "dispositions": ["accept_new", "reject", "reject", "reject", "reject", "reject", "reject", "accept_new"],
+      "stats": {"accept_new": 2, "budget_stopped": false, "candidates": 8, "failed_sources": 0, "merge": 0, "reject": 6, "relevance_calls": 5, "reuse": 0}
+    },
+    "reuse_and_merge": {
+      "merge": {
+        "calls": {"reviewer": 1, "search": 1, "verify": 0, "verify_budget": 0},
+        "dispositions": ["merge_duplicate"],
+        "stats": {"accept_new": 0, "budget_stopped": false, "candidates": 1, "failed_sources": 0, "merge": 1, "reject": 0, "relevance_calls": 1, "reuse": 0}
+      },
+      "reuse": {
+        "calls": {"reviewer": 1, "search": 1, "verify": 0, "verify_budget": 0},
+        "dispositions": ["reuse_existing"],
+        "stats": {"accept_new": 0, "budget_stopped": false, "candidates": 1, "failed_sources": 0, "merge": 0, "reject": 0, "relevance_calls": 1, "reuse": 1}
+      }
+    },
+    "source_failure": {
+      "calls": {"reviewer": 0, "search": 1, "verify": 0, "verify_budget": 0},
+      "dispositions": [],
+      "stats": {"accept_new": 0, "budget_stopped": false, "candidates": 0, "failed_sources": 1, "merge": 0, "reject": 0, "relevance_calls": 0, "reuse": 0}
+    }
+  }
+}

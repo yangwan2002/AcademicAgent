@@ -25,7 +25,6 @@ present/user_absent/ambiguous/invalid/unavailable，绝不产出 defaulted。
 
 from __future__ import annotations
 
-import json
 import re
 from abc import ABC, abstractmethod
 from dataclasses import replace
@@ -33,9 +32,13 @@ from typing import Any
 
 from paper_agent.intents.router import Intent
 from paper_agent.providers.llm.base import LLMProvider, Message
+from paper_agent.providers.llm.structured import (
+    CallStatus,
+    StructuredCallResult,
+    structured_call,
+)
 from paper_agent.tasking.contracts import (
     AtomicRequirement,
-    CallStatus,
     ExtractionResult,
     FieldStatus,
     RawOperation,
@@ -47,135 +50,73 @@ from paper_agent.tasking.operation_analyzer import new_requirement_id
 from paper_agent.tasking.spans import locate_requirement
 
 
-# --- 结构化调用收敛点 ---------------------------------------------------------
-
-class StructuredCallResult:
-    """一次结构化调用的结果：调用态 + payload（成功时）+ 错误类别。"""
-
-    __slots__ = ("call_status", "payload", "error_category")
-
-    def __init__(
-        self,
-        call_status: CallStatus,
-        payload: dict | None = None,
-        error_category: str | None = None,
-    ) -> None:
-        self.call_status = call_status
-        self.payload = payload
-        self.error_category = error_category
-
-
-def _extract_json_object(text: str) -> dict:
-    """从模型文本输出里取第一段 JSON 对象；失败抛 ValueError/JSONDecodeError。"""
-    s = text.strip()
-    if s.startswith("```"):
-        s = s.split("```", 2)[1]
-        if s.startswith("json"):
-            s = s[4:]
-    start = s.find("{")
-    end = s.rfind("}")
-    if start == -1 or end == -1 or end < start:
-        raise ValueError("no json object")
-    obj = json.loads(s[start:end + 1])
-    if not isinstance(obj, dict):
-        raise ValueError("not a json object")
-    return obj
-
-
-def _forced_tool_name(tool_schema: dict) -> str:
-    """要强制调用的工具名。**协议形态由各 provider 自行适配**（#8）——
-    统一层只传 `forced_tool_name`，不拼 Anthropic/OpenAI 各异的 `tool_choice` 结构。
-    """
-    fn = tool_schema.get("function", tool_schema) if isinstance(tool_schema, dict) else {}
-    return str(fn.get("name", "") or "")
-
-
-# 只有「参数不被支持」才值得去掉 forced_tool_name 重试一次；
-# 超时/限流/网络错误重试会造成重复请求与延迟翻倍（由 Resilient 层负责退避）。
-_UNSUPPORTED_HINTS = (
-    "forced_tool_name", "tool_choice", "unexpected keyword", "unknown parameter",
-    "unsupported parameter", "invalid_request_error", "extra fields not permitted",
-)
-
-
-def _looks_unsupported(exc: Exception) -> bool:
-    text = f"{type(exc).__name__}: {exc}".lower()
-    if isinstance(exc, TypeError):
-        return True          # provider 签名不认识该参数
-    return any(h in text for h in _UNSUPPORTED_HINTS)
-
-
-def structured_call(
-    llm: LLMProvider,
-    messages: list[Message],
-    *,
-    tool_schema: dict | None = None,
-) -> StructuredCallResult:
-    """调 LLM 拿结构化 payload；四态失败分类，绝不塌成空。
-
-    统一走 function calling（`tool_schema` 必给）：`tool_choice` 强制调用，读
-    `tool_calls[0].arguments`；模型若未走工具而回了正文，则按 JSON 兜底解析。
-    未提供 `tool_schema` 时退化为「解析正文 JSON」（仅供无 schema 的调用方）。
-
-    这是全项目结构化输出的唯一收敛点；换实现只改此函数。
-    """
-    # 1) provider 调用
-    use_tools = tool_schema is not None
-    try:
-        if use_tools:
-            # 只传中立的 forced_tool_name；具体 tool_choice 形态由 provider 适配。
-            resp = llm.complete(
-                messages, tools=[tool_schema],
-                forced_tool_name=_forced_tool_name(tool_schema),
-            )
-        else:
-            resp = llm.complete(messages)
-    except Exception as exc:  # noqa: BLE001
-        # **只**在「该参数不被支持」时降级重试一次；超时/限流等一律直接失败，
-        # 交由 Resilient 层退避，避免重复请求与延迟翻倍（#8）。
-        if use_tools and _looks_unsupported(exc):
-            try:
-                resp = llm.complete(messages, tools=[tool_schema])
-            except Exception as exc2:  # noqa: BLE001
-                return StructuredCallResult(
-                    CallStatus.PROVIDER_FAILED, None, type(exc2).__name__
-                )
-        else:
-            return StructuredCallResult(
-                CallStatus.PROVIDER_FAILED, None, type(exc).__name__
-            )
-
-    # 2) 取 payload
-    if use_tools:
-        calls = getattr(resp, "tool_calls", None) or []
-        if calls:
-            args = calls[0].arguments
-            if isinstance(args, dict):
-                return StructuredCallResult(CallStatus.SUCCESS, args, None)
-            return StructuredCallResult(
-                CallStatus.SCHEMA_FAILED, None, "tool_args_not_dict"
-            )
-        # 模型没走工具而是回了正文 → 兜底按 JSON 解析（不塌成失败）；
-        # 正文也不是 JSON → parse_failed（确实"解析"失败，非结构不符）。
-        try:
-            payload = _extract_json_object((resp.content or "").strip())
-        except (ValueError, json.JSONDecodeError) as exc:
-            return StructuredCallResult(
-                CallStatus.PARSE_FAILED, None, type(exc).__name__
-            )
-        return StructuredCallResult(CallStatus.SUCCESS, payload, None)
-
-    content = (resp.content or "").strip()
-    try:
-        payload = _extract_json_object(content)
-    except (ValueError, json.JSONDecodeError) as exc:
-        return StructuredCallResult(CallStatus.PARSE_FAILED, None, type(exc).__name__)
-    return StructuredCallResult(CallStatus.SUCCESS, payload, None)
+# --- 结构化调用收敛点：已迁至 providers/llm/structured.py（A2a）---------------
+# `CallStatus` / `StructuredCallResult` / `structured_call` 从中立模块导入并在下方
+# __all__ re-export，既有 `from ...extractors.base import structured_call` 零改动。
 
 
 # --- 抽取器基类 ---------------------------------------------------------------
 
 _VALUED_STATUSES = (FieldStatus.PRESENT, FieldStatus.AMBIGUOUS, FieldStatus.INVALID)
+
+
+def _unwrap_slot_payload(raw) -> dict:
+    """把 payload 里的一项归一成「信封」形态 `{value, status, ...}`。
+
+    模型有两种写法，都要容忍：
+
+    ==========  ==================================================
+    信封形态     ``{"value": X, "status": "present"}``
+    裸值形态     ``X``
+    ==========  ==================================================
+
+    **历史缺陷**：判据原本是 `isinstance(raw, dict)` —— 裸值恰好是 dict 时
+    （object 型槽位，如 `citation_quota` 的 ``{"filters": [...], "constraints": [...]}``）
+    会被误认成信封，于是 `raw.get("value")` 得到 `None` → 静默判成 `user_absent`。
+    而 `build_tool_schema` 生成的是**扁平** schema，模型必然发裸值形态，
+    **object 型槽位因此从未被读到过**：路由修好、文本送到、模型正确填了配额，
+    值仍会在这里被丢掉。
+
+    正确判据是**看有没有信封的标志键**，而不是看类型。当前所有 object 型槽位的
+    顶层属性都不含 `value` / `status`（`RAW_QUOTA_JSON_SCHEMA` 是
+    `filters` / `constraints` / `explicit_scope`），故无歧义。
+    """
+    if not isinstance(raw, dict):
+        return {"value": raw}
+    if "value" in raw or "status" in raw:
+        return raw
+    return {"value": raw}
+
+
+def _is_empty_shell(value) -> bool:
+    """各层皆空的容器。递归。
+
+    算「空」的：`None` / `[]` / `{}` / `""`（含纯空白）/ 各层皆空的嵌套组合。
+    空字符串必须算空 —— 否则 ``{"filters": [], "constraints": [], "explicit_scope": ""}``
+    这种「模型把可选字段填成空串」的写法会逃过判定。
+    """
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return value.strip() == ""
+    if isinstance(value, (list, tuple)):
+        return len(value) == 0
+    if isinstance(value, dict):
+        return all(_is_empty_shell(v) for v in value.values())
+    return False
+
+
+def _is_empty_object(slot_spec: SlotSpec, value) -> bool:
+    """仅对 **object 型**槽位判定空壳。
+
+    **刻意不覆盖 array 型槽位**：`constraints` / `presets` / `subsections` 的空列表
+    在现状下记 `present`（`source=user_explicit`），PlanBuilder 保留 `[]`；
+    若改判 `user_absent`，最终值仍是 `[]`（由 `default_factory` 填）但
+    `source` 会变成 `defaulted` —— 这是**可观测的行为变化**，会破坏保持性比对，
+    且与本次缺陷无关。收窄到 object 型即可覆盖 `citation_quota`
+    （当前唯一的 object 槽），且判据是**类型**而非槽位名，故不是单槽位特判。
+    """
+    return getattr(slot_spec, "value_type", "string") == "object" and _is_empty_shell(value)
 
 
 class PreExtractor(ABC):
@@ -271,7 +212,10 @@ class PreExtractor(ABC):
                 )
         return [
             Message(role="system", content="\n".join(parts)),
-            Message(role="user", content=operation.verbatim),
+            Message(
+                role="user",
+                content=build_extractor_user_text(operation, canonical_requirements),
+            ),
         ]
 
     def _post_process(self, slots: dict[str, SlotValue]) -> dict[str, SlotValue]:
@@ -339,8 +283,7 @@ class PreExtractor(ABC):
         抽取器**不填默认值**（D10），故只会产出 present/user_absent/ambiguous/
         invalid，绝不 defaulted。
         """
-        if not isinstance(raw, dict):
-            raw = {"value": raw}
+        raw = _unwrap_slot_payload(raw)
 
         status_str = str(raw.get("status", "present"))
         try:
@@ -357,6 +300,19 @@ class PreExtractor(ABC):
         value = raw.get("value")
         if status is FieldStatus.PRESENT and value is None:
             status = FieldStatus.USER_ABSENT
+        elif status is FieldStatus.PRESENT and _is_empty_object(slot_spec, value):
+            # 空壳对象（如 {"filters": [], "constraints": []}）语义上等于「没有配额」。
+            # 若记 present，下游「该要求是否被承载」的判定会对空壳返回 true ——
+            # 验证器报「已修复」而实际没有配额。**验证器不能被哄骗。**
+            #
+            # 能到这一行说明模型**发出了这个键**（`_parse_payload` 里 key 缺失时
+            # 直接记 USER_ABSENT、不进本函数），即「模型试过但产出空壳」：
+            #   - 该槽声明了 clarify_if_user_invalid → INVALID，走澄清
+            #   - 否则 → USER_ABSENT，由 PlanBuilder 填默认
+            status = (
+                FieldStatus.INVALID if slot_spec.clarify_if_user_invalid
+                else FieldStatus.USER_ABSENT
+            )
 
         source: SlotSource | None = None
         if status is FieldStatus.PRESENT:
@@ -435,6 +391,60 @@ class PreExtractor(ABC):
             return value, False
 
 
+# --- 抽取器看到的「用户说的话」------------------------------------------------
+
+#: 句末标点：已有则不再补「。」，避免拼出「…部分。。要求：」这种。
+_SENTENCE_END = ("。", "，", "；", "：", "!", "?", ".", ",", ";", ":", "！", "？")
+
+
+def build_extractor_user_text(
+    operation: RawOperation,
+    canonical_requirements: tuple[AtomicRequirement, ...] | None,
+) -> str:
+    """组装抽取器的 user 消息内容 = 操作原话 + 归属于它的要求原话。
+
+    **这里曾是真机缺陷的所在（2026-08-01）。** 此前只有 `operation.verbatim`：
+
+    ==============  ==========================================================
+    用户原话         …你能帮我完善我的引言部分吗，要求参考文献10，英文8，中文2
+    analyzer 切片    完善我的引言部分
+    抽取器看到       完善我的引言部分          ← 一个数字都没有
+    ==============  ==========================================================
+
+    于是模型按 `citation_quota` 槽位说明「仅当用户明确提出篇数/语言配额时给出；
+    没提就不要给」**正确地**省略了该槽 —— 三条配额落 unmapped，计划里没有配额，
+    执行会产出一篇零引用的引言。槽位、绑定、schema 全都在位，缺的只是输入。
+
+    **为什么放 user 消息而不是继续留在 system**：要求列表此前**已经**在 system
+    里（见 `_build_tool_messages` 的「该操作已识别出以下要求」），模型仍然没填
+    —— 因为 user 消息与槽位 description 都在说「用户没提配额」，两个信号冲突时
+    模型采信了后者。同一信息放在不同位置权重不同：**用户说了什么，就应当出现在
+    user 消息里。**
+
+    去重：要求原话已包含在 `verbatim` 内时不重复追加（analyzer 若把修饰语一起
+    摘进了切片，这是正常且更好的情况，不该因此喂两遍）。
+    """
+    text = (operation.verbatim or "").strip()
+    if not canonical_requirements:
+        return text
+
+    extras: list[str] = []
+    seen: set[str] = set()
+    for r in canonical_requirements:
+        v = (r.verbatim or "").strip()
+        if not v or v in text or v in seen:
+            continue
+        seen.add(v)
+        extras.append(v)
+    if not extras:
+        return text
+    joined = "要求：" + "；".join(extras)
+    if not text:
+        return joined
+    sep = "" if text.endswith(_SENTENCE_END) else "。"
+    return f"{text}{sep}{joined}"
+
+
 # --- function calling schema（由 IntentSpec 自动生成）-------------------------
 
 _FORMAT_OP_SCHEMA = {
@@ -450,6 +460,14 @@ _FORMAT_OP_SCHEMA = {
 
 def _slot_property(spec_slot) -> dict:
     """把一个 SlotSpec 映射为 JSON schema 属性（类型 + 字段级规矩 description）。"""
+    # 显式 override（嵌套结构，如配额）优先，原样使用（A2b D10）。
+    override = getattr(spec_slot, "json_schema_override", None)
+    if override is not None:
+        prop = dict(override)
+        desc = getattr(spec_slot, "description", "") or ""
+        if desc and "description" not in prop:
+            prop["description"] = desc
+        return prop
     vt = getattr(spec_slot, "value_type", "string") or "string"
     prop: dict
     if vt == "array":
@@ -508,19 +526,53 @@ def _norm_text(s: object) -> str:
     return re.sub(r"\s+", "", str(s)).lower()
 
 
-def _slot_text(sv: SlotValue) -> str:
-    """一个槽位承载的全部文本（值 + verbatim），用于匹配 requirement 原话。"""
+def _collect_verbatims(v: object, out: list[str]) -> None:
+    """递归收集嵌套结构里所有 ``verbatim`` 字段（结构化槽位的原话来源）。
+
+    嵌套槽位（如 `citation_quota`）的 schema 已要求每个 clause 自带 `verbatim`
+    （见 `intent_spec._RAW_COUNT_CLAUSE_SCHEMA`），模型也确实在填——**此前无人读**。
+    """
+    if isinstance(v, dict):
+        for key, val in v.items():
+            if key == "verbatim" and isinstance(val, str) and val.strip():
+                out.append(val)
+            else:
+                _collect_verbatims(val, out)
+    elif isinstance(v, (list, tuple)):
+        for item in v:
+            _collect_verbatims(item, out)
+
+
+def _slot_texts(sv: SlotValue) -> list[str]:
+    """一个槽位可用于认领 requirement 的**文本片段列表**（各自独立匹配）。
+
+    分片而非拼成一坨,是 X-11 的修复要点：结构化槽位（dict/list）序列化后,
+    用户原话里相邻的两句会被 dict 语法切开（`'英文8篇'},{'dimension':...`）,
+    子串匹配要求连续 ⇒ **任何嵌套槽位恒定 100% 漏报**。
+    改为逐 clause 的 `verbatim` 独立匹配后,「英文 8 篇」「中文 2 篇」各自可认领。
+    """
     parts: list[str] = []
     if sv.verbatim:
         parts.append(str(sv.verbatim))
     v = sv.value
     if isinstance(v, str):
         parts.append(v)
+    elif isinstance(v, dict):
+        _collect_verbatims(v, parts)          # 结构化槽位：只认 verbatim，不吞 dict 语法
     elif isinstance(v, (list, tuple)):
-        parts.extend(str(x) for x in v)
+        for item in v:
+            if isinstance(item, str):
+                parts.append(item)
+            else:
+                _collect_verbatims(item, parts)
     elif v is not None:
         parts.append(str(v))
-    return _norm_text(" ".join(parts))
+    return [t for t in (_norm_text(p) for p in parts) if t]
+
+
+def _slot_text(sv: SlotValue) -> str:
+    """一个槽位承载的全部文本（值 + verbatim）。保留给既有调用方/测试。"""
+    return "".join(_slot_texts(sv))
 
 
 def _infer_consumption(
@@ -532,13 +584,17 @@ def _infer_consumption(
     只对**已有取值**的槽位推断；模型已显式给出 `requirement_ids` 的槽位保持原样
     （显式优先）。匹配用归一化双向子串包含，与 golden 打分器同一口径。
 
+    每个槽位贡献**多个**候选文本（`_slot_texts`）：结构化槽位按 clause 的 verbatim
+    分片。任一片匹配即算该槽消费，修 X-11「嵌套槽位恒漏报」。
+
     返回 `(新的 slots, 被消费的 requirement id 列表)`。
     """
     texts = {
-        name: _slot_text(sv)
+        name: _slot_texts(sv)
         for name, sv in slots.items()
         if sv.field_status in _VALUED_STATUSES and sv.value is not None
     }
+    texts = {k: v for k, v in texts.items() if v}
     if not texts:
         return slots, []
 
@@ -553,13 +609,14 @@ def _infer_consumption(
             consumed.append(req.requirement_id)
             continue
         best: str | None = None
-        for name, text in texts.items():
-            if not text:
-                continue
-            if needle in text or text in needle:
-                # 取匹配文本最短者（最贴切的那个槽位）
-                if best is None or len(text) < len(texts[best]):
-                    best = name
+        best_len: int | None = None
+        for name, fragments in texts.items():
+            for text in fragments:
+                if needle in text or text in needle:
+                    # 取匹配片段最短者（最贴切的那个槽位）
+                    if best_len is None or len(text) < best_len:
+                        best, best_len = name, len(text)
+                    break
         if best is not None:
             additions.setdefault(best, []).append(req.requirement_id)
             consumed.append(req.requirement_id)
@@ -610,5 +667,6 @@ __all__ = [
     "StructuredCallResult",
     "structured_call",
     "build_tool_schema",
+    "build_extractor_user_text",
     "derive_want_search",
 ]

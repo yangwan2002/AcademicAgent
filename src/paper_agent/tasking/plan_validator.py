@@ -23,7 +23,11 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from paper_agent.intents.router import Intent
-from paper_agent.session.section_index import slugify
+from paper_agent.session.section_index import (
+    match_key,
+    slugify,
+    supports_sections,
+)
 from paper_agent.tasking.contracts import (
     FieldStatus,
     Operation,
@@ -39,10 +43,14 @@ SECTION_EXISTS = "section_exists"
 CONVERT_NOT_TERMINAL = "convert_not_terminal"
 CONVERT_SAME_FORMAT = "convert_same_format"
 FORMAT_REQUIRES_DOCX = "format_requires_docx"
+FORMAT_LACKS_SECTIONS = "format_lacks_sections"
 CONFLICTING_CONSTRAINTS = "conflicting_constraints"
 UNSUPPORTED_INTENT = "unsupported_intent"
 
 _EDIT_INTENTS = (Intent.POLISH, Intent.REWRITE)
+#: 需要按章节定位的意图。格式解析不出章节时，这些意图的**根因是格式**，
+#: 报 section_not_found 会把用户引向「章节名写错了吗」这条错误的排查方向。
+_SECTION_INTENTS = (Intent.POLISH, Intent.REWRITE, Intent.ADD_SECTION)
 
 
 def _norm(value: object) -> str:
@@ -58,13 +66,32 @@ def _norm_ext(value: object) -> str:
 
 
 def _matches(value: object, projected: set[str]) -> bool:
-    """章节是否落在投影集里（归一相等或宽松包含，呼应 SectionIndex.find）。"""
+    """章节是否落在投影集里。判据与 `SectionIndex.find` **共用** `match_key`。
+
+    此前这里是一份独立实现（注释写「呼应 SectionIndex.find」——呼应但不共用），
+    于是两边可以各自漂移。真机 2026-08-01：LLM 填 `section_id="引言部分"`，
+    文档章节是「1 引言」（slug `1_引言`），双向包含两个方向都不成立
+    （`引言部分` ⊄ `1_引言`，`1_引言` ⊄ `引言部分`），计划期误报 section_not_found。
+    根因是**章节编号前缀**，由 `match_key` 剥离。
+
+    注意 `projected` 是**已归一的扁平集合**（含 id 与标题，还含前序 add_section
+    将创建的标题），拿不到 (id, title) 配对，故不能直接调 `anchor_match_rank`；
+    但去编号这一关键步骤共用同一函数，不会再分叉。
+    """
     key = _norm(value)
     if not key:
         return False
     if key in projected:
         return True
-    return any(key in p or p in key for p in projected)
+    if any(key in p or p in key for p in projected):
+        return True
+    mk = match_key(value)
+    if not mk:
+        return False
+    return any(
+        pk and (pk == mk or pk in mk or mk in pk)
+        for pk in (match_key(p) for p in projected)
+    )
 
 
 def _position_ref(op: Operation) -> str | None:
@@ -117,6 +144,20 @@ def validate_plan(
             issues.append(ValidationIssue(op.operation_id, UNSUPPORTED_INTENT,
                                           f"不支持的意图：{op.intent.value}"))
             continue
+
+        # 格式能力先于章节存在性：docx 等格式解析不出章节，投影集合必然为空，
+        # 若不先在此拦下，下面会报 section_not_found —— 把根因说成表象。
+        # `current_format` 为空表示未知 → 沿用「相关检查跳过」的既有语义。
+        if (op.intent in _SECTION_INTENTS and current_format
+                and not supports_sections(current_format)):
+            issues.append(ValidationIssue(
+                op.operation_id, FORMAT_LACKS_SECTIONS,
+                f"当前文档格式 .{_norm_ext(current_format)} 解析不出章节结构，"
+                f"而 {op.intent.value} 需要按章节定位。"
+                "请先用 convert_format 转成 .md 或 .tex（转换须单独一轮），"
+                "或直接以 .md/.tex 文件载入。",
+            ))
+            continue    # 归因已明确，不再叠加 section_not_found 等次生诊断
 
         if op.intent in _EDIT_INTENTS:
             target = _slot_value(op, "section_id")
@@ -205,6 +246,7 @@ def _format_conflicts(op: Operation) -> list[ValidationIssue]:
 __all__ = [
     "validate_plan",
     "SECTION_NOT_FOUND", "SECTION_EXISTS", "CONVERT_NOT_TERMINAL",
+    "FORMAT_LACKS_SECTIONS",
     "CONVERT_SAME_FORMAT", "FORMAT_REQUIRES_DOCX", "CONFLICTING_CONSTRAINTS",
     "UNSUPPORTED_INTENT",
 ]

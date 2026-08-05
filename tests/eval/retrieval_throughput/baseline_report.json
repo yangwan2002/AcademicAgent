@@ -1,0 +1,25 @@
+{
+  "schema_version": "retrieval-throughput-baseline-report-v1",
+  "collected_on": "2026-07-31",
+  "test_collection": {
+    "command": "python -m pytest --collect-only -q -p no:cacheprovider",
+    "collected": 937,
+    "status": "passed"
+  },
+  "offline_characterization": {
+    "status": "frozen",
+    "profile": "benchmark_profile.json",
+    "golden": "legacy_golden.json",
+    "snapshot_sha256": "9e80fc6d7d40bd5904a28e4be577d764f731907ab8c1403fdf43d29069d4f16a"
+  },
+  "historical_live_dogfood": {
+    "source": "../literature_dogfood/last_run.txt",
+    "status": "invalid-incomplete",
+    "candidate_rows_written": 30,
+    "reason": "historical log ends after retrieval started and has no terminal stop reason or elapsed metrics"
+  },
+  "live_baseline": {
+    "status": "not-run",
+    "reason": "requires explicit network and paid reviewer opt-in"
+  }
+}

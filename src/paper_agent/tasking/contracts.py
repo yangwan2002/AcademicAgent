@@ -18,17 +18,12 @@ from typing import Any
 
 from paper_agent.intents.router import Intent
 
+# CallStatus 已迁至中立模块 providers/llm/structured.py（A2a）；此处 re-export，
+# 使 `from paper_agent.tasking.contracts import CallStatus` 的既有调用点零改动。
+from paper_agent.providers.llm.structured import CallStatus
+
 
 # --- 枚举 ---
-
-class CallStatus(str, Enum):
-    """一次抽取/分析调用的整体状态（不与字段态折叠）。"""
-
-    SUCCESS = "success"
-    PROVIDER_FAILED = "provider_failed"
-    PARSE_FAILED = "parse_failed"
-    SCHEMA_FAILED = "schema_failed"
-
 
 class FieldStatus(str, Enum):
     """单个槽位的状态。"""
@@ -90,6 +85,7 @@ class RevisionReason(str, Enum):
     SUPPLEMENT = "supplement"        # unmapped 补充说明
     USER_MODIFY = "user_modify"      # 确认阶段修改
     NEEDS_REPLAN = "needs_replan"    # 执行期失效重规划
+    VALIDATION_REPAIR = "validation_repair"  # 静态校验拒绝 → 带确定性提示自行重规划
 
 
 # --- 需求与操作（值对象，frozen）---
@@ -155,6 +151,11 @@ class AnalyzeResult:
     requirements: tuple[AtomicRequirement, ...] = ()
     unmapped_text: tuple[str, ...] = ()
     error_category: str | None = None
+    # 项目级事实（「课题是 X」）：key → (值, 认领的 requirement_id 元组)。
+    # 不属于任何单次操作：由 PlanBuilder 记 PROJECT_MEMORY，由规划循环
+    # (`_persist_project_facts`) 立即写入并保存 `facts.claims` —— 落盘不等写作成功，
+    # 否则计划被驳回时用户交代的课题就白说了。
+    project_facts: tuple[tuple[str, str, tuple[str, ...]], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -193,6 +194,9 @@ class DispositionStatus(str, Enum):
     CLARIFIED = "clarified"    # 经澄清回填后落到 Slot
     REJECTED = "rejected"      # 系统明确拒绝（如不支持的意图）
     UNPARSED = "unparsed"      # 理解整体失败的兜底（原话留痕，不静默丢）
+    # 项目级陈述（「课题是 X」「本文研究 X」）：不属于任何单次操作，落 facts.claims
+    # 供全部后续操作与会话复用。**是被消费了**，故不该弹 unmapped（X-11）。
+    PROJECT_MEMORY = "project_memory"
 
 
 @dataclass(frozen=True)

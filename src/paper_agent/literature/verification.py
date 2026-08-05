@@ -183,6 +183,131 @@ def aggregate_status(events) -> VerificationStatus:
     return fold_events(events).status
 
 
+# ===========================================================================
+# A2c-1 / 任务 2：严格核验策略（读时投影，不改历史事件）
+# ===========================================================================
+#
+# 问题（design-a2c D2）：A1 兼容路径在 ``require_final=False`` 下把 aggregator 对 DOI 的
+# 成功回查固化成 ``authority=final``。这些事件已写进历史，事后翻配置**不会**让旧记录降级。
+# 若原地改写事件，又会制造第二真相源、破坏「事件只记发生了什么」的不变量。
+#
+# 解法：把「严格与否」做成**读时投影**——原始事件不动，读取时按一张**版本化**的
+# ``(source, identifier_type) -> final|corroboration|none`` 权限快照重算有效 authority，
+# 再走与 :func:`fold_events` 相同的因果折叠。版本号绑定策略，写进 Assessment/Batch/trace，
+# 使同一批事件在任何时间得到同一严格状态（不随后续 config 漂移）。
+
+
+class VerificationPolicy(str, Enum):
+    """核验状态的解释策略。"""
+
+    COMPAT_A1 = "compat_a1"            # 读事件里存的 authority（等价 aggregate_status，现状）
+    STRICT_FINAL_V1 = "strict_final_v1"  # 忽略存储 authority，按版本化 registry 重算
+
+
+#: STRICT_FINAL_V1 绑定的 authority registry 版本号。**权限口径变更必须 bump 此版本**，
+#: 使「这批事件按哪套权限算的」可追溯、可复现。
+STRICT_FINAL_V1_VERSION = "authority-registry-v1"
+
+
+@dataclass(frozen=True)
+class AuthorityRegistry:
+    """冻结的 ``(source, identifier_type) -> final|corroboration|none`` 权限快照。
+
+    从 A1 :func:`paper_agent.literature.sources.verification_authority` 的口径**快照**而来
+    （同一套判定），但一旦绑定某 ``version`` 便不随运行期 config 变化——严格投影只认与
+    ``STRICT_FINAL_V1`` 绑定的这份版本化权限，不读「当前配置」。
+    """
+
+    version: str
+
+    def authority_of(self, source: str, identifier_type: str) -> str:
+        """该 (source, id_type) 的有效核验权限：``final`` | ``corroboration`` | ``none``。"""
+        # 惰性 import 避免顶层环依赖（sources 不 import verification，此处单向）。
+        from paper_agent.literature.sources import verification_authority
+
+        return verification_authority(source, identifier_type)
+
+
+#: STRICT_FINAL_V1 使用的版本化权限快照单例。
+STRICT_FINAL_V1_REGISTRY = AuthorityRegistry(version=STRICT_FINAL_V1_VERSION)
+
+
+def _effective_authority(
+    event: VerificationEvent,
+    policy: VerificationPolicy,
+    registry: AuthorityRegistry,
+) -> str:
+    """一条事件在给定策略下的**有效** authority。
+
+    - COMPAT_A1：用事件里存的 ``authority``（现状）。
+    - STRICT_FINAL_V1：**忽略**存储值，按版本化 registry 依 ``(source, identifier_type)`` 重算。
+      只有核验尝试类事件（VERIFIED/CONFLICT）才需要 authority；变迁事件原样返回其存储值
+      （折叠只看它们的 target/kind，不看 authority）。
+    """
+    if policy is VerificationPolicy.COMPAT_A1:
+        return event.authority
+    if event.kind in (EventKind.VERIFIED, EventKind.CONFLICT):
+        return registry.authority_of(event.source, event.identifier_type)
+    return event.authority
+
+
+def status_under_policy(
+    events,
+    policy: VerificationPolicy = VerificationPolicy.STRICT_FINAL_V1,
+    registry: AuthorityRegistry = STRICT_FINAL_V1_REGISTRY,
+) -> VerificationStatus:
+    """在给定策略下折叠事件得到核验状态（读时投影，不改原事件）。
+
+    STRICT_FINAL_V1 下，OpenAlex/S2 的 DOI 事件即使历史写了 ``final``，也只算
+    ``corroboration``；Crossref 的 DOI、arXiv 的原生 id 等才算 ``final``。折叠规则
+    （因果引用、QUARANTINED > final CONFLICT > final VERIFIED > UNVERIFIED）与
+    :func:`fold_events` **完全一致**，只是 authority 的取值改由 ``_effective_authority`` 决定。
+    """
+    events = list(events)
+    if policy is VerificationPolicy.COMPAT_A1:
+        return fold_events(events).status
+
+    by_id = {e.event_id: e for e in events}
+    resolved_conflict_ids: set[str] = set()
+    released_quarantine_ids: set[str] = set()
+
+    for e in events:
+        if e.kind == EventKind.CONFLICT_RESOLVED:
+            target = by_id.get(e.target_event_id)
+            if target is not None and target.kind == EventKind.CONFLICT:
+                resolved_conflict_ids.add(e.target_event_id)
+        elif e.kind == EventKind.RELEASED:
+            target = by_id.get(e.target_event_id)
+            if target is not None and target.kind == EventKind.QUARANTINED:
+                released_quarantine_ids.add(e.target_event_id)
+
+    has_open_quarantine = any(
+        e.kind == EventKind.QUARANTINED and e.event_id not in released_quarantine_ids
+        for e in events
+    )
+    if has_open_quarantine:
+        return VerificationStatus.QUARANTINED
+
+    has_open_conflict = any(
+        e.kind == EventKind.CONFLICT
+        and _effective_authority(e, policy, registry) == "final"
+        and e.event_id not in resolved_conflict_ids
+        for e in events
+    )
+    if has_open_conflict:
+        return VerificationStatus.CONFLICT
+
+    has_final_verified = any(
+        e.kind == EventKind.VERIFIED
+        and _effective_authority(e, policy, registry) == "final"
+        for e in events
+    )
+    if has_final_verified:
+        return VerificationStatus.VERIFIED
+
+    return VerificationStatus.UNVERIFIED
+
+
 __all__ = [
     "EventKind",
     "VerificationStatus",
@@ -192,4 +317,10 @@ __all__ = [
     "make_event_id",
     "fold_events",
     "aggregate_status",
+    # A2c-1：严格核验策略（读时投影）
+    "VerificationPolicy",
+    "AuthorityRegistry",
+    "STRICT_FINAL_V1_VERSION",
+    "STRICT_FINAL_V1_REGISTRY",
+    "status_under_policy",
 ]

@@ -110,6 +110,21 @@ class OpenAlexRetrievalProvider(RetrievalProvider):
             primary = work.get("primary_location") or {}
             if isinstance(primary, dict):
                 pdf_url = (primary.get("pdf_url") or "").strip()
+        # 著录字段：期刊名在 primary_location.source.display_name，卷期页在 biblio。
+        # 这些字段完整格式（GB/T 7714 的「刊名, 年, 卷(期): 页」）必需；原先未取
+        # ⇒ 账本里覆盖率恒为 0 ⇒ 渲染只能退化成「作者. 标题. 年.」。
+        container_title = ""
+        if isinstance(src, dict):
+            container_title = (src.get("display_name") or "").strip()
+        publisher = ""
+        if isinstance(src, dict):
+            publisher = (src.get("host_organization_name") or "").strip()
+        biblio = work.get("biblio") or {}
+        if not isinstance(biblio, dict):
+            biblio = {}
+        first_page = (biblio.get("first_page") or "").strip()
+        last_page = (biblio.get("last_page") or "").strip()
+        pages = f"{first_page}-{last_page}" if first_page and last_page else first_page
         return ReferenceEntry(
             id=f"openalex:{openalex_id}" if openalex_id else f"doi:{doi}",
             title=work.get("display_name") or work.get("title") or "",
@@ -118,7 +133,15 @@ class OpenAlexRetrievalProvider(RetrievalProvider):
             source_id=source_id,
             source="openalex",
             abstract=reconstruct_abstract(work.get("abstract_inverted_index")),
+            language=(work.get("language") or "").strip(),   # A2a 语言判定的源信号
             pdf_url=pdf_url,
             work_identifiers=work_ids,
             container_identifiers=container_ids,
+            reference_type=(work.get("type") or "").strip(),
+            container_title=container_title,
+            volume=(biblio.get("volume") or "").strip(),
+            issue=(biblio.get("issue") or "").strip(),
+            pages=pages,
+            publisher=publisher,
+            url=(work.get("doi") or "").strip(),
         )

@@ -97,6 +97,9 @@ class ArxivRetrievalProvider(RetrievalProvider):
                     source_id=arxiv_id,
                     source="arxiv",
                     abstract=summary,
+                    # arXiv 政策要求题录（标题/摘要）为英文,故源语言取 en;若正文实为
+                    # 他语种,脚本分析（Han 等硬证据）仍会在分类时纠正。
+                    language="en",
                     work_identifiers=work_ids,
                 )
             )

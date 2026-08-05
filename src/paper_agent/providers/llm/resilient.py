@@ -267,6 +267,11 @@ class ResilientLLMProvider(LLMProvider):
         self._policy = policy or RetryPolicy()
         self._sink = sink
 
+    @property
+    def structured_call_capability_owner(self):
+        """Structured-call protocol capabilities belong to the inner adapter."""
+        return self._inner
+
     def complete(self, messages: list[Message], **opts) -> LLMResponse:
         """带退避与 429 处理的健壮补全（算法 4 / Req 4）。
 

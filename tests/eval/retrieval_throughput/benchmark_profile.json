@@ -1,0 +1,56 @@
+{
+  "schema_version": "retrieval-throughput-benchmark-profile-v1",
+  "profile_id": "literature-20-zh5-en15-v1",
+  "objective": {
+    "citation_total_min": 20,
+    "language_zh_min": 5,
+    "language_en_min": 15,
+    "requires_quota_completion": true
+  },
+  "timing": {
+    "clock": "monotonic",
+    "metrics": [
+      "retrieval_loop_active_elapsed_s",
+      "literature_preflight_active_elapsed_s"
+    ],
+    "exclude_user_wait": true,
+    "include_queue_retry_search_llm_verify": true
+  },
+  "cache_profiles": ["cold", "warm"],
+  "modes": ["legacy", "b1", "b1_b2", "b1_b2_b3"],
+  "workloads": {
+    "offline_characterization": "legacy-characterization-v1",
+    "replay_fixture": "pending-recording",
+    "live_topic_source": "explicit-cli-argument"
+  },
+  "runtime": {
+    "provider_names": "record-at-run-time",
+    "model_ids": "record-at-run-time",
+    "prompt_schema_versions": "record-at-run-time",
+    "retrieval_limits": "record-at-run-time",
+    "batch_concurrency": "record-at-run-time",
+    "timeouts": "record-at-run-time"
+  },
+  "runs": {
+    "replay_min": 30,
+    "live_paired_min": 5
+  },
+  "validity": {
+    "predeclared_invalid_reasons": [
+      "all_sources_unavailable_before_any_candidate",
+      "missing_required_runtime_identity"
+    ],
+    "fast_incomplete_is_success": false,
+    "retain_invalid_sample_count_and_reason": true
+  },
+  "targets": {
+    "replay_p50_reduction_min": 0.6,
+    "replay_p95_reduction_min": 0.5,
+    "live_median_active_elapsed_s_max": 600,
+    "live_median_reduction_min": 0.5
+  },
+  "privacy": {
+    "persist_raw_query_or_candidate_text": false,
+    "live_topic_persisted_in_report": false
+  }
+}

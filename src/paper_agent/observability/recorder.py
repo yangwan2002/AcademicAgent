@@ -254,6 +254,7 @@ class SimpleTraceRecorder:
             EventKind.PLAN_VALIDATION,
             EventKind.CLARIFICATION_QA,
             EventKind.UNMAPPED_RESOLUTION,
+            EventKind.PROJECT_FACT_RECORDED,
             EventKind.PLAN_CONFIRMED,
             EventKind.PLAN_REJECTED,
             EventKind.PLAN_CANCELLED,

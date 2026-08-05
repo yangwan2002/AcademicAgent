@@ -31,8 +31,12 @@ def test_save_writes_schema_v2(tmp_path):
     f.add_ref(KnownRef(id="1", bibkey="k", title="T", verified=True))
     f.save()
     data = json.loads((tmp_path / "facts.json").read_text(encoding="utf-8"))
-    assert data["schema_version"] == 2
+    # envelope 版本随分期演进：A2c-5 加 relevance_store/pending_batches（v3），
+    # A2d-4 加 pending_literature_flows（v4）。旧版本一律无损加载。
+    assert data["schema_version"] == 4
     assert "references" in data and "known_refs" not in data
+    assert "relevance_store" in data and "pending_batches" in data
+    assert "pending_literature_flows" in data
     # verification_status 是派生字段，不落 JSON
     assert "verification_status" not in data["references"][0]
 

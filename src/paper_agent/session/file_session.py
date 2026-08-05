@@ -20,6 +20,8 @@ import uuid
 from dataclasses import dataclass, field
 
 from paper_agent.observability.events import EventKind
+from paper_agent.session.docx_format_probe import is_docx
+from paper_agent.session.docx_document import apply_text, project_text
 
 
 @dataclass(frozen=True)
@@ -57,15 +59,28 @@ class FileBackedSession:
     working_path: str = field(init=False)
     session_dir: str = field(init=False)
     ext: str = field(init=False)
+    # 非空表示「本会话源文件是 docx」。working copy **本身就是 docx 副本**：
+    # 排版直接改它，正文按段落就地写回，二者不互斥。
+    # （早前版本把 working 变成 markdown、保存时用 pandoc 重建，导致 run 级排版
+    #   被静默丢弃 —— 纯排版请求会「报告成功但结果错误」。已弃用该路径。）
+    docx_source: str = field(default="", init=False)
     _snapshots: list[str] = field(default_factory=list, init=False)
     _git_ok: bool = field(default=False, init=False)
 
     def __post_init__(self) -> None:
         if not os.path.isfile(self.source_path):
             raise FileNotFoundError(f"源文件不存在：{self.source_path}")
-        self.ext = os.path.splitext(self.source_path)[1].lstrip(".").lower()
+        raw_ext = os.path.splitext(self.source_path)[1].lstrip(".").lower()
         self.session_dir = os.path.join(self.workspace_root, self.session_id)
         os.makedirs(self.session_dir, exist_ok=True)
+
+        # docx：working copy 就是 docx 副本本身，全程不离开二进制。
+        # 意图层看到的是它的**只读文本投影**（read_working），写回时按段落 diff
+        # 就地落盘（write_working）—— 排版因此一点不动。详见 docx_document 模块文档。
+        self.docx_source = ""
+        self.ext = raw_ext
+        if is_docx(raw_ext):
+            self.docx_source = self.source_path
         self.working_path = os.path.join(self.session_dir, f"current.{self.ext}")
         shutil.copyfile(self.source_path, self.working_path)  # 源自此不再被触碰
         if self.use_git and _git_available():
@@ -73,6 +88,13 @@ class FileBackedSession:
 
     # ---- working 读写 ----
     def read_working(self) -> str:
+        """返回 working 的文本。
+
+        docx 会话返回**投影**（一段一行，标题带 `#` 前缀），使意图层与章节索引
+        无需改动即可工作；docx 二进制本身仍是真相。
+        """
+        if self.docx_source:
+            return project_text(self.working_path)
         with open(self.working_path, "r", encoding="utf-8") as fh:
             return fh.read()
 
@@ -82,9 +104,16 @@ class FileBackedSession:
         可选 `bus`（按方法传、不长存）：写 working 后发 `WORKING_COPY_UPDATE`，
         git 快照后发 `WORKSPACE_COMMIT`。不传时行为与既有一致。
         """
-        if not self._git_ok:
-            self._snapshots.append(self.read_working())
-        _atomic_write(self.working_path, text)
+        if self.docx_source:
+            # docx：无 git 时的快照必须存**二进制**副本，不能存投影文本 ——
+            # 存文本的话 undo 会把排版一并丢掉（投影里没有排版信息）。
+            if not self._git_ok:
+                self._snapshots.append(self._binary_snapshot())
+            apply_text(self.working_path, text)
+        else:
+            if not self._git_ok:
+                self._snapshots.append(self.read_working())
+            _atomic_write(self.working_path, text)
         if bus is not None:
             bus.publish(
                 EventKind.WORKING_COPY_UPDATE,
@@ -100,6 +129,18 @@ class FileBackedSession:
                     status="committed",
                 )
 
+    def _binary_snapshot(self) -> str:
+        """把当前 working docx 复制到会话目录，返回快照路径（无 git 时的 undo 用）。
+
+        放在 `snapshots/` 子目录：会话 git 仓库若可用不会走到这里，而该目录也不该
+        被当成 working 的一部分。
+        """
+        snap_dir = os.path.join(self.session_dir, "snapshots")
+        os.makedirs(snap_dir, exist_ok=True)
+        path = os.path.join(snap_dir, f"{uuid.uuid4().hex[:8]}.docx")
+        shutil.copyfile(self.working_path, path)
+        return path
+
     def undo(self) -> bool:
         """回退到上一个版本。无历史返回 False。"""
         if self._git_ok:
@@ -107,6 +148,14 @@ class FileBackedSession:
         if not self._snapshots:
             return False
         prev = self._snapshots.pop()
+        if self.docx_source:
+            # docx 快照是**文件路径**（二进制），不是文本内容。
+            if not os.path.isfile(prev):
+                return False
+            tmp = f"{self.working_path}.tmp.{uuid.uuid4().hex[:8]}"
+            shutil.copyfile(prev, tmp)
+            os.replace(tmp, self.working_path)   # 原子替换
+            return True
         with open(self.working_path, "w", encoding="utf-8") as fh:
             fh.write(prev)
         return True
@@ -198,18 +247,25 @@ class FileBackedSession:
         return None
 
     # ---- 明确落盘到源文件（用户 save 时才调用）----
-    def save_to_source(self, *, bus=None) -> None:
-        """把 working 原子写回源文件（二进制安全）；可选 `bus` 发 `SOURCE_SAVE`。"""
-        # 先拷到源文件同目录的 tmp 再 os.replace，保证原子且不破坏二进制（docx）。
-        tmp = f"{self.source_path}.tmp.{uuid.uuid4().hex[:8]}"
+    def save_to_source(self, *, bus=None) -> str:
+        """把 working 原子写回源文件（二进制安全）；返回实际写入的路径。
+
+        docx 与其他格式走**同一条路**：working 本身就是同格式副本，直接拷回即可，
+        不再有格式转换、也就没有保真损失。
+
+        """
+        # 先拷到源文件同目录的 tmp 再 os.replace，保证原子且不破坏二进制。
+        dest = self.source_path
+        tmp = f"{dest}.tmp.{uuid.uuid4().hex[:8]}"
         shutil.copyfile(self.working_path, tmp)
-        os.replace(tmp, self.source_path)
+        os.replace(tmp, dest)
         if bus is not None:
             bus.publish(
                 EventKind.SOURCE_SAVE,
-                path=os.path.basename(self.source_path),
+                path=os.path.basename(dest),
                 status="saved",
             )
+        return dest
 
     def read_source(self) -> str:
         with open(self.source_path, "r", encoding="utf-8") as fh:

@@ -34,7 +34,7 @@ from paper_agent.tasking.contracts import (
     ValidationOutcome,
 )
 from paper_agent.tasking.extractors import build_extractor
-from paper_agent.tasking.operation_analyzer import analyze
+from paper_agent.tasking.operation_analyzer import analyze, requirements_for
 from paper_agent.tasking.plan_builder import build_plan
 from paper_agent.tasking.plan_validator import validate_plan
 
@@ -146,6 +146,9 @@ class TurnResult:
     planning_exit: Any = None           # PlanningExit（未进执行时的出口）
     state: Any = None                   # Plan_Execution_State（run 外持有）
     run_report: Any = None              # coordinator.RunReport
+    # 新栈**内部**异常的类别（Coordinator 已捕获，未降级到旧栈）。空 = 无异常。
+    # 结构化暴露，供 TurnMetrics 归属计数使用——不让调用方去解析 warnings 里的中文。
+    run_error_category: str = ""
 
 
 class TurnService:
@@ -246,7 +249,7 @@ class TurnService:
                     text, llm=self._llm, interactor=self._interactor,
                     current_sections=sections, current_format=snapshot.file_type,
                     turn_id=turn_id, max_plan_revisions=max_revisions,
-                    replan=replan, budget=budget, bus=bus,
+                    replan=replan, budget=budget, bus=bus, facts=facts,
                 )
                 if not isinstance(outcome, ConfirmedPlan):
                     return ("exit", outcome)
@@ -281,10 +284,10 @@ class TurnService:
                 if run_report.run_status == "cancelled":
                     result.report = state.to_cancelled_report()
                 else:
+                    category = (run_report.error or {}).get("category", "未知")
                     result.report = _failed_report(state, run_report)
-                    result.warnings.append(
-                        f"执行异常（{(run_report.error or {}).get('category', '未知')}）"
-                    )
+                    result.run_error_category = str(category)
+                    result.warnings.append(f"执行异常（{category}）")
                 return result
             kind, payload = run_report.value
 
@@ -347,11 +350,14 @@ class TurnService:
                 return result
 
             extractions = []
+            n_ops = len(ar.operations)
             for op in ar.operations:
                 ex = build_extractor(op.intent, self._llm)
                 if ex is None:
                     continue
-                er = ex.pre_extract(op, ar.requirements)
+                # 与 active 走同一路由，否则 shadow 的差异统计会失真
+                owned, _attr = requirements_for(op, ar.requirements, n_ops)
+                er = ex.pre_extract(op, owned)
                 extractions.append(er)
                 self._publish(bus, EventKind.PRE_EXTRACT,
                               turn_id=turn_id, intent=op.intent.value,

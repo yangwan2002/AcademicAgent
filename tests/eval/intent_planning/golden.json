@@ -407,6 +407,98 @@
         "constraints": [],
         "atomic_requirements": ["先改写引言", "再改写结论"]
       }
+    },
+
+    {
+      "id": "real_quota_rambling_intro",
+      "note": "真机原话（2026-08-01）。此前 35 条 golden 无一带引用配额，也无一句是这种口语铺垫式长句。实测代价：配额槽认领了「英文8」「中文2」却漏报「参考文献10」，用户被追问一条其实已满足的要求。expected_unmapped 为空 = 三条配额要求都必须被槽位认领。",
+      "message": "我目前小论文只写了一个框架，我现在需要去写我的引言部分，你能帮我完善我的引言部分吗，要求参考文献10，英文8，中文2",
+      "current_sections": ["1_引言", "2_相关工作", "3_方法", "1 引言", "2 相关工作", "3 方法"],
+      "current_format": "md",
+      "expected": {
+        "operations": [{"intent": "rewrite", "target_hint": "1 引言"}],
+        "constraints": [],
+        "atomic_requirements": ["完善我的引言部分", "参考文献10", "英文8", "中文2"],
+        "expected_unmapped": []
+      }
+    },
+    {
+      "id": "real_quota_explicit_sentence",
+      "note": "同一意图的规范措辞。与上一条配对，用于区分「配额抽取本身不行」与「口语措辞才不行」。",
+      "message": "改写引言这一章，需要引用 10 篇参考文献，其中英文 8 篇、中文 2 篇",
+      "current_sections": ["1_引言", "2_相关工作", "1 引言", "2 相关工作"],
+      "current_format": "md",
+      "expected": {
+        "operations": [{"intent": "rewrite", "target_hint": "1 引言"}],
+        "constraints": [],
+        "atomic_requirements": ["改写引言这一章", "需要引用 10 篇参考文献", "英文 8 篇", "中文 2 篇"],
+        "expected_unmapped": []
+      }
+    },
+    {
+      "id": "real_numbered_section_with_suffix_word",
+      "note": "章节标题带编号（真实文档形态）+ 指代带后缀词。X-6 的回归：slugify(\"1 引言\")=\"1_引言\"，与「引言部分」双向包含均不成立。",
+      "message": "帮我把引言部分重写一下，叙述更连贯些",
+      "current_sections": ["1_引言", "2_1跨视角图像匹配研究", "1 引言", "2.1跨视角图像匹配研究"],
+      "current_format": "md",
+      "expected": {
+        "operations": [{"intent": "rewrite", "target_hint": "1 引言"}],
+        "constraints": [],
+        "atomic_requirements": ["把引言部分重写一下", "叙述更连贯些"],
+        "expected_unmapped": []
+      }
+    },
+    {
+      "id": "real_improve_existing_section_is_rewrite",
+      "note": "X-7 的回归：「完善」一个已存在章节应为 rewrite。理解层拿不到章节清单，此处考察它能否从「完善」这个动词判断出是改已有内容而非新建。选 add_section 会被 section_exists 拒，现由自修复通道兜一次。",
+      "message": "你能帮我完善我的引言吗",
+      "current_sections": ["1_引言", "2_相关工作", "1 引言", "2 相关工作"],
+      "current_format": "md",
+      "expected": {
+        "operations": [{"intent": "rewrite", "target_hint": "1 引言"}],
+        "constraints": [],
+        "atomic_requirements": ["完善我的引言"],
+        "expected_unmapped": []
+      }
+    },
+    {
+      "id": "real_quota_on_new_section",
+      "note": "配额挂在 add_section 上（章节确实不存在）。与 real_quota_* 配对，验证配额槽在两个意图上都被认领。",
+      "message": "新增一个相关工作章节，需要引用 15 篇文献，英文至少 12 篇",
+      "current_sections": ["1_引言", "1 引言"],
+      "current_format": "md",
+      "expected": {
+        "operations": [{"intent": "add_section", "target_hint": "相关工作"}],
+        "constraints": [],
+        "atomic_requirements": ["新增一个相关工作章节", "需要引用 15 篇文献", "英文至少 12 篇"],
+        "expected_unmapped": []
+      }
+    },
+    {
+      "id": "real_docx_rewrite_should_still_parse",
+      "note": "X-5 的伴随用例：docx 上理解层仍应产出 rewrite（不可执行是 validator 的判断，不是理解层的）。此处只考察理解，不考察可执行性。",
+      "message": "帮我完善引言部分",
+      "current_sections": [],
+      "current_format": "docx",
+      "expected": {
+        "operations": [{"intent": "rewrite", "target_hint": "引言"}],
+        "constraints": [],
+        "atomic_requirements": ["完善引言部分"],
+        "expected_unmapped": []
+      }
+    },
+    {
+      "id": "real_rambling_with_context_preamble",
+      "note": "口语铺垫式长句，前半句是背景陈述而非要求。考察 analyzer 会不会把「只写了一个框架」误当成一条要求（那会造成无谓的 unmapped 追问）。",
+      "message": "我这篇论文才刚开始写，目前只有个大纲，你先帮我把方法这一章润色一下吧，别改公式",
+      "current_sections": ["3_方法", "3 方法"],
+      "current_format": "md",
+      "expected": {
+        "operations": [{"intent": "polish", "target_hint": "3 方法"}],
+        "constraints": ["别改公式"],
+        "atomic_requirements": ["把方法这一章润色一下", "别改公式"],
+        "expected_unmapped": []
+      }
     }
   ]
 }

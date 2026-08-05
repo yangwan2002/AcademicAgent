@@ -61,11 +61,17 @@ class SlotSpec:
     normalizer: Callable[[object], object] | None = None
     validator: Callable[[object], bool] | None = None
     reuse_history: bool = False      # 是否允许复用 facts 历史值
+    # 可选槽的条件式澄清（A2d）：用户**显式给出**但 INVALID/AMBIGUOUS 时也追问
+    # （USER_ABSENT 仍不追问）。默认 False → 既有可选槽行为逐字不变。
+    clarify_if_user_invalid: bool = False
     # --- 抽取指导（function calling 的字段级 description 与类型）---
     # `description` 是该槽位的**判定规矩**，会直接作为 JSON schema 的字段
     # description 交给模型；比堆在 system prompt 里更贴近字段本身。
     description: str = ""
     value_type: str = "string"       # string | integer | number | boolean | array | object
+    # 嵌套结构槽位（如配额）的显式 JSON schema。为 None 时按 value_type 生成
+    # （既有行为逐字不变）；非 None 时 build_tool_schema 原样使用之（A2b D10）。
+    json_schema_override: dict | None = None
 
     def default(self):
         return self.default_factory() if self.default_factory is not None else None
@@ -274,6 +280,85 @@ FORMAT_DOCX_SPEC = IntentSpec(
 )
 
 
+# --- 引用配额槽位（A2b 定义 schema/常量；A2d-5 原子激活）---------------------
+#
+# 嵌套结构 schema，与 literature.quota.RawQuotaSpec 的 clause 列表对齐（D10）。
+# field/operator/dimension 的枚举与 finalize_quota 期望的 token 一致。
+# 挂入 REWRITE_SPEC / ADD_SECTION_SPEC 的动作在本文件末尾，与 Handler 消费同批交付
+# （A2b D11 原子激活），避免「抽取了配额却按旧逻辑写作」的静默失效。
+
+_RAW_FILTER_CLAUSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "field": {"type": "string", "enum": ["year", "reference_type", "language"],
+                  "description": "过滤字段：年份 / 文献类型 / 限定语言。"},
+        "operator": {"type": "string",
+                     "enum": ["gte", "lte", "range", "recent_years", "eq", "in"],
+                     "description": "年份用 gte/lte/range/recent_years；"
+                                    "文献类型用 in；限定语言用 eq/in。相对年份用 "
+                                    "recent_years 并把年数 N 放进 value（如最近五年 → 5）。"},
+        "value": {"description": "年份数/年数N/年份区间[low,high]，或类型/语言桶(zh/en)列表。"},
+        "verbatim": {"type": "string", "description": "用户原话片段。"},
+    },
+    "required": ["field", "operator"],
+}
+
+_RAW_COUNT_CLAUSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "dimension": {"type": "string", "enum": ["total", "language.zh", "language.en"],
+                      "description": "计数维度：总数 / 中文数 / 英文数。只支持中英文。"},
+        "operator": {"type": "string",
+                     "enum": ["bare", "exact", "min", "max", "range", "approx"],
+                     "description": "纯数字(如『引用20篇』)用 bare；明确『恰好/正好』用 "
+                                    "exact；『至少』min；『最多』max；区间 range；"
+                                    "含糊(『约/左右/二十来』)用 approx。"},
+        "value": {"description": "数量整数，或区间 [low, high]。"},
+        "verbatim": {"type": "string", "description": "用户原话片段。"},
+    },
+    "required": ["dimension", "operator"],
+}
+
+RAW_QUOTA_JSON_SCHEMA: dict = {
+    "type": "object",
+    "description": (
+        "用户对『正文引用多少篇文献』的数量要求。分两组，不要混：\n"
+        "- filters：资格门槛（年份、文献类型、只要某种语言）。\n"
+        "- constraints：数量要求（总数、中文数、英文数，各带 恰好/至少/最多/区间）。\n"
+        "相对年份保留年数放进 recent_years，不要自己换算成具体年份。"
+    ),
+    "properties": {
+        "filters": {"type": "array", "items": _RAW_FILTER_CLAUSE_SCHEMA},
+        "constraints": {"type": "array", "items": _RAW_COUNT_CLAUSE_SCHEMA},
+        "explicit_scope": {"type": "string",
+                           "description": "用户显式表达的统计范围（罕见，一般留空）。"},
+    },
+}
+
+# 槽位常量。绑定目标为 rewrite/add_section 的 Plan 字段；消费方为
+# runtime/handlers.py 的 Rewrite/AddSectionHandler（见文件末尾挂槽）。
+CITATION_QUOTA_SLOT_SPEC = SlotSpec(
+    "citation_quota", required=False, default_factory=lambda: None,
+    value_type="object", json_schema_override=RAW_QUOTA_JSON_SCHEMA,
+    clarify_if_user_invalid=True,       # 用户给了配额但无法解析/含糊 → 追问（A2d D1）
+    description=(
+        "用户对正文引用配额的要求。仅当用户明确提出篇数/语言配额/年份或类型门槛时给出；"
+        "没提就不要给。"
+    ),
+    execution_binding=_b(BindingKind.PLAN_FIELD, "citation_quota"),
+)
+
+
+# --- A2d-5：原子激活 citation_quota 槽 ---------------------------------------
+#
+# 挂槽与 Handler 消费（runtime/handlers.py 的 Rewrite/AddSectionHandler）**同批交付**，
+# 兑现 A2b D11：不制造「抽取了却没人执行」。Handler 侧另有 feature flag
+# （`literature_writing_integration`）：flag 关但用户给了配额 → 明确 UNSUPPORTED，
+# 不降级成「忽略配额继续写」。
+REWRITE_SPEC.slots["citation_quota"] = CITATION_QUOTA_SLOT_SPEC
+ADD_SECTION_SPEC.slots["citation_quota"] = CITATION_QUOTA_SLOT_SPEC
+
+
 INTENT_SPECS: dict[Intent, IntentSpec] = {
     Intent.POLISH: POLISH_SPEC,
     Intent.REWRITE: REWRITE_SPEC,
@@ -291,4 +376,5 @@ __all__ = [
     "BindingKind", "ExecutionBinding", "SlotSpec", "IntentSpec",
     "INTENT_SPECS", "spec_for",
     "POLISH_SPEC", "REWRITE_SPEC", "ADD_SECTION_SPEC", "CONVERT_SPEC", "FORMAT_DOCX_SPEC",
+    "RAW_QUOTA_JSON_SCHEMA", "CITATION_QUOTA_SLOT_SPEC",
 ]

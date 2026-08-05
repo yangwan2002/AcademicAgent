@@ -21,6 +21,17 @@ class FormatResult:
     applied: list[str] = field(default_factory=list)
 
 
+def _format_target(session) -> str:
+    """返回可排版的 docx 路径；不可排版返回空串。
+
+    docx 会话的 working copy 就是 docx 副本本身，排版直接改它 —— 正文改动走段落
+    就地写回，两者作用于同一个文件、互不覆盖。
+    """
+    if session.ext == "docx":
+        return session.working_path
+    return ""
+
+
 def execute_format(session: FileBackedSession, message: str, *, ops=None) -> FormatResult:
     """执行排版。
 
@@ -29,7 +40,8 @@ def execute_format(session: FileBackedSession, message: str, *, ops=None) -> For
     `execute_format.ops`），避免「FormatOp → 中文 → 再解析」的有损往返。
     不传时行为与旧调用完全一致（用 `parse_format_ops(message)` 规则解析）。
     """
-    if session.ext != "docx":
+    target = _format_target(session)
+    if not target:
         return FormatResult(
             ok=False,
             message=(
@@ -50,14 +62,14 @@ def execute_format(session: FileBackedSession, message: str, *, ops=None) -> For
         )
 
     session.commit("format baseline")
-    before = snapshot_docx(session.working_path)
+    before = snapshot_docx(target)
     try:
-        apply_ops(session.working_path, ops)
+        apply_ops(target, ops)
     except Exception as exc:  # noqa: BLE001
         session.discard_changes()
         return FormatResult(ok=False, message=f"应用格式操作失败，已回滚：{exc}")
 
-    result = FormatGate().check(before, session.working_path)
+    result = FormatGate().check(before, target)
     if not result.passed:
         session.discard_changes()
         return FormatResult(

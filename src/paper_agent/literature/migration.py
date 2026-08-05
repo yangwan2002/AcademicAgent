@@ -75,8 +75,21 @@ def candidate_to_record(cand) -> ReferenceRecord:
         authors=tuple(getattr(cand, "authors", ()) or ()),
         year=getattr(cand, "year", None),
         abstract=getattr(cand, "abstract", "") or "",
+        language_hint=getattr(cand, "language", "") or "",   # 源语言信号贯通至判定
         discovery_sources=(source,) if source else (),
         field_provenance=field_prov,
+        # 著录字段贯通至账本：这一环缺失则 provider 取到了也存不下来
+        # （渲染完整格式所需的刊名/卷期页会在此处静默丢失）。getattr 兜底使
+        # 不带这些字段的旧候选对象/桩仍可转换。
+        reference_type=getattr(cand, "reference_type", "") or "",
+        container_title=getattr(cand, "container_title", "") or "",
+        volume=getattr(cand, "volume", "") or "",
+        issue=getattr(cand, "issue", "") or "",
+        pages=getattr(cand, "pages", "") or "",
+        article_number=getattr(cand, "article_number", "") or "",
+        publisher=getattr(cand, "publisher", "") or "",
+        conference_name=getattr(cand, "conference_name", "") or "",
+        url=getattr(cand, "url", "") or "",
     )
     return prospective.with_changes(
         reference_id=_dedup.make_reference_id(prospective)

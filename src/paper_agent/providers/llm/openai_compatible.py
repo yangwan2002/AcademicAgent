@@ -101,6 +101,31 @@ def _to_api_message(m: Message) -> dict:
     return msg
 
 
+def _normalize_tools(tools) -> list[dict]:
+    """把中立的工具 schema 归一化为 **OpenAI 协议要求的形态**（每项带顶层 ``type``）。
+
+    协议差异在 provider 内消化（与 ``AnthropicProvider._to_anthropic_tools`` 对称）：
+    Anthropic 适配器只读 ``function`` 子字典、忽略顶层 ``type``，故项目里有若干 schema
+    历史上只写了 ``{"function": {...}}``。这些 schema 打 Anthropic 网关正常，直接透传给
+    OpenAI 端点则会被拒（invalid_request_error），且 ``structured_call`` 会把该错误当成
+    「不支持 forced tool」而降级重试 —— 表现为 **每次判定 2 次物理调用后仍失败**，
+    错误被吞成 ``provider_failed``，极难定位。故在此**统一补齐**，而不是要求每个调用点自觉。
+    """
+    out: list[dict] = []
+    for t in tools or []:
+        if not isinstance(t, dict):
+            continue
+        if t.get("type") == "function" and "function" in t:
+            out.append(t)
+            continue
+        if "function" in t:
+            out.append({"type": "function", **t})
+            continue
+        # 裸 function 定义（{"name","description","parameters"}）→ 包一层
+        out.append({"type": "function", "function": t})
+    return out
+
+
 def _parse_tool_calls(message) -> list[ToolCall]:
     raw = getattr(message, "tool_calls", None)
     if not raw:
@@ -189,7 +214,7 @@ class OpenAICompatibleProvider(LLMProvider):
         payload = [_to_api_message(m) for m in messages]
         # 工具调用回合不走流式（tool_calls 在流式下需额外拼装，从简）。
         if tools:
-            call_opts["tools"] = tools
+            call_opts["tools"] = _normalize_tools(tools)
             if forced_tool_name:
                 call_opts["tool_choice"] = {
                     "type": "function",
@@ -226,7 +251,7 @@ class OpenAICompatibleProvider(LLMProvider):
                 **call_opts.get("extra_body", {}),
             }
         if tools:
-            call_opts["tools"] = tools
+            call_opts["tools"] = _normalize_tools(tools)
         call_opts["stream"] = True
         call_opts.setdefault("stream_options", {"include_usage": True})
         payload = [_to_api_message(m) for m in messages]

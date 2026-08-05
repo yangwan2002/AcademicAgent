@@ -11,9 +11,35 @@ from paper_agent.config import Config
 from paper_agent.providers.llm.base import LLMError, LLMProvider
 from paper_agent.providers.llm.mock import MockLLMProvider
 from paper_agent.providers.llm.presets import VENDOR_PRESETS
+from paper_agent.providers.llm.resilient import ResilientLLMProvider
 from paper_agent.providers.retrieval.base import RetrievalProvider
 from paper_agent.providers.retrieval.mock import MockRetrievalProvider
 from paper_agent.utils.dotenv import load_dotenv
+from paper_agent.workspace.models import RetryPolicy
+
+
+def _retry_policy(config: Config) -> RetryPolicy:
+    return RetryPolicy(
+        max_retries=config.llm_max_retries,
+        base_backoff=config.llm_retry_base_backoff_s,
+        max_backoff=config.llm_retry_max_backoff_s,
+    )
+
+
+def _resilient(inner: LLMProvider, config: Config) -> LLMProvider:
+    """把具体 provider 包进重试层。
+
+    这一层曾经写好但**没接上线**：工厂直接返回裸 provider，于是一次网络超时就让
+    整个计划 failed —— 而 `APITimeoutError` 本就在 `is_retryable` 的可重试名单里。
+    包装点只能在这里：内层 provider 有意透传原始异常（见 `OpenAICompatibleProvider
+    .complete` 的注释），只有外层才分得清瞬时错误与终态错误。
+
+    `max_retries=0` 时不包装 —— 让"关掉重试"回到裸 provider 的原始异常语义，
+    便于调试时看到真实错误类型而非被 `LLMError` 包一层。
+    """
+    if config.llm_max_retries <= 0:
+        return inner
+    return ResilientLLMProvider(inner, policy=_retry_policy(config))
 
 
 def build_llm_provider(config: Config) -> LLMProvider:
@@ -23,6 +49,9 @@ def build_llm_provider(config: Config) -> LLMProvider:
     1. "mock" → MockLLMProvider。
     2. 预设厂商名（见 presets.VENDOR_PRESETS）→ 通用 OpenAI 兼容 provider。
     3. 显式提供 llm_base_url + llm_api_key_env → 通用 provider（零代码接入）。
+
+    除 mock 外一律经 `ResilientLLMProvider` 包一层，统一治理重试/退避/429。
+    mock 不包：它不产生瞬时错误，包了只会让测试里的异常多一层 `LLMError` 外壳。
     """
     load_dotenv()  # 加载 .env，使本地运行无需手动配置环境变量
     name = config.llm_provider.lower()
@@ -36,32 +65,44 @@ def build_llm_provider(config: Config) -> LLMProvider:
 
         if not config.llm_model:
             raise LLMError("使用 Anthropic provider 时必须指定 llm_model。")
-        return AnthropicProvider(
-            model=config.llm_model,
-            api_key_env=config.llm_api_key_env or "ANTHROPIC_API_KEY",
-            base_url=config.llm_base_url or None,
+        return _resilient(
+            AnthropicProvider(
+                model=config.llm_model,
+                api_key_env=config.llm_api_key_env or "ANTHROPIC_API_KEY",
+                base_url=config.llm_base_url or None,
+                timeout=config.llm_request_timeout_s,
+            ),
+            config,
         )
 
     from paper_agent.providers.llm.openai_compatible import OpenAICompatibleProvider
 
     if name in VENDOR_PRESETS:
         preset = VENDOR_PRESETS[name]
-        return OpenAICompatibleProvider(
-            model=config.llm_model or preset.default_model,
-            api_key_env=config.llm_api_key_env or preset.api_key_env,
-            base_url=config.llm_base_url or (preset.base_url or None),
-            extra_body=preset.extra_body,
-            default_options=preset.default_options,
+        return _resilient(
+            OpenAICompatibleProvider(
+                model=config.llm_model or preset.default_model,
+                api_key_env=config.llm_api_key_env or preset.api_key_env,
+                base_url=config.llm_base_url or (preset.base_url or None),
+                extra_body=preset.extra_body,
+                default_options=preset.default_options,
+                timeout=config.llm_request_timeout_s,
+            ),
+            config,
         )
 
     # 未预设厂商：只要给了 base_url 即可纯靠配置接入。
     if config.llm_base_url:
         if not config.llm_model:
             raise LLMError("使用自定义 LLM 端点时必须指定 llm_model。")
-        return OpenAICompatibleProvider(
-            model=config.llm_model,
-            api_key_env=config.llm_api_key_env or "OPENAI_API_KEY",
-            base_url=config.llm_base_url,
+        return _resilient(
+            OpenAICompatibleProvider(
+                model=config.llm_model,
+                api_key_env=config.llm_api_key_env or "OPENAI_API_KEY",
+                base_url=config.llm_base_url,
+                timeout=config.llm_request_timeout_s,
+            ),
+            config,
         )
 
     raise ValueError(
@@ -96,6 +137,12 @@ def build_reviewer_llm_provider(config: Config) -> LLMProvider | None:
         llm_base_url=config.reviewer_llm_base_url or config.llm_base_url,
         llm_api_key_env=config.reviewer_llm_api_key_env or config.llm_api_key_env,
         retrieval_provider=config.retrieval_provider,
+        # 重试/超时必须显式带过来：这里是新建 Config，不写就静默退回默认值，
+        # reviewer 于是拿到一套与 writer 不同的健壮性策略。
+        llm_max_retries=config.llm_max_retries,
+        llm_retry_base_backoff_s=config.llm_retry_base_backoff_s,
+        llm_retry_max_backoff_s=config.llm_retry_max_backoff_s,
+        llm_request_timeout_s=config.llm_request_timeout_s,
     )
     return build_llm_provider(reviewer_cfg)
 
@@ -151,19 +198,27 @@ def build_vlm_provider(config: Config) -> LLMProvider | None:
 
     if name in VENDOR_PRESETS:
         preset = VENDOR_PRESETS[name]
-        return OpenAICompatibleProvider(
-            model=config.vlm_model or preset.default_model,
-            api_key_env=config.vlm_api_key_env or preset.api_key_env,
-            base_url=config.vlm_base_url or (preset.base_url or None),
-            extra_body=preset.extra_body,
-            default_options=preset.default_options,
+        return _resilient(
+            OpenAICompatibleProvider(
+                model=config.vlm_model or preset.default_model,
+                api_key_env=config.vlm_api_key_env or preset.api_key_env,
+                base_url=config.vlm_base_url or (preset.base_url or None),
+                extra_body=preset.extra_body,
+                default_options=preset.default_options,
+                timeout=config.llm_request_timeout_s,
+            ),
+            config,
         )
     if not config.vlm_model:
         raise LLMError("配置多模态 provider 时必须指定 vlm_model。")
-    return OpenAICompatibleProvider(
-        model=config.vlm_model,
-        api_key_env=config.vlm_api_key_env or "PAPER_VLM_API_KEY",
-        base_url=config.vlm_base_url or None,
+    return _resilient(
+        OpenAICompatibleProvider(
+            model=config.vlm_model,
+            api_key_env=config.vlm_api_key_env or "PAPER_VLM_API_KEY",
+            base_url=config.vlm_base_url or None,
+            timeout=config.llm_request_timeout_s,
+        ),
+        config,
     )
 
 

@@ -92,6 +92,15 @@ def sanitize_text(text: Any) -> SafeText:
     return SafeText(hash=h, preview=preview, length=length)
 
 
+def digest(text: Any, *, length: int = 16) -> str:
+    """**只出摘要、不出预览**的哈希（A2f trace 用；主题/查询原文绝不进 trace）。
+
+    统一入口,避免在 Loop/Handler 里散落 sha1;先剔密钥再哈希,截断到 length。
+    """
+    s = "" if text is None else str(text)
+    return hashlib.sha256(redact(s).encode("utf-8")).hexdigest()[:length]
+
+
 def _message_to_canonical(m: Any) -> dict:
     """把一条消息（Message 对象或 dict）规范化为可稳定序列化的普通 dict。
 

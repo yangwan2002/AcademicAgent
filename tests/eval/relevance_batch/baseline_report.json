@@ -1,0 +1,27 @@
+{
+  "schema_version": "relevance-batch-eval-report-v1",
+  "dataset_id": "relevance-batch-smoke-40-v1",
+  "status": "engineering-ready-quality-not-evaluated",
+  "gate_status": "NO_GO_MISSING_HUMAN_ADJUDICATION",
+  "manifest": {
+    "hash": "efb3c4c2f2f4d62b65d5fcf83c0f976d8d67852d9218524cc211f4edc9c8a389",
+    "cases": 40,
+    "language_zh": 20,
+    "language_en": 20,
+    "relevant": 15,
+    "weakly_relevant": 15,
+    "unrelated": 10
+  },
+  "protocol_smoke": {
+    "status": "passed",
+    "evaluation_kind": "protocol_fixture",
+    "physical_stub_calls": 70,
+    "verdict_consistency": 1.0,
+    "acceptance_consistency": 1.0,
+    "window_transformation_acceptance_consistency": 1.0,
+    "quality_claim_allowed": false
+  },
+  "human_adjudicated_cases": 0,
+  "live_provider_evaluation": "not-run",
+  "reason": "评测基建已建立；40 条草拟标签尚未经过双人复核，且未获真实付费 reviewer 运行授权"
+}

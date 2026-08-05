@@ -65,10 +65,22 @@ class SessionFacts:
     ) -> None:
         from paper_agent.literature.ledger import ReferenceLedger
 
+        from paper_agent.literature.relevance import RelevanceStore
+
         self.path = path
         self.ledger = ledger if ledger is not None else ReferenceLedger()
         self.known_numbers: list[KnownNumber] = list(known_numbers or [])
         self.claims: dict = dict(claims) if claims is not None else {}
+        # A2c-5：单 envelope 同文件持久化的两段（默认空 → 向后兼容）。
+        self.relevance_store = RelevanceStore()
+        self.pending_batches: list[dict] = []   # 序列化的 pending batch（staged/confirmed）
+        self.committed_batch_ids: list[str] = []  # 幂等键
+        # A2d-4：可恢复的写作文献流 checkpoint（不含 Bundle/摘要/查询原文）。
+        self.pending_literature_flows: list[dict] = []
+        self.corrupt_flow_count: int = 0        # 加载时被隔离的损坏条目数（报告用）
+        # A2f：暂停时冻结的检索意图（canonical payload；会话状态，不进 trace）。
+        self.pending_search_intents: list[dict] = []
+        self.corrupt_search_intent_count: int = 0
         if known_refs:
             self.ledger.ingest_known_refs(known_refs)
 
@@ -93,16 +105,74 @@ class SessionFacts:
 
     # ---- 持久化 ----
     def save(self) -> None:
-        from paper_agent.literature.migration import atomic_write_json, suggestion_to_dict
+        from paper_agent.literature.migration import atomic_write_json
 
-        data = {
-            "schema_version": 2,
+        atomic_write_json(self.path, self.to_envelope())
+
+    def to_envelope(self) -> dict:
+        """整个 project facts 的单一 envelope（A2c-5：Ledger + RelevanceStore + pending batch）。"""
+        from paper_agent.literature.migration import suggestion_to_dict
+
+        return {
+            "schema_version": 4,
             "references": self.ledger.to_json(),
             "dedup_suggestions": [suggestion_to_dict(s) for s in self.ledger.suggestions()],
             "known_numbers": [asdict(n) for n in self.known_numbers],
             "claims": self.claims,
+            "relevance_store": self.relevance_store.to_json(),
+            "pending_batches": list(self.pending_batches),
+            "committed_batch_ids": list(self.committed_batch_ids),
+            "pending_literature_flows": list(self.pending_literature_flows),
+            "pending_search_intents": list(self.pending_search_intents),
         }
-        atomic_write_json(self.path, data)
+
+    # ---- 写作文献流 checkpoint（A2d-4；envelope 单一事实源）----
+    def put_literature_flow(self, flow: dict) -> None:
+        """按 flow_id 覆盖写入一条 checkpoint。"""
+        fid = flow.get("flow_id")
+        if not fid:
+            raise ValueError("flow 缺少 flow_id")
+        self.pending_literature_flows = [
+            f for f in self.pending_literature_flows if f.get("flow_id") != fid
+        ] + [flow]
+
+    def get_literature_flow(self, flow_id: str) -> dict | None:
+        for f in self.pending_literature_flows:
+            if f.get("flow_id") == flow_id:
+                return f
+        return None
+
+    def drop_literature_flow(self, flow_id: str) -> bool:
+        before = len(self.pending_literature_flows)
+        self.pending_literature_flows = [
+            f for f in self.pending_literature_flows if f.get("flow_id") != flow_id
+        ]
+        return len(self.pending_literature_flows) < before
+
+    # ---- 冻结检索意图（A2f；envelope 单一事实源，会话状态不进 trace）----
+    def put_search_intent(self, intent_id: str, payload: dict) -> None:
+        """按 search_intent_id 覆盖写入冻结意图 payload。"""
+        if not intent_id:
+            raise ValueError("search intent 缺少 id")
+        row = {"search_intent_id": intent_id, **payload}
+        self.pending_search_intents = [
+            s for s in self.pending_search_intents
+            if s.get("search_intent_id") != intent_id
+        ] + [row]
+
+    def get_search_intent(self, intent_id: str) -> dict | None:
+        for s in self.pending_search_intents:
+            if s.get("search_intent_id") == intent_id:
+                return s
+        return None
+
+    def drop_search_intent(self, intent_id: str) -> bool:
+        before = len(self.pending_search_intents)
+        self.pending_search_intents = [
+            s for s in self.pending_search_intents
+            if s.get("search_intent_id") != intent_id
+        ]
+        return len(self.pending_search_intents) < before
 
     @classmethod
     def load(cls, path: str) -> "SessionFacts":
@@ -134,7 +204,32 @@ class SessionFacts:
         else:
             ledger = ReferenceLedger()
 
-        return cls(path=path, known_numbers=known_numbers, claims=claims, ledger=ledger)
+        facts = cls(path=path, known_numbers=known_numbers, claims=claims, ledger=ledger)
+        # A2c-5：单 envelope 的两段（旧 v1/v2 无此段 → 按空，无损向后兼容）。
+        facts.relevance_store.merge_from(data.get("relevance_store", []))
+        facts.pending_batches = list(data.get("pending_batches", []))
+        facts.committed_batch_ids = list(data.get("committed_batch_ids", []))
+        # A2d-4：损坏的 flow 条目（非 dict / 缺 flow_id）被**隔离并计数**，不影响 Ledger 与其余 flow。
+        flows: list[dict] = []
+        corrupt = 0
+        for row in data.get("pending_literature_flows", []) or []:
+            if isinstance(row, dict) and row.get("flow_id"):
+                flows.append(row)
+            else:
+                corrupt += 1
+        facts.pending_literature_flows = flows
+        facts.corrupt_flow_count = corrupt
+        # A2f：冻结检索意图（旧 envelope 无此段 → 空；损坏条目隔离计数，同 flow 先例）。
+        intents: list[dict] = []
+        corrupt_si = 0
+        for row in data.get("pending_search_intents", []) or []:
+            if isinstance(row, dict) and row.get("search_intent_id"):
+                intents.append(row)
+            else:
+                corrupt_si += 1
+        facts.pending_search_intents = intents
+        facts.corrupt_search_intent_count = corrupt_si
+        return facts
 
     # ---- 引用查询 / 变更（保持 resolvable 语义）----
     def ref_ids(self) -> set[str]:

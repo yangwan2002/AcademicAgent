@@ -112,17 +112,25 @@ class ReferenceLedger:
         return len(self._records)
 
     def resolve_token(self, token: str, *, ext: str) -> ResolutionResult:
-        """把一个引用标记解析到 reference_id。tex 查 bibkey/别名，md/docx 查数字别名。"""
+        """把一个引用标记解析到 reference_id。tex 查 bibkey/别名，md/docx 查数字别名。
+
+        解析顺序由 `literature.dialect.resolution_order` 单一来源给出 —— 与 prompt 公布
+        标记的口径同源，二者不可能再各自漂移（详见 dialect 模块 docstring）。
+        """
+        from paper_agent.literature.dialect import resolution_order
+
         token = (token or "").strip()
         if not token:
             return ResolutionResult(ResolutionStatus.NOT_FOUND)
-        ext = (ext or "").lower().lstrip(".")
-        order: list[tuple[str, dict[str, list[str]]]]
-        if ext == "tex":
-            order = [("bibkey", self._by_bibkey), ("bibkey_alias", self._by_alias)]
-        else:
-            order = [("numeric", self._by_numeric)]
-        order.append(("merged_from", self._by_merged))
+        indexes = {
+            "bibkey": self._by_bibkey,
+            "bibkey_alias": self._by_alias,
+            "numeric": self._by_numeric,
+        }
+        order: list[tuple[str, dict[str, list[str]]]] = [
+            (name, indexes[name]) for name in resolution_order(ext) if name in indexes
+        ]
+        order.append(("merged_from", self._by_merged))   # 所有格式共有的兜底
 
         for via, index in order:
             hit = index.get(token)

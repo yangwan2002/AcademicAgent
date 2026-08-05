@@ -25,7 +25,10 @@ for p in (str(_SRC), str(_HERE)):
 from paper_agent.providers.llm.base import LLMProvider  # noqa: E402
 from paper_agent.tasking.contracts import AnalyzeResult, CallStatus, Task_Plan  # noqa: E402
 from paper_agent.tasking.extractors import build_extractor  # noqa: E402
-from paper_agent.tasking.operation_analyzer import analyze  # noqa: E402
+from paper_agent.tasking.operation_analyzer import (  # noqa: E402
+    analyze,
+    requirements_for,
+)
 from paper_agent.tasking.plan_builder import build_plan  # noqa: E402
 
 import scorer  # noqa: E402  (同目录)
@@ -38,15 +41,24 @@ def run_case(case: scorer.GoldenCase, llm: LLMProvider) -> tuple[AnalyzeResult, 
     """对一条样本跑理解链路，返回 (AnalyzeResult, Task_Plan)。"""
     ar = analyze(case.message, llm)
     extractions = []
+    n_ops = len(ar.operations)
     for op in ar.operations:
         ex = build_extractor(op.intent, llm)
         if ex is None:
             continue
-        extractions.append(ex.pre_extract(op, ar.requirements))
+        # **必须与生产路径走同一路由**，否则 golden 指标不反映真实行为。
+        # backlog F-3 的教训：runner 此前直接调 assess_availability 不传策略，
+        # 于是恒走 strict，真机改动在评测里完全看不出来。
+        owned, _attr = requirements_for(op, ar.requirements, n_ops)
+        extractions.append(ex.pre_extract(op, owned))
     # build_extractor 恒非 None（analyze 已过滤不支持意图），extractions 与 operations 对齐
     plan = build_plan(
         case.id, ar.operations, extractions, ar.requirements,
         unmapped_text=ar.unmapped_text,
+        # 与生产路径一致：项目级事实的 requirement 记 PROJECT_MEMORY，不算 unmapped。
+        project_fact_requirement_ids=tuple(
+            rid for _k, _v, rids in ar.project_facts for rid in rids
+        ),
     )
     return ar, plan
 

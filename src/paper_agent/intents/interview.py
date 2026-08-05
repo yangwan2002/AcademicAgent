@@ -42,6 +42,9 @@ class RewritePlan:
     want_search: bool = False
     search_query: str = ""
     search_limit: int = 5
+    # A2d：正文引用配额（executable Citation QuotaSpec）。默认 None → 行为与现状一致。
+    # 类型标注为 object 避免 interview 顶层依赖 literature.quota（惰性/结构解耦）。
+    citation_quota: object | None = None
 
 
 _DIRECTION_MAP = {
@@ -66,6 +69,8 @@ class AddSectionPlan:
     want_search: bool = False
     search_query: str = ""
     search_limit: int = 5
+    # A2d：正文引用配额（executable Citation QuotaSpec）。默认 None → 行为与现状一致。
+    citation_quota: object | None = None
 
 
 class InterviewError(Exception):

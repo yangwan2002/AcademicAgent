@@ -1,0 +1,651 @@
+{
+  "schema_version": "relevance-batch-eval-report-v1",
+  "evaluation_kind": "live_provider",
+  "dataset_id": "relevance-batch-smoke-40-v1",
+  "manifest_hash": "efb3c4c2f2f4d62b65d5fcf83c0f976d8d67852d9218524cc211f4edc9c8a389",
+  "provider": "anthropic",
+  "model_id": "qwen3.7-max",
+  "profile": {
+    "random_seed": 20260731,
+    "temperature": 0.0,
+    "batch_size": 4,
+    "retry_limit": 0,
+    "acceptance_policy": {
+      "accepted_verdicts": [
+        "relevant"
+      ],
+      "accept_title_only": false
+    },
+    "text_policy": {
+      "version": "relevance-batch-eval-text-v1",
+      "max_title_chars": 1000,
+      "max_abstract_chars": 4000
+    },
+    "input_budget": {
+      "max_input_chars": 16000,
+      "max_input_tokens": null,
+      "max_output_chars": 12000,
+      "max_output_tokens": 4096
+    },
+    "metamorphic_variants": [
+      "reverse_order",
+      "rotate_one"
+    ]
+  },
+  "distribution": {
+    "cases": 40,
+    "languages": {
+      "en": 20,
+      "zh": 20
+    },
+    "verdicts": {
+      "relevant": 15,
+      "unrelated": 10,
+      "weakly_relevant": 15
+    },
+    "slices": {
+      "adjacent_topic": 10,
+      "include_exclude": 15,
+      "long_abstract": 5,
+      "prompt_injection": 5,
+      "relevant": 15,
+      "title_only": 5,
+      "unrelated": 10,
+      "weakly_relevant": 15
+    }
+  },
+  "label_readiness": {
+    "adjudicated_cases": 0,
+    "controlled_40_ready": false,
+    "tier2_200_ready": false
+  },
+  "metrics": {
+    "n_cases": 40,
+    "verdict_consistency": 0.95,
+    "acceptance_consistency": 1.0,
+    "per_item_accepted_precision": 1.0,
+    "batch_accepted_precision": 1.0,
+    "precision_drop_pp": 0.0,
+    "per_item_false_acceptance_rate": 0.0,
+    "batch_false_acceptance_rate": 0.0,
+    "false_acceptance_increase_pp": 0.0,
+    "window_transformation_acceptance_consistency": 1.0,
+    "per_item_error_rate": 0.0,
+    "batch_error_rate": 0.0
+  },
+  "thresholds": {
+    "verdict_consistency": true,
+    "acceptance_consistency": true,
+    "precision_drop": true,
+    "false_acceptance_increase": true,
+    "window_transformation": true
+  },
+  "physical_llm_calls": 140,
+  "gate_status": "NO_GO_MISSING_HUMAN_ADJUDICATION",
+  "predictions": {
+    "per_item": {
+      "aa_en_rel_01": {
+        "case_id": "aa_en_rel_01",
+        "status": "SUCCESS",
+        "verdict": "relevant",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "aa_zh_rel_02": {
+        "case_id": "aa_zh_rel_02",
+        "status": "SUCCESS",
+        "verdict": "relevant",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "aa_en_rel_03": {
+        "case_id": "aa_en_rel_03",
+        "status": "SUCCESS",
+        "verdict": "relevant",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "aa_zh_weak_04": {
+        "case_id": "aa_zh_weak_04",
+        "status": "SUCCESS",
+        "verdict": "weakly_relevant",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "aa_en_weak_05": {
+        "case_id": "aa_en_weak_05",
+        "status": "SUCCESS",
+        "verdict": "weakly_relevant",
+        "basis": "title_only",
+        "error_kind": null
+      },
+      "aa_zh_weak_06": {
+        "case_id": "aa_zh_weak_06",
+        "status": "SUCCESS",
+        "verdict": "weakly_relevant",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "aa_en_unrel_07": {
+        "case_id": "aa_en_unrel_07",
+        "status": "SUCCESS",
+        "verdict": "unrelated",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "aa_zh_unrel_08": {
+        "case_id": "aa_zh_unrel_08",
+        "status": "SUCCESS",
+        "verdict": "unrelated",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "mt_en_rel_01": {
+        "case_id": "mt_en_rel_01",
+        "status": "SUCCESS",
+        "verdict": "relevant",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "mt_zh_rel_02": {
+        "case_id": "mt_zh_rel_02",
+        "status": "SUCCESS",
+        "verdict": "relevant",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "mt_en_rel_03": {
+        "case_id": "mt_en_rel_03",
+        "status": "SUCCESS",
+        "verdict": "relevant",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "mt_zh_weak_04": {
+        "case_id": "mt_zh_weak_04",
+        "status": "SUCCESS",
+        "verdict": "unrelated",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "mt_en_weak_05": {
+        "case_id": "mt_en_weak_05",
+        "status": "SUCCESS",
+        "verdict": "weakly_relevant",
+        "basis": "title_only",
+        "error_kind": null
+      },
+      "mt_zh_weak_06": {
+        "case_id": "mt_zh_weak_06",
+        "status": "SUCCESS",
+        "verdict": "unrelated",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "mt_en_unrel_07": {
+        "case_id": "mt_en_unrel_07",
+        "status": "SUCCESS",
+        "verdict": "unrelated",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "mt_zh_unrel_08": {
+        "case_id": "mt_zh_unrel_08",
+        "status": "SUCCESS",
+        "verdict": "unrelated",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "cp_en_rel_01": {
+        "case_id": "cp_en_rel_01",
+        "status": "SUCCESS",
+        "verdict": "relevant",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "cp_zh_rel_02": {
+        "case_id": "cp_zh_rel_02",
+        "status": "SUCCESS",
+        "verdict": "relevant",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "cp_en_rel_03": {
+        "case_id": "cp_en_rel_03",
+        "status": "SUCCESS",
+        "verdict": "relevant",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "cp_zh_weak_04": {
+        "case_id": "cp_zh_weak_04",
+        "status": "SUCCESS",
+        "verdict": "weakly_relevant",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "cp_en_weak_05": {
+        "case_id": "cp_en_weak_05",
+        "status": "SUCCESS",
+        "verdict": "weakly_relevant",
+        "basis": "title_only",
+        "error_kind": null
+      },
+      "cp_zh_weak_06": {
+        "case_id": "cp_zh_weak_06",
+        "status": "SUCCESS",
+        "verdict": "weakly_relevant",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "cp_en_unrel_07": {
+        "case_id": "cp_en_unrel_07",
+        "status": "SUCCESS",
+        "verdict": "unrelated",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "cp_zh_unrel_08": {
+        "case_id": "cp_zh_unrel_08",
+        "status": "SUCCESS",
+        "verdict": "unrelated",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "sb_en_rel_01": {
+        "case_id": "sb_en_rel_01",
+        "status": "SUCCESS",
+        "verdict": "relevant",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "sb_zh_rel_02": {
+        "case_id": "sb_zh_rel_02",
+        "status": "SUCCESS",
+        "verdict": "relevant",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "sb_en_rel_03": {
+        "case_id": "sb_en_rel_03",
+        "status": "SUCCESS",
+        "verdict": "relevant",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "sb_zh_weak_04": {
+        "case_id": "sb_zh_weak_04",
+        "status": "SUCCESS",
+        "verdict": "unrelated",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "sb_en_weak_05": {
+        "case_id": "sb_en_weak_05",
+        "status": "SUCCESS",
+        "verdict": "weakly_relevant",
+        "basis": "title_only",
+        "error_kind": null
+      },
+      "sb_zh_weak_06": {
+        "case_id": "sb_zh_weak_06",
+        "status": "SUCCESS",
+        "verdict": "unrelated",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "sb_en_unrel_07": {
+        "case_id": "sb_en_unrel_07",
+        "status": "SUCCESS",
+        "verdict": "unrelated",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "sb_zh_unrel_08": {
+        "case_id": "sb_zh_unrel_08",
+        "status": "SUCCESS",
+        "verdict": "unrelated",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "ff_en_rel_01": {
+        "case_id": "ff_en_rel_01",
+        "status": "SUCCESS",
+        "verdict": "relevant",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "ff_zh_rel_02": {
+        "case_id": "ff_zh_rel_02",
+        "status": "SUCCESS",
+        "verdict": "relevant",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "ff_en_rel_03": {
+        "case_id": "ff_en_rel_03",
+        "status": "SUCCESS",
+        "verdict": "relevant",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "ff_zh_weak_04": {
+        "case_id": "ff_zh_weak_04",
+        "status": "SUCCESS",
+        "verdict": "weakly_relevant",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "ff_en_weak_05": {
+        "case_id": "ff_en_weak_05",
+        "status": "SUCCESS",
+        "verdict": "weakly_relevant",
+        "basis": "title_only",
+        "error_kind": null
+      },
+      "ff_zh_weak_06": {
+        "case_id": "ff_zh_weak_06",
+        "status": "SUCCESS",
+        "verdict": "weakly_relevant",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "ff_en_unrel_07": {
+        "case_id": "ff_en_unrel_07",
+        "status": "SUCCESS",
+        "verdict": "unrelated",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "ff_zh_unrel_08": {
+        "case_id": "ff_zh_unrel_08",
+        "status": "SUCCESS",
+        "verdict": "unrelated",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      }
+    },
+    "batch": {
+      "aa_en_rel_01": {
+        "case_id": "aa_en_rel_01",
+        "status": "SUCCESS",
+        "verdict": "relevant",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "aa_zh_rel_02": {
+        "case_id": "aa_zh_rel_02",
+        "status": "SUCCESS",
+        "verdict": "relevant",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "aa_en_rel_03": {
+        "case_id": "aa_en_rel_03",
+        "status": "SUCCESS",
+        "verdict": "relevant",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "aa_zh_weak_04": {
+        "case_id": "aa_zh_weak_04",
+        "status": "SUCCESS",
+        "verdict": "weakly_relevant",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "aa_en_weak_05": {
+        "case_id": "aa_en_weak_05",
+        "status": "SUCCESS",
+        "verdict": "weakly_relevant",
+        "basis": "title_only",
+        "error_kind": null
+      },
+      "aa_zh_weak_06": {
+        "case_id": "aa_zh_weak_06",
+        "status": "SUCCESS",
+        "verdict": "weakly_relevant",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "aa_en_unrel_07": {
+        "case_id": "aa_en_unrel_07",
+        "status": "SUCCESS",
+        "verdict": "unrelated",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "aa_zh_unrel_08": {
+        "case_id": "aa_zh_unrel_08",
+        "status": "SUCCESS",
+        "verdict": "unrelated",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "mt_en_rel_01": {
+        "case_id": "mt_en_rel_01",
+        "status": "SUCCESS",
+        "verdict": "relevant",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "mt_zh_rel_02": {
+        "case_id": "mt_zh_rel_02",
+        "status": "SUCCESS",
+        "verdict": "relevant",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "mt_en_rel_03": {
+        "case_id": "mt_en_rel_03",
+        "status": "SUCCESS",
+        "verdict": "relevant",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "mt_zh_weak_04": {
+        "case_id": "mt_zh_weak_04",
+        "status": "SUCCESS",
+        "verdict": "weakly_relevant",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "mt_en_weak_05": {
+        "case_id": "mt_en_weak_05",
+        "status": "SUCCESS",
+        "verdict": "weakly_relevant",
+        "basis": "title_only",
+        "error_kind": null
+      },
+      "mt_zh_weak_06": {
+        "case_id": "mt_zh_weak_06",
+        "status": "SUCCESS",
+        "verdict": "unrelated",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "mt_en_unrel_07": {
+        "case_id": "mt_en_unrel_07",
+        "status": "SUCCESS",
+        "verdict": "unrelated",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "mt_zh_unrel_08": {
+        "case_id": "mt_zh_unrel_08",
+        "status": "SUCCESS",
+        "verdict": "unrelated",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "cp_en_rel_01": {
+        "case_id": "cp_en_rel_01",
+        "status": "SUCCESS",
+        "verdict": "relevant",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "cp_zh_rel_02": {
+        "case_id": "cp_zh_rel_02",
+        "status": "SUCCESS",
+        "verdict": "relevant",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "cp_en_rel_03": {
+        "case_id": "cp_en_rel_03",
+        "status": "SUCCESS",
+        "verdict": "relevant",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "cp_zh_weak_04": {
+        "case_id": "cp_zh_weak_04",
+        "status": "SUCCESS",
+        "verdict": "weakly_relevant",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "cp_en_weak_05": {
+        "case_id": "cp_en_weak_05",
+        "status": "SUCCESS",
+        "verdict": "weakly_relevant",
+        "basis": "title_only",
+        "error_kind": null
+      },
+      "cp_zh_weak_06": {
+        "case_id": "cp_zh_weak_06",
+        "status": "SUCCESS",
+        "verdict": "weakly_relevant",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "cp_en_unrel_07": {
+        "case_id": "cp_en_unrel_07",
+        "status": "SUCCESS",
+        "verdict": "unrelated",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "cp_zh_unrel_08": {
+        "case_id": "cp_zh_unrel_08",
+        "status": "SUCCESS",
+        "verdict": "unrelated",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "sb_en_rel_01": {
+        "case_id": "sb_en_rel_01",
+        "status": "SUCCESS",
+        "verdict": "relevant",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "sb_zh_rel_02": {
+        "case_id": "sb_zh_rel_02",
+        "status": "SUCCESS",
+        "verdict": "relevant",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "sb_en_rel_03": {
+        "case_id": "sb_en_rel_03",
+        "status": "SUCCESS",
+        "verdict": "relevant",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "sb_zh_weak_04": {
+        "case_id": "sb_zh_weak_04",
+        "status": "SUCCESS",
+        "verdict": "weakly_relevant",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "sb_en_weak_05": {
+        "case_id": "sb_en_weak_05",
+        "status": "SUCCESS",
+        "verdict": "weakly_relevant",
+        "basis": "title_only",
+        "error_kind": null
+      },
+      "sb_zh_weak_06": {
+        "case_id": "sb_zh_weak_06",
+        "status": "SUCCESS",
+        "verdict": "unrelated",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "sb_en_unrel_07": {
+        "case_id": "sb_en_unrel_07",
+        "status": "SUCCESS",
+        "verdict": "unrelated",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "sb_zh_unrel_08": {
+        "case_id": "sb_zh_unrel_08",
+        "status": "SUCCESS",
+        "verdict": "unrelated",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "ff_en_rel_01": {
+        "case_id": "ff_en_rel_01",
+        "status": "SUCCESS",
+        "verdict": "relevant",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "ff_zh_rel_02": {
+        "case_id": "ff_zh_rel_02",
+        "status": "SUCCESS",
+        "verdict": "relevant",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "ff_en_rel_03": {
+        "case_id": "ff_en_rel_03",
+        "status": "SUCCESS",
+        "verdict": "relevant",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "ff_zh_weak_04": {
+        "case_id": "ff_zh_weak_04",
+        "status": "SUCCESS",
+        "verdict": "weakly_relevant",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "ff_en_weak_05": {
+        "case_id": "ff_en_weak_05",
+        "status": "SUCCESS",
+        "verdict": "weakly_relevant",
+        "basis": "title_only",
+        "error_kind": null
+      },
+      "ff_zh_weak_06": {
+        "case_id": "ff_zh_weak_06",
+        "status": "SUCCESS",
+        "verdict": "weakly_relevant",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "ff_en_unrel_07": {
+        "case_id": "ff_en_unrel_07",
+        "status": "SUCCESS",
+        "verdict": "unrelated",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      },
+      "ff_zh_unrel_08": {
+        "case_id": "ff_zh_unrel_08",
+        "status": "SUCCESS",
+        "verdict": "unrelated",
+        "basis": "title_and_abstract",
+        "error_kind": null
+      }
+    }
+  }
+}

@@ -63,17 +63,23 @@
   verdict ∈ `relevant | weakly_relevant | unrelated`。
   **相关性是 (文献, 任务) 的函数，不是文献的固有属性**——同一篇论文对「深度学习医学诊断」
   相关、对「供应链风险管理」无关。
-- **Language_Verdict**：`verdict ∈ zh | non_zh | unknown` + `confidence ∈ high | low`
-  + `basis`（source_field / script_analysis / source_default）。
+- **Language_Verdict**：`language_code ∈ zh | en | ja | ko | other | unknown` +
+  `quota_bucket ∈ zh | en | other | unknown`（只有 zh/en 参与配额,ja/ko/其他拉丁语种
+  归 other、报告单列不计数）+ `confidence ∈ high | medium | low | none` +
+  `basis`（source_field / script_analysis / agreement / none）。
+  **判定不对称**:中文靠字符(无 language 字段也判 zh);英文靠源字段(拉丁 + 源缺失 →
+  `unknown`,不硬判 en)。产品口径为**中/英**。
 - **Language_Counting_Policy**：`high_only`（仅 high confidence 计入语言配额，严格模式默认）
   | `include_low_with_warning`（low 也计入，但必须在报告中标注）。
 
 ### 配额
 
 - **Eligibility_Filter**：**硬过滤**条件，决定某 Reference 是否**有资格**被计数：
-  `(field, operator, value)`，field ∈ `year | reference_type | language | topic`。
+  `(field, operator, value)`，field ∈ `year | reference_type | language`。
+  **主题（topic）不作硬过滤字段**——主题切题由 Requirement 7 的 Relevance_Assessment
+  负责（语义判断，非确定性布尔），避免与相关性职责重叠（见 A2b design D1）。
 - **Count_Constraint**：**计数**要求：`(dimension, operator, value)`，
-  dimension ∈ `total | language.zh | language.non_zh`，operator ∈ `exact | min | max | range`。
+  dimension ∈ `total | language.zh | language.en`，operator ∈ `exact | min | max | range`。
 - **Quota_Spec**：`(eligibility_filters, count_constraints, scope)` 三元组。
   「最近 5 年至少 10 篇期刊论文」= filters `[year gte Y-4, reference_type in [journal_article]]`
   + constraints `[total min 10]`。**filter 与 constraint 不得混在同一结构里表达**。
@@ -287,7 +293,7 @@
 
 ### Requirement 5: 语言判定与计数策略
 
-**User Story:** 作为中文论文作者，我希望「中文 N 篇、外文 M 篇」的要求被如实处理，而不是被不可靠的元数据误导。
+**User Story:** 作为中文论文作者，我希望「中文 N 篇、英文 M 篇」的要求被如实处理，而不是被不可靠的元数据误导（产品口径为中/英）。
 
 #### Acceptance Criteria
 
@@ -297,8 +303,8 @@
 3. WHERE 检索源 `language` 与标题/摘要的字符构成分析**一致**，THE system SHALL 判
    `confidence=high`。
 4. WHERE 仅有单一弱证据（如源默认语言），THE system SHALL 判 `confidence=low`。
-5. WHERE 无任何可用依据，THE system SHALL 判 `unknown`，SHALL NOT 计入 `language.zh` 或
-   `language.non_zh` 任一 Count_Constraint。
+5. WHERE 无任何可用依据（含拉丁字母但检索源未提供 language 字段），THE system SHALL
+   判 `unknown`，SHALL NOT 计入 `language.zh` 或 `language.en` 任一 Count_Constraint。
 6. THE system SHALL 按 Language_Counting_Policy 决定 `confidence=low` 条目是否计入
    语言 Count_Constraint，SHALL NOT 让该行为处于未定义状态。
 7. THE system SHALL 以 `high_only` 为严格模式默认；WHERE policy 为
@@ -464,15 +470,21 @@
 12. WHERE Identifier_Resolution 未取得 work identifier，THE system SHALL 把该候选记为
     Unresolved_Lead：SHALL 在报告中作为线索呈现（含来源 URL），
     SHALL NOT 入 Ledger 的可引用集合，SHALL NOT 计入任何 Count_Constraint。
-13. WHERE 权威源反查明确「查无此文」，THE system SHALL 产生 `outcome=not_found` 的
-    Verification_Record 并把该候选标注为**疑似不存在**（Discovery_Source 可能为
-    模型幻觉），SHALL NOT 记为 `provider_error`。
+13. THE system SHALL 区分「模糊反查无匹配」与「精确回查查无此文」，SHALL NOT 混为一谈：
+    - WHERE 书目文本**模糊反查**未得到相似度达标的候选，THE system SHALL 记为
+      `UNRESOLVED_NO_MATCH`（仅表示未能解析出标识符），SHALL NOT 产生 `not_found`，
+      SHALL NOT 标注为疑似不存在——模糊查询无结果**不证明**作品不存在。
+    - WHERE Identifier_Resolution 已取得精确 work identifier、随后对其**精确回查**明确
+      「查无此文」，THE system SHALL 产生 `outcome=not_found` 的 Verification_Record 并把该
+      候选标注为**疑似不存在**（Discovery_Source 可能为模型幻觉），SHALL NOT 记为
+      `provider_error`，且此「疑似不存在」限于**该源**、不上升为「全球不存在」。
 14. THE system SHALL NOT 因 Identifier_Resolution 成功而把 `discovery_source`
     改写为权威源；两者分别记录（Requirement 2.7）。
 15. THE system SHALL 对 Discovery_Source 返回的标题、摘要、网页正文施加
     Requirement 17 的全部不可信输入防护。
-16. THE system SHALL 在报告中分别统计：Discovery_Source 发现数、
-    Identifier_Resolution 成功数、Unresolved_Lead 数、疑似不存在数。
+16. THE system SHALL 在报告中分别统计以下**四类互斥**计数：Discovery_Source 发现数、
+    Identifier_Resolution 成功数、`UNRESOLVED_NO_MATCH`（模糊反查无匹配）数、
+    疑似不存在（精确回查明确未命中）数，SHALL NOT 把模糊无匹配与疑似不存在混计。
 
 **核验源能力与来源层级**
 
@@ -582,8 +594,12 @@
 10. WHERE 提交后 Acquisition_Gap 仍非零，THE system SHALL 按 Requirement 10.6 让用户
     选择「接受现状继续写作」或「取消本次操作」，SHALL NOT 在用户未选择的情况下
     进入必定失败的写作循环。
-11. WHEN 用户选择接受现状，THE system SHALL 记录该决定，使后续 CitationQuotaGate
-    的未达标结果被报告为「已知缺口」而非新的失败。
+11. WHEN 用户选择接受现状，THE system SHALL 记录一条**有数量的偏差**
+    （Accepted_Quota_Deviation）：冻结接受时的可用数为 `effective_lower_bound`，
+    并保留 `original_lower_bound` 与原始差额。后续 CitationQuotaGate SHALL 按
+    `effective_lower_bound` 执行该维度、SHALL NOT 因原始差额判为**新**失败，
+    但 SHALL NOT 把该维度当作**无条件跳过**——正文引用数仍必须达到 `effective_lower_bound`。
+    该偏差 SHALL 仅作用于当前 operation + Task_Fingerprint + quota 指纹，SHALL NOT 跨任务复用。
 12. THE LiteraturePreflight SHALL 是唯一在写作前触发检索的环节；
     THE system SHALL NOT 在写作循环内触发检索（见 spec B Requirement 7）。
 
@@ -605,8 +621,11 @@
 5. WHEN 任一 Count_Constraint 未满足，THE CitationQuotaGate SHALL 判定不通过并回灌
    逐维度 Quota_Gap 与「Bundle 中尚未被引用且满足条件的候选文献」，
    使写作修订循环可据此补引用。
-6. WHERE 未达标的维度已被 Requirement 13.11 记录为「已知缺口」，
-   THE CitationQuotaGate SHALL 不因该维度判定不通过，SHALL 在报告中如实呈现该缺口。
+6. WHERE 某维度已被 Requirement 13.11 记录为 Accepted_Quota_Deviation，
+   THE CitationQuotaGate SHALL 按其 `effective_lower_bound` 校验该维度、SHALL NOT 因
+   原始差额判为新失败；THE CitationQuotaGate SHALL NOT 无条件跳过该维度——正文引用数
+   低于 `effective_lower_bound` 仍判不通过。THE system SHALL 在报告中同时呈现原始 gap 与
+   effective 下界。
 7. THE CitationQuotaGate SHALL 与写作循环**共用同一重试预算**，SHALL NOT 拥有独立的
    无限重试；WHEN 预算耗尽且仍不满足，THE system SHALL 按 Requirement 10.6 让用户
    选择接受现状或取消，SHALL NOT 静默放行。
@@ -743,6 +762,37 @@
    低置信自动去重各自可通过配置关闭；WHERE 全部关闭，THE system SHALL 退化为现有的
    「一次检索 + 核验入库」行为。
 9. THE system SHALL 保证既有测试全部通过。
+
+### Requirement 20: 检索意图准备与查询规划（A2f）
+
+**User Story:** 作为论文作者，我说「帮我加个引言，引用 20 篇」时，即便没直接给检索词，我也希望
+系统据论文主题去找对的文献，而不是拿「引言」两个字去搜；找不够时能自己换关键词继续找。
+
+#### Acceptance Criteria
+
+1. THE system SHALL 区分**语义主题**（决定「什么文献算切题」）与**检索 seed**（决定「到 provider
+   里怎么搜」）；语义主题进入 Relevance_Criteria 与 Task_Fingerprint，seed 只影响召回，
+   SHALL NOT 进入 semantic fingerprint。
+2. THE system SHALL NOT 以通用章节名（引言、相关工作、Introduction、Discussion 等）单独作为
+   检索主题或 seed。
+3. WHEN 用户未给显式 search_query 且 operation 语义与项目 claims 均不足以确定主题，
+   THE system SHALL 明确向用户澄清，SHALL NOT 退回用章节名硬搜，也 SHALL NOT 把系统失败
+   伪装成「用户没说明」。
+4. WHEN 语义主题（或 section_purpose）改变，THE system SHALL 视为新的 Task_Fingerprint；
+   WHEN 仅 seed 或 Query_Planner 产生的查询变化，THE system SHALL NOT 改变 Task_Fingerprint 或
+   使既有 Relevance_Assessment 缓存失效。
+5. THE system SHALL 把检索意图合成、多 seed 检索与查询规划的全部 LLM/检索调用计入**同一** 检索
+   预算（BudgetLedger）；确定性合成/规划 SHALL NOT 记 LLM 调用，且 LLM 计费点须在真正发出模型
+   调用处。
+6. THE system SHALL 自适应执行多个 seed：每次 Retrieval_Attempt 后重新评估配额缺口，满足即停，
+   SHALL NOT 在首轮盲目跑完全部 seed。
+7. WHEN 派生主题需要确认或澄清而流程暂停，THE system SHALL 可跨 turn 恢复**同一个冻结**的
+   Search_Intent，SHALL NOT 在恢复时重新采样 LLM；恢复到批次确认状态时 SHALL 复用原 pending
+   batch，SHALL NOT 重复发起检索。
+8. THE system SHALL 使持久化 trace 只记录 semantic_fingerprint / strategy_hash / 长度 / 数量 /
+   来源类型，SHALL NOT 记录语义主题、seed/query、claims 或正文原文。
+9. WHERE 不带 Citation_Quota，THE system SHALL NOT 进入检索意图准备；既有 rewrite/add_section 的
+   prompt、检索调用与输出行为逐字节不变。
 
 ## Correctness Properties
 
@@ -883,8 +933,9 @@ CitationQuotaGate 的计数完全由正文文本的确定性解析得出，与�
 
 ### Property 25: 引用配额闭环
 存在 Citation_Quota 时，写入 Working_Copy 的正文要么满足全部 Count_Constraint，
-要么其 Quota_Gap 已被显式报告并经用户选择接受（含预检阶段记录的已知缺口）；
-不存在静默放行。
+要么每个未满足维度已被显式报告并经用户接受为 Accepted_Quota_Deviation（记录
+`effective_lower_bound`），且正文引用数达到该 `effective_lower_bound`；
+不存在静默放行，也不存在「接受缺口后维度被无条件跳过」。
 **Validates: Requirements 13.11, 14.1, 14.5, 14.6, 14.7**
 
 ### Property 26: 条目完整性与格式诚实

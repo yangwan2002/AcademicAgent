@@ -1,0 +1,97 @@
+{
+  "schema_version": 4,
+  "references": [
+    {
+      "reference_id": "rf77a8bfbe100",
+      "work_identifiers": [
+        [
+          "arxiv",
+          "1706.03762"
+        ]
+      ],
+      "container_identifiers": [],
+      "unclassified_identifiers": [],
+      "title": "Attention Is All You Need",
+      "year": 2017,
+      "publication_date": "",
+      "abstract": "We propose the Transformer, based solely on attention mechanisms.",
+      "language_hint": "",
+      "reference_type": "",
+      "container_title": "",
+      "volume": "",
+      "issue": "",
+      "pages": "",
+      "article_number": "",
+      "publisher": "",
+      "publisher_place": "",
+      "edition": "",
+      "url": "",
+      "accessed_at": "",
+      "conference_name": "",
+      "conference_place": "",
+      "bibkey": "vaswani2017attention",
+      "legacy_verified": false,
+      "verification_method": "",
+      "quarantined": false,
+      "created_at": "",
+      "authors": [
+        "Vaswani"
+      ],
+      "bibkey_aliases": [],
+      "numeric_aliases": [
+        "1"
+      ],
+      "merged_from": [],
+      "discovery_sources": [
+        "arxiv"
+      ],
+      "field_provenance": [
+        [
+          "title",
+          "arxiv"
+        ]
+      ],
+      "verification_events": [
+        {
+          "event_id": "345d55d1012b",
+          "kind": "verified",
+          "source": "mock",
+          "provenance": "aggregator",
+          "authority": "final",
+          "identifier_type": "arxiv",
+          "identifier": "1706.03762",
+          "checked_at": "2026-07-30T09:34:10.831519+00:00",
+          "target_event_id": "",
+          "details": ""
+        }
+      ],
+      "field_conflicts": []
+    }
+  ],
+  "dedup_suggestions": [],
+  "known_numbers": [],
+  "claims": {},
+  "relevance_store": [
+    {
+      "reference_id": "arxiv:1706.03762",
+      "task_fingerprint": "d0d8d63dd6b583ee",
+      "reference_content_hash": "95a803520868ce13",
+      "judge_key": "openai||relevance-a2a-v1|relevance-schema-v1",
+      "status": "SUCCESS",
+      "verdict": "relevant",
+      "confidence": "high",
+      "basis": "title_and_abstract",
+      "matched_aspects": [],
+      "mismatch_aspects": [],
+      "reason_code": "",
+      "rationale": "",
+      "error_kind": null,
+      "assessed_at": "2026-07-30T09:34:10.831519+00:00"
+    }
+  ],
+  "pending_batches": [],
+  "committed_batch_ids": [
+    "batch_d0278de5"
+  ],
+  "pending_literature_flows": []
+}

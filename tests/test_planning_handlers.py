@@ -162,6 +162,7 @@ def test_format_ops_actually_applied_to_document(tmp_path):
     docx = pytest.importorskip("docx")
     if not _git_available():
         pytest.skip("需要 git")
+    from paper_agent.intents.format_docx import _format_target
     from paper_agent.tools.docx_format import FormatOp
 
     path = tmp_path / "d.docx"
@@ -180,8 +181,10 @@ def test_format_ops_actually_applied_to_document(tmp_path):
     res = handler_for(Intent.FORMAT_DOCX).execute(op, ctx)
 
     assert res.status is OperationStatus.SUCCEEDED, res.message
-    # 关键：字号真的被改到文档里（读回 working copy 验证）
-    out = docx.Document(session.working_path)
+    # 关键：字号真的被改到文档里（读回排版载体验证）。
+    # docx 会话的正文走 markdown 投影、排版走二进制副本，二者分工不同；
+    # 排版断言必须读那个二进制副本。
+    out = docx.Document(_format_target(session))
     sizes = [r.font.size.pt for p in out.paragraphs for r in p.runs if r.font.size]
     assert sizes and all(s == 20 for s in sizes)
 

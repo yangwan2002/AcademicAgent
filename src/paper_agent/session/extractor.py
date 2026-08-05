@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 import re
 
+from paper_agent.literature.dialect import is_tex, normalize_ext
 from paper_agent.session.facts import KnownNumber, KnownRef
 
 _TEX_BIBITEM = re.compile(r"\\bibitem(?:\[[^\]]*\])?\{([^}]+)\}([^\n]*)")
@@ -23,9 +24,9 @@ _NUMBER = re.compile(r"\d+(?:\.\d+)?")
 
 
 def extract_refs(text: str, ext: str) -> list[KnownRef]:
-    ext = ext.lower().lstrip(".")
+    ext = normalize_ext(ext)
     refs: list[KnownRef] = []
-    if ext == "tex":
+    if is_tex(ext):
         for i, m in enumerate(_TEX_BIBITEM.finditer(text), start=1):
             bibkey = m.group(1).strip()
             title = m.group(2).strip().rstrip(".")
@@ -46,9 +47,9 @@ def extract_numbers(text: str, ext: str) -> list[KnownNumber]:
     - ``.tex``：``\\begin{tabular}...\\end{tabular}`` 块内的数字。
     - ``.md`` ：markdown 表格行（含 ``|``）内的数字。
     """
-    ext = ext.lower().lstrip(".")
+    ext = normalize_ext(ext)
     blocks: list[str] = []
-    if ext == "tex":
+    if is_tex(ext):
         blocks = _TABULAR.findall(text)
     elif ext in ("md", "markdown"):
         blocks = _MD_TABLE_ROW.findall(text)

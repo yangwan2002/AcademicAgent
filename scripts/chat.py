@@ -1,19 +1,23 @@
-"""Week 1 极简 Chat REPL：对一个论文文件做 polish。
+"""Chat REPL：对一篇论文做润色 / 改写 / 新增章节 / 转格式 / 排版。
 
 用法：
     python scripts/chat.py path/to/paper.tex
 
-环境变量（可选）：
-    PAPER_LLM=mock            # 无 API key 时用 mock provider 走通流程
-    PAPER_LLM=deepseek        # 或任意预设厂商
+环境变量（可选，完整清单见 paper_agent/config.py）：
+    PAPER_LLM=mock                      # 无 API key 时用 mock provider 走通流程
+    PAPER_LLM=deepseek                  # 或任意预设厂商
     PAPER_LLM_MODEL=...
+    PAPER_INTENT_PLANNING_MODE=active   # off | shadow | active（默认 off，走关键词路由）
+    PAPER_TRACE=true                    # 落 runs/<run_id>/trace.json
 
 命令：
     :sections   列出章节
+    :refs       回填参考文献著录字段（刊名/卷/期/页，按 DOI 查 Crossref）
     :save       把 working copy 落盘到源文件
-    :undo       撤销上一次润色
+    :undo       撤销上一次修改
+    :stats      本次会话的 Turn 归属统计（新栈 / shadow / 静默降级到旧栈）
     :quit       退出（不自动保存源文件）
-其余输入按自然语言意图处理（Week 1 仅 polish）。
+其余输入按自然语言意图处理。
 """
 
 from __future__ import annotations
@@ -28,11 +32,15 @@ if _SRC not in sys.path:
 
 from paper_agent.config import load_config
 from paper_agent.utils.dotenv import load_dotenv
-from paper_agent.providers.factory import build_llm_provider, build_retrieval_provider
+from paper_agent.providers.factory import (
+    build_llm_provider,
+    build_retrieval_provider,
+    build_reviewer_llm_provider,
+)
 from paper_agent.session.extractor import extract_refs, extract_numbers
 from paper_agent.session.facts import SessionFacts, project_facts_path
 from paper_agent.session.file_session import FileBackedSession
-from paper_agent.session.section_index import SectionIndex
+from paper_agent.session.section_index import SECTIONABLE_EXTS, SectionIndex
 from paper_agent.tools.citation import CitationVerifier
 from paper_agent.tools.bibliography import fix_bibliography
 from paper_agent.intents.router import Router, Intent
@@ -52,13 +60,16 @@ from paper_agent.application.turn_service import TurnService
 from paper_agent.runtime.handlers import HandlerContext
 from paper_agent.observability.events import EventKind
 from paper_agent.observability.renderer import ConsoleRenderer
+from paper_agent.observability.turn_metrics import TurnMetrics
 from paper_agent.providers.llm.base import CancellationToken
 
 _COMMON_SECTIONS = [
     "Introduction", "Related Work", "Method", "Experiments",
     "Discussion", "Conclusion",
 ]
-_TEXT_EXT = {"tex", "md", "markdown"}
+#: 复用 section_index 的唯一真相源（此前这里硬编码了同一份集合 = 第二真相源）。
+#: 语义一致：能解析章节 ⇔ 能按 utf-8 当文本读。docx 两者皆不成立。
+_TEXT_EXT = SECTIONABLE_EXTS
 
 
 def _build_index(session) -> SectionIndex:
@@ -76,6 +87,51 @@ def _print_sections(index: SectionIndex) -> None:
     for i, s in enumerate(index.list(), start=1):
         indent = "  " * (s.level - 1)
         print(f"  {i}. {indent}{s.title}  [{s.id}]")
+
+
+def _warn_if_no_sections(session, index: SectionIndex) -> None:
+    """载入时就说清「这个格式做不了什么」，而不是等用户提请求后报 section_not_found。
+
+    docx 是 zip 二进制，解析不出标题 → 章节索引恒为空 → polish/rewrite/add_section
+    在计划期必然被拒。以前这条信息只体现为一句「（未识别到任何章节）」，
+    用户拿到的是 `section_not_found`，会去排查章节名而不是格式。
+    """
+    if index.supports_sections:
+        return
+    print(
+        f"\n[注意] 当前格式 .{session.ext} 解析不出章节结构，"
+        "按章节定位的操作全部不可用：润色 / 改写 / 新增章节。"
+        f"\n       可用：转格式、docx 排版。"
+        "\n       要做章节级写作，请先转成 .md 或 .tex，例如："
+        f"\n         pandoc \"{session.source_path}\" -t markdown -o paper.md"
+        "\n         python scripts/chat.py paper.md"
+    )
+
+
+def _note_docx_scope(session) -> None:
+    """docx 源：说清就地编辑的能力与**覆盖不到的范围**。
+
+    要说的不再是"排版会丢"（就地编辑不丢），而是表格/文本框内的文字看不见 ——
+    否则用户会以为全文都被处理了，而表格里的数字其实没动过。
+    """
+    if not getattr(session, "docx_source", ""):
+        return
+    lines = [
+        "\n[提示] 源文件是 .docx，直接在其副本上就地编辑"
+        "（润色 / 改写 / 新增章节 / 排版均可用）。",
+        "       页边距、分栏、页眉页脚、段内加粗等排版保持不变；:save 覆盖原文件。",
+    ]
+    try:
+        from paper_agent.session.docx_document import table_text_ignored
+        cells = table_text_ignored(session.working_path)
+    except Exception:      # noqa: BLE001 - 提示不该阻断启动
+        cells = 0
+    if cells:
+        lines.append(
+            f"       注意：表格内有 {cells} 处文字不在处理范围内（正文段落之外），"
+            "需手动改。"
+        )
+    print("\n".join(lines))
 
 
 def _ask(prompt: str) -> str:
@@ -101,12 +157,17 @@ def _run_add_section(session, facts, llm, retrieval, verifier, title_hint, posit
     )
 
 
-def _handle_planned_turn(turn_service, msg, *, session, facts, legacy_intent) -> bool:
+def _handle_planned_turn(turn_service, msg, *, session, facts, legacy_intent,
+                        metrics=None) -> bool:
     """走 intent-planning 理解层。返回 True 表示本轮已接管（跳过旧链路）。
 
     - shadow：只读旁路（`legacy` 传 no-op，真正的旧链路仍由调用方在其后执行），
       打印一行差异对比，返回 False。
     - active：规划层接管并执行，打印计划结果，返回 True。
+
+    `metrics`（可选 `TurnMetrics`，backlog B-4）：记录本轮**实际由谁服务**。
+    返回 False 时旧链路会接手 —— 这条降级路径以前只印一行提示、不留痕，导致
+    E2E 数据无法区分「新栈处理了」与「新栈挂了、旧栈兜的」。
     """
     try:
         out = turn_service.handle_turn(
@@ -115,14 +176,25 @@ def _handle_planned_turn(turn_service, msg, *, session, facts, legacy_intent) ->
         )
     except OperationCancelled:
         print("\n已取消。")
+        if metrics is not None:
+            metrics.record_cancelled()
+            metrics.record_served_by("cancelled")
         return True
     except Exception as exc:  # noqa: BLE001 - 理解层异常绝不拖垮 REPL
-        print(f"\n理解层出错（{type(exc).__name__}），本轮改用原有流程。")
+        category = type(exc).__name__
+        print(f"\n理解层出错（{category}），本轮改用原有流程。")
+        if metrics is not None:
+            # B-4：静默降级必须留痕 —— 否则这一轮会被误算成「新栈处理成功」
+            metrics.record_fallback(category)
+            metrics.record_served_by("legacy_fallback")
         return False
 
     if out.mode == "shadow":
         s = out.shadow
         if s is None:
+            if metrics is not None:
+                metrics.record_served_by("legacy_fallback")
+                metrics.record_fallback("shadow_result_missing")
             return False
         if s.ok:
             same = "一致" if s.matches_legacy else "不同"
@@ -132,11 +204,27 @@ def _handle_planned_turn(turn_service, msg, *, session, facts, legacy_intent) ->
             )
         else:
             print(f"[shadow] 未完成（{s.analyze_status or s.error}），不影响本次执行")
+        if metrics is not None:
+            metrics.record_served_by("shadow")
+            metrics.record_shadow(ok=s.ok, matches_legacy=s.matches_legacy)
         return False   # 旧链路照常继续
 
     # active
+    if metrics is not None:
+        metrics.record_served_by("active")
+        _absorb_active_metrics(out, metrics)
     _print_plan_outcome(out)
     return True
+
+
+def _absorb_active_metrics(out, metrics) -> None:
+    """把 active 结果的终态归入计数（结构化字段，不解析人类可读文本）。"""
+    if getattr(out, "run_error_category", ""):
+        metrics.record_active_failed(out.run_error_category)
+    if out.planning_exit is not None:
+        metrics.record_planning_exit(out.planning_exit.status.value)
+    elif out.report is not None:
+        metrics.record_plan_status(out.report.plan_status.value)
 
 
 def _print_plan_outcome(out) -> None:
@@ -154,10 +242,13 @@ def _print_plan_outcome(out) -> None:
         return
     print(f"\n计划结果：{report.plan_status.value}")
     for i, r in enumerate(report.operations, 1):
-        line = f"  {i}. {r.status.value}"
-        if r.message:
-            line += f" — {r.message.splitlines()[0]}"
-        print(line)
+        # 打印**整条** message：Gate 失败原因在第 2 行起（「最后一次违反：」之后），
+        # 此前只取首行 ⇒ 用户看到一个冒号后面什么都没有，等于没给失败原因。
+        head, *rest = r.message.splitlines() if r.message else ("",)
+        print(f"  {i}. {r.status.value}" + (f" — {head}" if head else ""))
+        for extra in rest:
+            if extra.strip():
+                print(f"     {extra.strip()}")
         for path in r.generated_outputs:
             print(f"     产物：{path}")
     if report.rollback_available:
@@ -232,6 +323,50 @@ def main(argv: list[str]) -> int:
     facts.save()
     _remembered = len(facts.claims.get("section_intents", {}))
 
+    # 写作前文献编排器装配（A2d 引用配额路径；默认关 → 装不出即保持旧路径，零影响）
+    lit_orchestrator = None
+    lit_port = None
+    lit_classifier = None
+    lit_synthesizer = None
+    if config.literature_writing_integration:
+        from paper_agent.application.console_literature_port import (
+            ConsoleLiteratureInteractor,
+        )
+        from paper_agent.application.literature_composition import (
+            CompositionUnavailable,
+            build_writing_orchestrator,
+        )
+        from paper_agent.literature.language import (
+            LanguageThresholds,
+            classify_record_language,
+        )
+
+        try:
+            lit_orchestrator = build_writing_orchestrator(
+                config, writer_llm=llm,
+                reviewer_llm=build_reviewer_llm_provider(config),
+                retrieval_provider=retrieval, facts=facts,
+            )
+            from paper_agent.application.literature_composition import (
+                build_search_synthesizer,
+            )
+            lit_synthesizer = build_search_synthesizer(config, writer_llm=llm)
+            lit_port = ConsoleLiteratureInteractor()
+            _th = LanguageThresholds(
+                han_ratio_zh=config.literature_lang_han_zh,
+                latin_ratio=config.literature_lang_latin,
+                kana_min=config.literature_lang_kana_min,
+                hangul_min=config.literature_lang_hangul_min,
+            )
+            lit_classifier = lambda rec: classify_record_language(rec, _th)  # noqa: E731
+            _bc = config.literature_bundle_budget_chars
+            print("引用配额写作已启用（supervised：检索/证据集需人工确认）。"
+                  + f"\n  证据集上下文预算：{'不限' if _bc <= 0 else f'{_bc} 字符'}"
+                    f"（约 {'—' if _bc <= 0 else _bc // 1500} 篇全摘要，"
+                    f"PAPER_LIT_BUNDLE_BUDGET_CHARS 可调）")
+        except CompositionUnavailable as exc:
+            print(f"引用配额写作未能启用：{exc} 将按旧路径处理带配额请求。")
+
     # intent-planning 理解层装配（PAPER_INTENT_PLANNING_MODE=off|shadow|active）
     turn_service = None
     if config.intent_planning_mode != "off":
@@ -242,6 +377,15 @@ def main(argv: list[str]) -> int:
             max_retry=config.polish_max_retry,
             max_char_change_ratio=config.polish_max_char_change_ratio,
             stream=config.stream_enabled,
+            writing_integration_enabled=config.literature_writing_integration,
+            literature_orchestrator=lit_orchestrator,
+            literature_port=lit_port,
+            classifier=lit_classifier,
+            language_policy=config.literature_lang_policy,
+            search_synthesis_enabled=config.literature_search_synthesis,
+            search_synthesizer=lit_synthesizer,
+            max_search_intent_revisions=config.literature_max_search_intent_revisions,
+            retrieval_limits=(lit_orchestrator._limits if lit_orchestrator is not None else None),
         )
         turn_service = TurnService(
             config=config, llm=llm,
@@ -257,12 +401,19 @@ def main(argv: list[str]) -> int:
                  if config.intent_planning_mode == "active"
                  else "（只旁路记录，执行仍走原流程）"))
 
+    # B-4：Turn 归属计数。每轮落盘一次，使崩溃/强杀后仍能看到已发生的归属，
+    # 且能回答「这次 E2E 的结论是否可直接采信」（attribution_is_clean）。
+    metrics = TurnMetrics()
+    metrics_path = os.path.join(config.runs_dir, "turn_metrics.json")
+
     index = _build_index(session)
     print(f"已载入 {source}（working: {session.working_path}）")
     print(f"抽取到 {len(facts.known_refs)} 条文献引用、{len(facts.known_numbers)} 个表格数字。")
     if _remembered:
         print(f"（已记住 {_remembered} 个此前章节的意图/结构，可复用）")
     _print_sections(index)
+    _warn_if_no_sections(session, index)
+    _note_docx_scope(session)
     print("\n输入润色需求，或 :help 查看命令。")
 
     while True:
@@ -279,22 +430,45 @@ def main(argv: list[str]) -> int:
         if msg == ":help":
             print(__doc__)
             continue
+        if msg == ":stats":
+            print("\n" + metrics.summary())
+            print(f"（明细：{metrics_path}）")
+            continue
         if msg == ":sections":
             index = _build_index(session)
             _print_sections(index)
             continue
+        if msg == ":refs":
+            # 修复 provider 之前抓的记录著录字段为空，需要一次性回填；
+            # 之后新检索的文献字段本就是齐的。只按 DOI 精确查，不猜。
+            ledger = getattr(facts, "ledger", None)
+            if ledger is None:
+                print("本会话没有文献账本。")
+                continue
+            from paper_agent.literature.backfill import backfill_ledger
+            from paper_agent.providers.retrieval.crossref import CrossrefVerifyProvider
+            print("正在按 DOI 回填著录字段（走 Crossref，可能需要一会儿）…")
+            report = backfill_ledger(ledger, CrossrefVerifyProvider())
+            facts.save()
+            print(report.message)
+            continue
         if msg == ":save":
+            # docx 与 md/tex 走同一条路：working 本身就是同格式副本，直接拷回。
+            # 就地编辑不再有格式转换，因此不需要"另存以防丢排版"那套额外问答。
+            saved: list[str] = []
+
             def _do_save(bus, _ct):
-                session.save_to_source(bus=bus)
+                saved.append(session.save_to_source(bus=bus))
                 return None
             coordinator.run(_do_save)  # :save 是独立 run
-            print(f"已保存到源文件：{session.source_path}")
+            print(f"已保存到：{saved[0] if saved else session.source_path}")
             continue
         if msg == ":undo":
             print("已撤销。" if session.undo() else "没有可撤销的修改。")
             continue
 
         # 自然语言意图
+        metrics.record_turn()
         index = _build_index(session)
         route = Router(index).route(msg)
 
@@ -302,11 +476,16 @@ def main(argv: list[str]) -> int:
         # - active：接管整条自然语言链路（多操作规划 → 澄清 → 未映射处置 → 确认 → 有序执行）
         # - shadow：只旁路分析并记录差异，随后仍走下面的旧链路（旧行为不变）
         if turn_service is not None and turn_service.mode != "off":
-            if _handle_planned_turn(
+            taken_over = _handle_planned_turn(
                 turn_service, msg, session=session, facts=facts,
-                legacy_intent=route.intent.value,
-            ):
+                legacy_intent=route.intent.value, metrics=metrics,
+            )
+            metrics.save(metrics_path)
+            if taken_over:
                 continue
+        else:
+            metrics.record_served_by("off")
+            metrics.save(metrics_path)
 
         if route.intent is Intent.UNCLEAR:
             print(route.note)
@@ -478,6 +657,11 @@ def main(argv: list[str]) -> int:
             print(result.diff)
             print("（:save 落盘到源文件，:undo 撤销）")
 
+    # 退出时给出归属摘要：静默降级过就显式警告，别让读者自己去推
+    if metrics.turns:
+        metrics.save(metrics_path)
+        print("\n" + metrics.summary())
+        print(f"（明细：{metrics_path}）")
     return 0
 
 

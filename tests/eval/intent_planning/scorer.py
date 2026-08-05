@@ -22,8 +22,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from paper_agent.tasking.contracts import AnalyzeResult, Task_Plan
-from paper_agent.tasking.plan_builder import operation_constraints
+from paper_agent.tasking.contracts import AnalyzeResult, DispositionStatus, Task_Plan
+from paper_agent.tasking.plan_builder import operation_constraints, operation_quota
 
 
 # --- golden 数据模型 -------------------------------------------------------
@@ -73,6 +73,17 @@ class CaseScore:
     requirements_missed: int
     silent_loss: int
     actual_intents: tuple[str, ...] = ()
+    # --- unmapped 账本核对（2026-08-01 新增）------------------------------
+    # `GoldenCase.expected_unmapped` 此前是**死数据**：load_golden 读进来，
+    # score_case 从不检查。于是「哪些要求应该落 unmapped」这条标注不进任何指标。
+    # 真机代价：用户说「参考文献10，英文8，中文2」，配额槽把后两条认领了、
+    # 漏报了第一条，系统于是追问「有一条要求我没能安排进任何操作：参考文献10」
+    # —— 值其实已在配额里，纯记账漏项。silent_loss 抓不到它（那条确实进了
+    # unmapped，账本是平的），只有跟人工标注对账才能发现。
+    unmapped_expected: int = 0             # 标注应落 unmapped 的条数
+    unmapped_missing: int = 0              # 标注应落 unmapped 却没落（危险：静默接受）
+    unmapped_spurious: int = 0             # 标注不该落却落了（扰民：无谓追问）
+    spurious_texts: tuple[str, ...] = ()   # 多余的 unmapped 原文，便于定位
 
 
 def _norm(s: str) -> str:
@@ -102,6 +113,9 @@ def _collect_constraint_texts(plan: Task_Plan) -> list[str]:
     for op in plan.operations:
         # slots 是唯一真相源；约束从 slots 实时派生（不再有 Operation.constraints 副本）
         texts.extend(operation_constraints(op.slots))
+        # 配额是嵌套 dict，下面的 str/list 分支取不到 —— 用与确认摘要同一个渲染器，
+        # 否则「引用 10 篇」这类标注约束在评测里恒判漏。
+        texts.extend(operation_quota(op.slots))
         for sv in op.slots.values():
             if sv.verbatim:
                 texts.append(sv.verbatim)
@@ -109,6 +123,14 @@ def _collect_constraint_texts(plan: Task_Plan) -> list[str]:
                 texts.append(sv.value)
             elif isinstance(sv.value, (list, tuple)):
                 texts.extend(str(x) for x in sv.value)
+            elif isinstance(sv.value, dict):
+                # clause 自带的用户原话（配额等结构化槽位）
+                for clauses in sv.value.values():
+                    if isinstance(clauses, (list, tuple)):
+                        texts.extend(
+                            str(c["verbatim"]) for c in clauses
+                            if isinstance(c, dict) and c.get("verbatim")
+                        )
     return texts
 
 
@@ -139,11 +161,29 @@ def score_case(case: GoldenCase, analyze: AnalyzeResult, plan: Task_Plan) -> Cas
         for rid in sv.requirement_ids
     }
     unmapped_texts = list(plan.unmapped_requirements)
+    # 项目级事实（「课题是 X」）落 facts.claims 而非槽位：**是**已消费，不算静默丢失。
+    project_memory_ids = {
+        d.requirement_id for d in plan.dispositions
+        if d.status is DispositionStatus.PROJECT_MEMORY
+    }
     silent = 0
     for r in analyze.requirements:
-        accounted = (r.requirement_id in consumed_ids) or _fuzzy_in(r.verbatim, unmapped_texts)
+        accounted = (
+            r.requirement_id in consumed_ids
+            or r.requirement_id in project_memory_ids
+            or _fuzzy_in(r.verbatim, unmapped_texts)
+        )
         if not accounted:
             silent += 1
+
+    # unmapped 账本与人工标注对账（两个方向都要查）
+    missing_unmapped = sum(
+        1 for exp in case.expected_unmapped if not _fuzzy_in(exp, unmapped_texts)
+    )
+    spurious = tuple(
+        actual_text for actual_text in unmapped_texts
+        if not _fuzzy_in(actual_text, case.expected_unmapped)
+    )
 
     return CaseScore(
         case_id=case.id,
@@ -155,6 +195,10 @@ def score_case(case: GoldenCase, analyze: AnalyzeResult, plan: Task_Plan) -> Cas
         requirements_missed=missed,
         silent_loss=silent,
         actual_intents=actual,
+        unmapped_expected=len(case.expected_unmapped),
+        unmapped_missing=missing_unmapped,
+        unmapped_spurious=len(spurious),
+        spurious_texts=spurious,
     )
 
 
@@ -168,6 +212,10 @@ class Metrics:
     constraint_recall: float = 0.0
     requirement_miss_rate: float = 0.0
     silent_loss_total: int = 0
+    # unmapped 账本核对
+    unmapped_missing_total: int = 0     # 应落未落（危险：系统静默接受了做不到的事）
+    unmapped_spurious_total: int = 0    # 不该落却落了（扰民：用户被问已满足的要求）
+    spurious_cases: list[tuple[str, tuple[str, ...]]] = field(default_factory=list)
     per_case: list[CaseScore] = field(default_factory=list)
 
     def as_dict(self) -> dict:
@@ -178,6 +226,12 @@ class Metrics:
             "constraint_recall": round(self.constraint_recall, 4),
             "requirement_miss_rate": round(self.requirement_miss_rate, 4),
             "silent_loss_total": self.silent_loss_total,
+            "unmapped_missing_total": self.unmapped_missing_total,
+            "unmapped_spurious_total": self.unmapped_spurious_total,
+            "spurious_cases": [
+                {"case_id": cid, "texts": list(texts)}
+                for cid, texts in self.spurious_cases
+            ],
         }
 
 
@@ -199,89 +253,11 @@ def aggregate(scores: Sequence[CaseScore]) -> Metrics:
         constraint_recall=(c_hit / c_total) if c_total else 1.0,
         requirement_miss_rate=(r_missed / r_total) if r_total else 0.0,
         silent_loss_total=sum(s.silent_loss for s in scores),
-        per_case=list(scores),
-    )
-
-
-# --- 澄清相关指标（Task 18）------------------------------------------------
-
-@dataclass(frozen=True)
-class ClarificationScore:
-    case_id: str
-    needed_clarification: bool          # 计划是否存在 required/must_ask 缺口
-    rounds: int                         # 澄清轮数（有 clarify_outcome 用其真实轮数）
-    repeat_ask_count: int               # 追问了已 present 字段的次数（不变量应为 0）
-    unnecessary: bool                   # 标注「本不该澄清」却需要澄清
-
-
-def score_clarification(case: GoldenCase, plan: Task_Plan, clarify_outcome=None) -> ClarificationScore:
-    """从（澄清前）计划与可选的 clarify 结果算澄清指标。
-
-    - `needed_clarification`：plan.missing_fields 非空（这正是 clarify 会问的缺口；
-      **计划确认不在此列**，确认不计入澄清追问）。
-    - `repeat_ask_count`：missing_fields 里指向的槽位若其实已 present → 违反「只补缺口」
-      不变量；正常恒为 0。
-    - `unnecessary`：仅当标注 expected_clarification=False 却仍需澄清。
-    """
-    missing = plan.missing_fields
-    needed = bool(missing)
-    rounds = clarify_outcome.rounds_used if clarify_outcome is not None else (1 if needed else 0)
-
-    repeat = 0
-    ops = {op.operation_id: op for op in plan.operations}
-    for field in missing:
-        op_id, _, slot = field.partition(":")
-        op = ops.get(op_id)
-        if op is not None:
-            sv = op.slots.get(slot)
-            if sv is not None and getattr(sv.field_status, "value", None) == "present":
-                repeat += 1
-
-    unnecessary = (case.expected_clarification is False) and needed
-    return ClarificationScore(
-        case_id=case.id, needed_clarification=needed, rounds=rounds,
-        repeat_ask_count=repeat, unnecessary=unnecessary,
-    )
-
-
-@dataclass
-class ClarificationMetrics:
-    n_cases: int = 0
-    clarification_rate: float = 0.0            # 需要澄清的样本占比
-    unnecessary_clarification_rate: float = 0.0  # 标注无需澄清却追问的占比
-    avg_rounds: float = 0.0
-    repeat_ask_total: int = 0                  # 重复询问 user_explicit 字段（应为 0）
-    per_case: list[ClarificationScore] = field(default_factory=list)
-
-    def as_dict(self) -> dict:
-        return {
-            "n_cases": self.n_cases,
-            "clarification_rate": round(self.clarification_rate, 4),
-            "unnecessary_clarification_rate": round(self.unnecessary_clarification_rate, 4),
-            "avg_rounds": round(self.avg_rounds, 4),
-            "repeat_ask_total": self.repeat_ask_total,
-        }
-
-
-def aggregate_clarification(scores: Sequence[ClarificationScore],
-                            cases: Sequence[GoldenCase] | None = None) -> ClarificationMetrics:
-    n = len(scores)
-    if n == 0:
-        return ClarificationMetrics()
-    needed = sum(1 for s in scores if s.needed_clarification)
-    # 不必要追问率：分母为「标注无需澄清」的样本
-    flagged_none = 0
-    if cases is not None:
-        by_id = {c.id: c for c in cases}
-        flagged_none = sum(1 for s in scores
-                           if by_id.get(s.case_id) and by_id[s.case_id].expected_clarification is False)
-    unnecessary = sum(1 for s in scores if s.unnecessary)
-    return ClarificationMetrics(
-        n_cases=n,
-        clarification_rate=needed / n,
-        unnecessary_clarification_rate=(unnecessary / flagged_none) if flagged_none else 0.0,
-        avg_rounds=sum(s.rounds for s in scores) / n,
-        repeat_ask_total=sum(s.repeat_ask_count for s in scores),
+        unmapped_missing_total=sum(s.unmapped_missing for s in scores),
+        unmapped_spurious_total=sum(s.unmapped_spurious for s in scores),
+        spurious_cases=[
+            (s.case_id, s.spurious_texts) for s in scores if s.spurious_texts
+        ],
         per_case=list(scores),
     )
 
@@ -289,9 +265,15 @@ def aggregate_clarification(scores: Sequence[ClarificationScore],
 __all__ = [
     "GoldenCase", "CaseScore", "Metrics",
     "load_golden", "score_case", "aggregate",
-    "ClarificationScore", "ClarificationMetrics",
-    "score_clarification", "aggregate_clarification",
 ]
+
+# 注：此处**曾有**一套 ClarificationScore / ClarificationMetrics /
+# score_clarification / aggregate_clarification 的旧实现（字段为
+# needed_clarification / repeat_ask_count / unnecessary），与文件末尾 Task 18
+# 那套同名。Python 后定义者遮盖前者 ⇒ 旧的一套是**死代码**，runner 调的一直是
+# 末尾那套（签名 `score_clarification(case_id, *, asks, rounds, pre_clarify_plan)`）。
+# 2026-08-01 删除。教训：新版指标要**替换**旧定义，追加同名类只会留下一个
+# 永不执行、却会误导读者的第二真相源。
 
 
 # --- 澄清相关指标（Task 18）------------------------------------------------

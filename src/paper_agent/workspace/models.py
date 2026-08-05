@@ -39,6 +39,9 @@ class ReferenceEntry:
     source: str = ""          # 来源，如 "arxiv" / "semantic_scholar" / "openalex"
     verified: bool = False
     abstract: str = ""
+    # 检索源提供的原始 language 值（如 OpenAlex 的 "language"）；语言判定（A2a）据此
+    # 拿到源信号。空 = 源未提供，判定退回脚本分析。
+    language: str = ""
     pdf_url: str = ""
     abstract_sections: dict[str, str] = field(default_factory=dict)
     citation_aliases: list[str] = field(default_factory=list)
@@ -47,6 +50,20 @@ class ReferenceEntry:
     # source_id 保留不动（核验/路由/facts 仍用它）；这两个字段供 Ledger 精确去重。
     work_identifiers: dict[str, str] = field(default_factory=dict)
     container_identifiers: dict[str, str] = field(default_factory=dict)
+    # ---- 著录字段（GB/T 7714 等完整格式所需）----
+    # 原先注释称「候选 DTO 不承载这些字段，留待候选→Record 转换时映射」，但转换函数
+    # 只能读候选**已有**的字段：provider 侧不取，转换处就无从映射 ⇒ 真机 25 条记录
+    # container_title / volume / pages 覆盖率全为 0，完整格式永远渲染不出来。
+    # 数据本就在 provider 响应里（OpenAlex 的 primary_location / biblio），不增加网络调用。
+    reference_type: str = ""       # OpenAlex `type` / Crossref `type`
+    container_title: str = ""      # 期刊名 / 会议论文集名
+    volume: str = ""
+    issue: str = ""
+    pages: str = ""
+    article_number: str = ""
+    publisher: str = ""
+    conference_name: str = ""
+    url: str = ""
 
 
 #: A1 起用语义正确的名字指代「检索候选（无身份、非持久化）」。

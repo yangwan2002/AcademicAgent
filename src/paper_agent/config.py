@@ -28,6 +28,14 @@ class Config:
     llm_base_url: str | None = None
     llm_api_key_env: str | None = None
 
+    # ---- LLM 健壮性（经 factory 注入 ResilientLLMProvider）----
+    # 写正文那次调用 prompt 与输出都最长，最容易撞超时。一次瞬时超时不该让整个
+    # 计划 failed，故默认开重试；置 0 可关掉（回到裸 provider 的原始异常语义）。
+    llm_max_retries: int = 3
+    llm_retry_base_backoff_s: float = 1.0
+    llm_retry_max_backoff_s: float = 30.0
+    llm_request_timeout_s: float = 120.0     # 单次 HTTP 请求超时（传给底层 client）
+
     # ---- reviewer LLM（可选，独立模型，用于生成/校验分离）----
     reviewer_llm_provider: str = ""
     reviewer_llm_model: str = ""
@@ -72,6 +80,64 @@ class Config:
     literature_require_final_verification: bool = False  # 是否要求最终核验源（A2 接 Crossref 后开）
     literature_source_priority: str = "openalex,semantic_scholar,arxiv"  # 同层级源排序
 
+    # ---- literature-evidence / A2a 语言判定阈值（初始值，需由 Golden Set 校准）----
+    literature_lang_han_zh: float = 0.50        # Han 占比 ≥ → Han 主导（中文候选）
+    literature_lang_latin: float = 0.50         # 拉丁占比 ≥ → 拉丁主导
+    literature_lang_kana_min: float = 0.05      # 假名占比 ≥ → 显著假名（→ ja）
+    literature_lang_hangul_min: float = 0.05    # Hangul 占比 ≥ → 显著 Hangul（→ ko）
+    literature_lang_policy: str = "high_only"   # high_only | include_low_with_warning
+
+    # ---- literature-evidence / A2d 写作接入总开关（默认关；A2d-5 全链路就绪才启用）----
+    literature_writing_integration: bool = False
+
+    # ---- literature-evidence / A2f 检索意图准备与查询规划 ----
+    literature_search_synthesis: bool = False           # 合成检索意图（默认关；开则可从上下文推主题）
+    literature_query_planner: str = "deterministic"     # deterministic | llm | hybrid
+    literature_max_search_intent_revisions: int = 2     # 澄清/修改重合成上限
+
+    # ---- literature-evidence / A2c 检索 Loop（组合层据此构造 RetrievalLimits 注入）----
+    literature_discovery_enabled: bool = False          # Discovery 兜底默认关（无真实 Web 后端）
+    literature_retrieval_max_iters: int = 6
+    literature_retrieval_max_provider_calls: int = 200  # 全局 provider 调用上限（search+verify）
+    literature_retrieval_max_search_calls: int = 30
+    literature_retrieval_max_verify_calls: int = 120
+    literature_retrieval_max_llm_calls: int = 30
+    literature_retrieval_time_budget_s: float = 120.0
+    # 接受相关性等级：仅 relevant | 也收 weakly_relevant（引言常引背景/邻近工作）
+    literature_accept_weakly_relevant: bool = False
+    # F-3：接受策略模式。真机数据（2026-08-01）显示 18 个候选里 10 个判 weakly_relevant，
+    # 含写引言必引的综述；而 method/evidence 类章节要的是直接支撑。故按章节用途分档。
+    #   strict     —— 一律只收 relevant（默认，与改造前逐字节一致）
+    #   by_purpose —— 按 section_purpose 分档（引言/相关工作/背景/讨论 收 weakly）
+    #   permissive —— 一律也收 weakly（等价于旧 literature_accept_weakly_relevant=true）
+    literature_acceptance_mode: str = "strict"
+
+    # ---- 证据集上下文预算（build_bundle）----
+    # 只约束**证据块**（文献题录 + 摘要片段），不含目标章节正文（后者当前无上限，
+    # 见 backlog D-4「两套预算体系互不相识」）。
+    #
+    # 默认值从 8000 提到 24000：8000 是硬编码默认参数，从未按真实数据校准。
+    # 真机实测（2026-08-02，proj_1780f6e14f27 的 10 条 OpenAlex 记录）
+    # 平均 1521 字符/条 ⇒ 8000 只装 5 条，而用户要求 total=10 需 15213 字符，
+    # 于是 `total=10` 恒定触发 CONTEXT_BUDGET_INSUFFICIENT → 操作被 rejected。
+    # 24000 ≈ 16 条全摘要，覆盖「引言 10 篇」这类常见要求且留余量。
+    #
+    # 计量口径是**字符**而非 token（backlog P-3 已记）：中文约 1–1.5 字符/token、
+    # 英文约 4 字符/token，故同一预算下中文的真实 token 成本是英文的 3–4 倍。
+    # 换 token 计量属独立改动，不在本次范围。
+    literature_bundle_budget_chars: int = 24000
+
+    # ---- retrieval-throughput / B1（默认关；size=1 保持逐篇语义）----
+    literature_relevance_batch_enabled: bool = False
+    literature_relevance_batch_size: int = 1
+    literature_relevance_batch_input_chars: int = 12000
+    literature_relevance_batch_input_tokens: int | None = None
+    literature_relevance_batch_output_chars: int = 8000
+    literature_relevance_batch_output_tokens: int | None = None
+    literature_batch_retry_limit: int = 1
+    # ---- retrieval-throughput / B2（默认关；相关性先于严格核验）----
+    literature_pipeline_reorder_enabled: bool = False
+
 
 # 向后兼容别名：V2 骨架代码里以 RuntimeConfig 指代同一对象。
 RuntimeConfig = Config
@@ -84,6 +150,16 @@ def load_config() -> Config:
         llm_model=os.environ.get("PAPER_LLM_MODEL", ""),
         llm_base_url=os.environ.get("PAPER_BASE_URL") or None,
         llm_api_key_env=os.environ.get("PAPER_KEY_ENV") or None,
+        llm_max_retries=_env_int("PAPER_LLM_MAX_RETRIES", 3, minimum=0),
+        llm_retry_base_backoff_s=_env_float(
+            "PAPER_LLM_RETRY_BASE_BACKOFF", 1.0, minimum=0.0
+        ),
+        llm_retry_max_backoff_s=_env_float(
+            "PAPER_LLM_RETRY_MAX_BACKOFF", 30.0, minimum=0.0
+        ),
+        llm_request_timeout_s=_env_float(
+            "PAPER_LLM_TIMEOUT", 120.0, minimum=1.0
+        ),
         reviewer_llm_provider=os.environ.get("PAPER_REVIEWER_LLM", ""),
         reviewer_llm_model=os.environ.get("PAPER_REVIEWER_LLM_MODEL", ""),
         reviewer_llm_base_url=os.environ.get("PAPER_REVIEWER_BASE_URL") or None,
@@ -116,6 +192,46 @@ def load_config() -> Config:
         literature_source_priority=os.environ.get(
             "PAPER_LIT_SOURCE_PRIORITY", "openalex,semantic_scholar,arxiv"
         ),
+        literature_lang_han_zh=_env_float("PAPER_LIT_LANG_HAN_ZH", 0.50, minimum=0.0),
+        literature_lang_latin=_env_float("PAPER_LIT_LANG_LATIN", 0.50, minimum=0.0),
+        literature_lang_kana_min=_env_float("PAPER_LIT_LANG_KANA_MIN", 0.05, minimum=0.0),
+        literature_lang_hangul_min=_env_float("PAPER_LIT_LANG_HANGUL_MIN", 0.05, minimum=0.0),
+        literature_lang_policy=_env_lang_policy("PAPER_LIT_LANG_POLICY", "high_only"),
+        literature_writing_integration=_env_flag("PAPER_LIT_WRITING_INTEGRATION", False),
+        literature_search_synthesis=_env_flag("PAPER_LIT_SEARCH_SYNTHESIS", False),
+        literature_query_planner=_env_query_planner("PAPER_LIT_QUERY_PLANNER", "deterministic"),
+        literature_max_search_intent_revisions=_env_int(
+            "PAPER_LIT_MAX_SEARCH_INTENT_REVISIONS", 2, minimum=0),
+        literature_discovery_enabled=_env_flag("PAPER_LIT_DISCOVERY_ENABLED", False),
+        literature_retrieval_max_iters=_env_int("PAPER_LIT_RETRIEVAL_MAX_ITERS", 6, minimum=1),
+        literature_retrieval_max_provider_calls=_env_int(
+            "PAPER_LIT_RETRIEVAL_MAX_PROVIDER_CALLS", 200, minimum=1),
+        literature_retrieval_max_search_calls=_env_int("PAPER_LIT_RETRIEVAL_MAX_SEARCH_CALLS", 30, minimum=1),
+        literature_retrieval_max_verify_calls=_env_int("PAPER_LIT_RETRIEVAL_MAX_VERIFY_CALLS", 120, minimum=1),
+        literature_retrieval_max_llm_calls=_env_int("PAPER_LIT_RETRIEVAL_MAX_LLM_CALLS", 30, minimum=1),
+        literature_retrieval_time_budget_s=_env_float("PAPER_LIT_RETRIEVAL_TIME_BUDGET", 120.0, minimum=0.0),
+        literature_accept_weakly_relevant=_env_flag("PAPER_LIT_ACCEPT_WEAKLY_RELEVANT", False),
+        literature_acceptance_mode=_env_acceptance_mode(
+            "PAPER_LIT_ACCEPTANCE_MODE", "strict"),
+        # 0 = 不限（build_bundle 对 budget_chars<=0 视为无预算），故 minimum=0。
+        literature_bundle_budget_chars=_env_int(
+            "PAPER_LIT_BUNDLE_BUDGET_CHARS", 24000, minimum=0),
+        literature_relevance_batch_enabled=_env_flag(
+            "PAPER_LIT_RELEVANCE_BATCH_ENABLED", False),
+        literature_relevance_batch_size=_env_int(
+            "PAPER_LIT_RELEVANCE_BATCH_SIZE", 1, minimum=1),
+        literature_relevance_batch_input_chars=_env_int(
+            "PAPER_LIT_RELEVANCE_BATCH_INPUT_CHARS", 12000, minimum=1),
+        literature_relevance_batch_input_tokens=_env_optional_int(
+            "PAPER_LIT_RELEVANCE_BATCH_INPUT_TOKENS", minimum=1),
+        literature_relevance_batch_output_chars=_env_int(
+            "PAPER_LIT_RELEVANCE_BATCH_OUTPUT_CHARS", 8000, minimum=1),
+        literature_relevance_batch_output_tokens=_env_optional_int(
+            "PAPER_LIT_RELEVANCE_BATCH_OUTPUT_TOKENS", minimum=1),
+        literature_batch_retry_limit=_env_int(
+            "PAPER_LIT_BATCH_RETRY_LIMIT", 1, minimum=0),
+        literature_pipeline_reorder_enabled=_env_flag(
+            "PAPER_LIT_PIPELINE_REORDER_ENABLED", False),
     )
 
 
@@ -130,6 +246,59 @@ def _env_mode(name: str, default: str) -> str:
     """理解层三态；非法值安全降级为 default。"""
     raw = (os.environ.get(name) or "").strip().lower()
     return raw if raw in ("off", "shadow", "active") else default
+
+
+def _env_lang_policy(name: str, default: str) -> str:
+    """语言计数策略；非法值降级为默认（high_only 严格），并打印可观测警告。
+
+    降级方向恒为**更严格**（默认 high_only），不会静默进入宽松模式。
+    """
+    raw = (os.environ.get(name) or "").strip().lower()
+    valid = ("high_only", "include_low_with_warning")
+    if raw == "":
+        return default
+    if raw not in valid:
+        import warnings
+        warnings.warn(
+            f"{name}={raw!r} 非法，降级为 {default!r}（不进入宽松模式）",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        return default
+    return raw
+
+
+def _env_acceptance_mode(name: str, default: str) -> str:
+    """相关性接受策略模式；非法值降级为 ``strict``（**更严格**方向）并告警。
+
+    与 `_env_lang_policy` 同一纪律：降级恒为更严格，绝不静默放宽引用门槛。
+    """
+    raw = (os.environ.get(name) or "").strip().lower()
+    valid = ("strict", "by_purpose", "permissive")
+    if raw == "":
+        return default
+    if raw not in valid:
+        import warnings
+        warnings.warn(
+            f"{name}={raw!r} 非法，降级为 'strict'（不静默放宽引用门槛）",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        return "strict"
+    return raw
+
+
+def _env_query_planner(name: str, default: str) -> str:
+    """检索查询规划器模式；非法值降级 deterministic 并告警（不静默进入 LLM 模式）。"""
+    raw = (os.environ.get(name) or "").strip().lower()
+    valid = ("deterministic", "llm", "hybrid")
+    if raw == "":
+        return default
+    if raw not in valid:
+        import warnings
+        warnings.warn(f"{name}={raw!r} 非法，降级为 {default!r}", RuntimeWarning, stacklevel=2)
+        return default
+    return raw
 
 
 def _env_int(name: str, default: int, *, minimum: int | None = None) -> int:
@@ -158,6 +327,19 @@ def _env_float(name: str, default: float, *, minimum: float | None = None) -> fl
     if minimum is not None and val < minimum:
         return default
     return val
+
+
+def _env_optional_int(name: str, *, minimum: int | None = None) -> int | None:
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return None
+    try:
+        value = int(raw.strip())
+    except (ValueError, TypeError):
+        return None
+    if minimum is not None and value < minimum:
+        return None
+    return value
 
 
 __all__ = ["Config", "RuntimeConfig", "load_config"]

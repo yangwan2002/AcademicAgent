@@ -63,9 +63,19 @@ class ConsolePlanningInteractor:
     # --- 未映射要求处置 ---
 
     def resolve_unmapped(self, item: str) -> UnmappedDisposition:
+        # 措辞刻意保守：「没能安排进任何操作」是**账本口径**（没有槽位认领它），
+        # 不等于「这条要求做不到」。真机常见成因是一个槽位覆盖了多条要求、
+        # 但只自报了其中几条（如配额槽吃下「参考文献10/英文8/中文2」却只报后两条）。
+        # 旧文案只说「没能安排」，用户无从判断选「忽略」会不会丢东西 —— 于是把
+        # 一个本可知情的决定变成了猜。上下文（已理解的操作与槽位）要靠扩展
+        # PlanningInteractor 协议才能展示，见 backlog X-8。
         self._out(f"\n有一条要求我没能安排进任何操作：「{item}」")
+        self._out(
+            "（可能它已被其他要求涵盖，也可能我确实没理解。"
+            "紧接着的计划确认会列出我实际要做的事，可据此核对。）"
+        )
         answer = self._prompt(
-            "怎么处理？(1=补充说明 / 2=忽略这条 / 3=取消本次)\n> "
+            "怎么处理？(1=补充说明 / 2=忽略这条并继续 / 3=取消本次)\n> "
         ).strip()
         if answer.startswith("1"):
             text = self._prompt("请补充说明：\n> ").strip()

@@ -1,0 +1,164 @@
+{
+  "schema_version": 4,
+  "references": [],
+  "dedup_suggestions": [],
+  "known_numbers": [],
+  "claims": {},
+  "relevance_store": [
+    {
+      "reference_id": "rc98190607a96",
+      "task_fingerprint": "e89a0612f8b4e18f",
+      "reference_content_hash": "4fb75146ea5ec398",
+      "judge_key": "anthropic|qwen3.7-max|relevance-a2a-v1|relevance-schema-v1",
+      "status": "SUCCESS",
+      "verdict": "weakly_relevant",
+      "confidence": "high",
+      "basis": "title_and_abstract",
+      "matched_aspects": [
+        "大语言模型",
+        "编程/代码相关任务(调试、评估)"
+      ],
+      "mismatch_aspects": [
+        "研究焦点(教学应用 vs 代码生成技术)",
+        "研究对象(学生/教学效果 vs 模型/生成算法)"
+      ],
+      "reason_code": "weakly_relevant",
+      "rationale": "候选文献的核心研究问题是大语言模型在Python编程教学中的应用（如辅助理解、练习设计、调试和评估），属于教育应用领域。而当前任务的主题是“大语言模型代码生成”，侧重于代码生成的技术、方法或模型本身。两者虽然都涉及大语言模型和代码/编程，但研究焦点和对象不匹配，候选文献仅提供相邻主题的背景，不能直接支撑代码生成的核心任务。",
+      "error_kind": null,
+      "assessed_at": "2026-07-30T13:03:32.070790+00:00"
+    },
+    {
+      "reference_id": "r69aa2c3b04e4",
+      "task_fingerprint": "e89a0612f8b4e18f",
+      "reference_content_hash": "6285f8bbf563bb64",
+      "judge_key": "anthropic|qwen3.7-max|relevance-a2a-v1|relevance-schema-v1",
+      "status": "SUCCESS",
+      "verdict": "unrelated",
+      "confidence": "high",
+      "basis": "title_and_abstract",
+      "matched_aspects": [
+        "大语言模型"
+      ],
+      "mismatch_aspects": [
+        "代码生成",
+        "研究核心问题",
+        "模型应用场景"
+      ],
+      "reason_code": "研究问题与方法不匹配",
+      "rationale": "候选文献的核心研究问题是基于大语言模型的结构件机械加工工艺知识推荐与问答系统构建，大语言模型的主要作用是推荐工艺知识。虽然摘要末尾提及该方法使“数控代码生成效率具有一定提升”，但这只是下游自动数控编程系统应用推荐知识后的间接效果，大语言模型本身并不直接执行代码生成任务。因此，该文献与“大语言模型代码生成”的核心查询意图不匹配。",
+      "error_kind": null,
+      "assessed_at": "2026-07-30T13:03:49.063440+00:00"
+    },
+    {
+      "reference_id": "r49af85ace2b9",
+      "task_fingerprint": "e89a0612f8b4e18f",
+      "reference_content_hash": "32c7c4881565501e",
+      "judge_key": "anthropic|qwen3.7-max|relevance-a2a-v1|relevance-schema-v1",
+      "status": "SUCCESS",
+      "verdict": "weakly_relevant",
+      "confidence": "high",
+      "basis": "title_and_abstract",
+      "matched_aspects": [
+        "大语言模型",
+        "代码生成（作为应用场景提及）"
+      ],
+      "mismatch_aspects": [
+        "核心研究问题（模型全面对比而非专门的代码生成研究）",
+        "研究深度（仅泛泛提及代码生成能力，未深入探讨代码生成的具体技术、方法或评估）"
+      ],
+      "reason_code": "weakly_relevant",
+      "rationale": "候选文献的核心目的是全面对比ChatGPT与DeepSeek-R1在架构、训练方法、推理能力和应用场景等方面的差异。虽然摘要中明确提到DeepSeek-R1在“代码生成”任务上表现优异，但代码生成仅仅是作为评估模型推理能力的一个应用场景被提及，并非该论文专门深入研究的核心问题。因此，该文献仅能提供大语言模型在代码生成方面表现的通用背景或相邻对比信息，不能直接支撑专门针对“大语言模型代码生成”技术或方法的核心写作任务。",
+      "error_kind": null,
+      "assessed_at": "2026-07-30T13:04:11.793088+00:00"
+    },
+    {
+      "reference_id": "rf89c56061dd7",
+      "task_fingerprint": "e89a0612f8b4e18f",
+      "reference_content_hash": "edcd2d0583c3d88f",
+      "judge_key": "anthropic|qwen3.7-max|relevance-a2a-v1|relevance-schema-v1",
+      "status": "SUCCESS",
+      "verdict": "unrelated",
+      "confidence": "high",
+      "basis": "title_and_abstract",
+      "matched_aspects": [
+        "生成式人工智能/大语言模型底层技术背景"
+      ],
+      "mismatch_aspects": [
+        "应用领域（学术论文写作 vs 代码生成）",
+        "研究对象（研究生教育 vs 软件开发/代码工程）",
+        "研究视角（哲学机理/学术伦理/教育对策 vs 算法设计/技术实现/模型评估）"
+      ],
+      "reason_code": "domain_mismatch",
+      "rationale": "当前任务的核心是“大语言模型代码生成”，关注的是LLM在生成计算机代码方面的技术、方法或评估。而候选文献探讨的是生成式人工智能在“研究生学术论文写作”中的应用，侧重于教育学、哲学机理、学术伦理及政策对策。两者虽然都涉及生成式AI/大语言模型，但应用领域（自然语言文本写作 vs 编程语言代码生成）和研究视角（人文社科/教育 vs 计算机科学/工程）完全不匹配，无法为代码生成任务提供直接支撑。",
+      "error_kind": null,
+      "assessed_at": "2026-07-30T13:04:32.009553+00:00"
+    },
+    {
+      "reference_id": "r8a91199555e6",
+      "task_fingerprint": "e89a0612f8b4e18f",
+      "reference_content_hash": "622e302b2bc0920e",
+      "judge_key": "anthropic|qwen3.7-max|relevance-a2a-v1|relevance-schema-v1",
+      "status": "SUCCESS",
+      "verdict": "unrelated",
+      "confidence": "high",
+      "basis": "title_and_abstract",
+      "matched_aspects": [],
+      "mismatch_aspects": [
+        "研究主题",
+        "研究对象",
+        "研究方法"
+      ],
+      "reason_code": "topic_mismatch",
+      "rationale": "当前任务的核心主题是“大语言模型代码生成”，而候选文献的主题是“可视化与人工智能的交叉学科研究（AI+VIS）”，主要探讨可视化技术如何提升AI的可解释性以及AI如何优化可视化生成与交互等。候选文献既未涉及大语言模型（LLMs），也未涉及代码生成（Code Generation）任务，两者在研究问题、对象和方法上完全不匹配。",
+      "error_kind": null,
+      "assessed_at": "2026-07-30T13:04:47.050897+00:00"
+    },
+    {
+      "reference_id": "r3360fab2b6a9",
+      "task_fingerprint": "e89a0612f8b4e18f",
+      "reference_content_hash": "6f7dcc20e4761e8d",
+      "judge_key": "anthropic|qwen3.7-max|relevance-a2a-v1|relevance-schema-v1",
+      "status": "SUCCESS",
+      "verdict": "weakly_relevant",
+      "confidence": "high",
+      "basis": "title_and_abstract",
+      "matched_aspects": [
+        "提及了大语言模型（DeepSeek）在代码生成（Python代码生成与修改）方面的具体应用"
+      ],
+      "mismatch_aspects": [
+        "核心研究问题是统计学课程教学改革而非大语言模型代码生成技术",
+        "研究对象是教学实践与本科生而非大语言模型本身",
+        "研究方法是教学实践与效果验证而非模型训练、算法优化或代码生成性能评估"
+      ],
+      "reason_code": "adjacent_topic",
+      "rationale": "候选文献的核心研究问题是基于Python和大语言模型（DeepSeek）的统计学课程教学改革，属于教育学/教学法领域。虽然摘要中提及了DeepSeek在Python代码生成与修改方面的辅助作用，但这仅作为教学工具的一个应用场景，并未深入探讨大语言模型代码生成的技术原理、模型架构、提示工程或性能评估。因此，该文献仅能提供大语言模型代码生成的下游应用背景（教育辅助），无法直接支撑代码生成技术本身的核心研究任务，判定为弱相关。",
+      "error_kind": null,
+      "assessed_at": "2026-07-30T13:04:59.546094+00:00"
+    },
+    {
+      "reference_id": "rc58357ea9633",
+      "task_fingerprint": "e89a0612f8b4e18f",
+      "reference_content_hash": "2709987315276d83",
+      "judge_key": "anthropic|qwen3.7-max|relevance-a2a-v1|relevance-schema-v1",
+      "status": "SUCCESS",
+      "verdict": "unrelated",
+      "confidence": "high",
+      "basis": "title_and_abstract",
+      "matched_aspects": [],
+      "mismatch_aspects": [
+        "研究主题",
+        "研究对象",
+        "研究方法"
+      ],
+      "reason_code": "研究问题、对象、方法与任务主题完全不匹配",
+      "rationale": "候选文献研究的是基于集成学习（如随机森林）和贝叶斯优化的岩石抗压强度预测，属于地质工程和传统机器学习领域。而当前任务的主题和查询意图是大语言模型代码生成。两者在研究问题、对象、方法和章节用途上均完全不匹配，没有任何直接关联。",
+      "error_kind": null,
+      "assessed_at": "2026-07-30T13:05:23.198183+00:00"
+    }
+  ],
+  "pending_batches": [],
+  "committed_batch_ids": [
+    "batch_f3fba513"
+  ],
+  "pending_literature_flows": []
+}

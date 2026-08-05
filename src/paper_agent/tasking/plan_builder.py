@@ -128,6 +128,62 @@ def operation_constraints(slots: dict[str, SlotValue]) -> tuple[str, ...]:
     return ()
 
 
+#: 配额维度/操作符 → 中文标签（仅供确认摘要展示）。
+_QUOTA_DIM_LABELS = {"total": "共", "language.zh": "中文", "language.en": "英文"}
+_QUOTA_OP_LABELS = {
+    "bare": "", "exact": "恰好", "min": "至少", "max": "最多",
+    "range": "", "approx": "约",
+}
+
+
+def operation_quota(slots: dict[str, SlotValue]) -> tuple[str, ...]:
+    """从 `citation_quota` 槽派生**人可读**的配额摘要（X-11）。
+
+    此前确认摘要完全不显示配额 —— 系统让用户「据此核对」，却不显示要核对的东西：
+    真机上「10 篇、英 8、中 2」在摘要里一个字都没有。
+    """
+    sv = slots.get("citation_quota")
+    if sv is None or sv.field_status is not FieldStatus.PRESENT:
+        return ()
+    raw = sv.value
+    if not isinstance(raw, dict):
+        return ()
+
+    out: list[str] = []
+    for c in raw.get("constraints") or ():
+        if not isinstance(c, dict):
+            continue
+        dim = _QUOTA_DIM_LABELS.get(str(c.get("dimension", "")), str(c.get("dimension", "")))
+        op = _QUOTA_OP_LABELS.get(str(c.get("operator", "")), "")
+        val = c.get("value")
+        if isinstance(val, (list, tuple)) and len(val) == 2:
+            val_s = f"{val[0]}-{val[1]}"
+        elif val is None:
+            continue
+        else:
+            val_s = str(val)
+        out.append(f"{dim}{op}{val_s}篇")
+
+    for f in raw.get("filters") or ():
+        if not isinstance(f, dict):
+            continue
+        field, op, val = str(f.get("field", "")), str(f.get("operator", "")), f.get("value")
+        if field == "year" and op == "recent_years" and val is not None:
+            out.append(f"近{val}年")
+        elif field == "year" and op == "gte" and val is not None:
+            out.append(f"{val}年后")
+        elif field == "year" and op == "lte" and val is not None:
+            out.append(f"{val}年前")
+        elif field == "language" and val is not None:
+            langs = val if isinstance(val, (list, tuple)) else [val]
+            names = "/".join(_QUOTA_DIM_LABELS.get(f"language.{x}", str(x)) for x in langs)
+            out.append(f"限{names}")
+        elif field == "reference_type" and val is not None:
+            types = val if isinstance(val, (list, tuple)) else [val]
+            out.append("限" + "/".join(str(x) for x in types))
+    return tuple(out)
+
+
 def _build_operation(
     raw: RawOperation,
     extraction: ExtractionResult,
@@ -238,6 +294,7 @@ def build_plan(
     unmapped_text: Sequence[str] = (),
     plan_id: str | None = None,
     plan_version: int = 1,
+    project_fact_requirement_ids: Sequence[str] = (),
 ) -> Task_Plan:
     """合并操作与抽取结果 → 有序 Task_Plan（保序、填默认、统计 unmapped）。
 
@@ -272,7 +329,9 @@ def build_plan(
         missing_all.extend(missing)
 
     # 每条 requirement 的去向账本（保序）：被某具体槽位消费 → mapped，否则 unmapped。
-    dispositions = _build_dispositions(canon, operations)
+    dispositions = _build_dispositions(
+        canon, operations, set(project_fact_requirement_ids)
+    )
     unmapped_reqs = [
         d.verbatim for d in dispositions if d.status is DispositionStatus.UNMAPPED
     ]
@@ -296,12 +355,18 @@ def build_plan(
 def _build_dispositions(
     canon: dict[str, AtomicRequirement],
     operations: Sequence[Operation],
+    project_fact_ids: set[str] | None = None,
 ) -> tuple[RequirementDisposition, ...]:
     """为每条 requirement 记录去向：被哪个操作的哪些槽位消费，或未映射。
 
     覆盖判定按 **Slot 消费粒度**（D4/Property 2）：只有落进某个具体
     `SlotValue.requirement_ids` 才算 mapped；「仅挂在 Operation 上」不算。
+
+    例外是 `project_fact_ids`（X-11）：项目级陈述（「课题是 X」）**没有**对应槽位——
+    它属于整篇论文而非单次操作，落 `facts.claims`。这类记 PROJECT_MEMORY，
+    算已消费，不弹 unmapped。槽位消费优先（同一条既进槽又进 claims 时记 mapped）。
     """
+    pf_ids = project_fact_ids or set()
     # requirement_id → (operation_id, [slot_name...])
     consumers: dict[str, tuple[str, list[str]]] = {}
     for op in operations:
@@ -324,7 +389,12 @@ def _build_dispositions(
             ))
             continue
         hit = consumers.get(rid)
-        if hit is None:
+        if hit is None and rid in pf_ids:
+            out.append(RequirementDisposition(
+                requirement_id=rid, status=DispositionStatus.PROJECT_MEMORY,
+                verbatim=req.verbatim,
+            ))
+        elif hit is None:
             out.append(RequirementDisposition(
                 requirement_id=rid, status=DispositionStatus.UNMAPPED,
                 verbatim=req.verbatim,
@@ -348,6 +418,7 @@ def build_revision(
     *,
     remaining_operation_ids: Sequence[str] | None = None,
     unmapped_text: Sequence[str] = (),
+    project_fact_requirement_ids: Sequence[str] = (),
 ) -> Task_Plan:
     """基于旧计划重建新版本（Task 17 有界规划循环调用）。
 
@@ -367,6 +438,7 @@ def build_revision(
         unmapped_text=unmapped_text,
         plan_id=previous_plan.plan_id,
         plan_version=previous_plan.plan_version + 1,
+        project_fact_requirement_ids=project_fact_requirement_ids,
     )
     if remaining_operation_ids:
         # 只保留与「未执行步骤数」相符的尾部操作：重规划的输入是原始请求，理解层可能
@@ -380,4 +452,5 @@ def build_revision(
 __all__ = [
     "build_plan", "build_revision", "new_plan_id",
     "operation_target", "operation_goal", "operation_constraints",
+    "operation_quota",
 ]

@@ -36,6 +36,8 @@ _EXPECTED = {
         "search_query": (False, "", False),
         "want_search": (False, False, False),
         "search_limit": (False, 5, False),
+        # 按 A2d-5 预期变更新增：引用配额槽原子激活（与 Handler 消费同批）
+        "citation_quota": (False, None, False),
     },
     Intent.ADD_SECTION: {
         "title": (True, None, True),
@@ -47,6 +49,8 @@ _EXPECTED = {
         "search_query": (False, "", False),
         "want_search": (False, False, False),
         "search_limit": (False, 5, False),
+        # 按 A2d-5 预期变更新增：引用配额槽原子激活
+        "citation_quota": (False, None, False),
     },
     Intent.CONVERT_FORMAT: {
         "target_ext": (True, None, True),

@@ -35,6 +35,7 @@ from paper_agent.tasking.intent_spec import SlotSpec, spec_for
 from paper_agent.tasking.plan_builder import (
     operation_constraints,
     operation_goal,
+    operation_quota,
     operation_target,
 )
 
@@ -90,12 +91,20 @@ class ClarifyOutcome:
 
 
 def _is_gap(slot_spec: SlotSpec, sv: SlotValue | None) -> bool:
-    """该槽位是否构成需追问的缺口：仅 required/must_ask 且非 present。"""
-    if not (slot_spec.required or slot_spec.must_ask):
-        return False
-    if sv is None:
-        return True
-    return sv.field_status in _GAP_STATUSES and sv.field_status is not FieldStatus.PRESENT
+    """该槽位是否构成需追问的缺口。
+
+    - required/must_ask 且非 present → 缺口（既有语义）。
+    - 可选槽标记 `clarify_if_user_invalid` 且**用户显式给出**但 INVALID/AMBIGUOUS →
+      也追问（A2d 条件式澄清）；USER_ABSENT/UNAVAILABLE 的可选槽仍不追问。
+    """
+    if slot_spec.required or slot_spec.must_ask:
+        if sv is None:
+            return True
+        return sv.field_status in _GAP_STATUSES and sv.field_status is not FieldStatus.PRESENT
+    # 可选槽：仅在条件式澄清标记下，且用户显式给了无法用的值时追问
+    if getattr(slot_spec, "clarify_if_user_invalid", False) and sv is not None:
+        return sv.field_status in (FieldStatus.INVALID, FieldStatus.AMBIGUOUS)
+    return False
 
 
 def _recompute_missing(plan: Task_Plan) -> list[str]:
@@ -327,6 +336,9 @@ def summarize_plan(plan: Task_Plan) -> str:
         constraints = operation_constraints(op.slots)
         if constraints:
             bits.append("约束=" + "/".join(constraints))
+        quota = operation_quota(op.slots)
+        if quota:
+            bits.append("引用配额=" + "，".join(quota))
         lines.append(f"  {i}. " + "，".join(bits))
     if plan.unmapped_requirements:
         lines.append("未映射（需处置）：" + "；".join(plan.unmapped_requirements))

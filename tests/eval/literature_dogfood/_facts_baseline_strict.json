@@ -1,0 +1,502 @@
+{
+  "schema_version": 4,
+  "references": [
+    {
+      "reference_id": "r6ac577f9e9e5",
+      "work_identifiers": [
+        [
+          "doi",
+          "10.3390/rs13010047"
+        ],
+        [
+          "openalex_work",
+          "W3115854999"
+        ]
+      ],
+      "container_identifiers": [
+        [
+          "issn",
+          "20724292"
+        ]
+      ],
+      "unclassified_identifiers": [],
+      "title": "A Practical Cross-View Image Matching Method between UAV and Satellite for UAV-Based Geo-Localization",
+      "year": 2020,
+      "publication_date": "",
+      "abstract": "Cross-view image matching has attracted extensive attention due to its huge potential applications, such as localization and navigation. Unmanned aerial vehicle (UAV) technology has been developed rapidly in recent years, and people have more opportunities to obtain and use UAV-view images than ever before. However, the algorithms of cross-view image matching between the UAV view (oblique view) and the satellite view (vertical view) are still in their beginning stage, and the matching accuracy is expected to be further improved when applied in real situations. Within this context, in this study, we proposed a cross-view matching method based on location classification (hereinafter referred to LCM), in which the similarity between UAV and satellite views is considered, and we implemented the method with the newest UAV-based geo-localization dataset (University-1652). LCM is able to solve the imbalance of the input sample number between the satellite images and the UAV images. In the training stage, LCM can simplify the retrieval problem into a classification problem and consider the influence of the feature vector size on the matching accuracy. Compared with one study, LCM shows higher accuracies, and Recall@K (K ∈ {1, 5, 10}) and the average precision (AP) were improved by 5–10%. The expansion of satellite-view images and multiple queries proposed by the LCM are capable of improving the matching accuracy during the experiment. In addition, the influences of different feature sizes on the LCM’s accuracy are determined, and we found that 512 is the optimal feature size. Finally, the LCM model trained based on synthetic UAV-view images was evaluated in real-world situations, and the evaluation result shows that it still has satisfactory matching accuracy. The LCM can realize the bidirectional matching between the UAV-view image and the satellite-view image and can contribute to two applications: (i) UAV-view image localization (i.e., predicting the geographic location of UAV-view images based on satellite-view images with geo-tags) and (ii) UAV navigation (i.e., driving the UAV to the region of interest in the satellite-view image based on the flight record).",
+      "language_hint": "en",
+      "reference_type": "",
+      "container_title": "",
+      "volume": "",
+      "issue": "",
+      "pages": "",
+      "article_number": "",
+      "publisher": "",
+      "publisher_place": "",
+      "edition": "",
+      "url": "",
+      "accessed_at": "",
+      "conference_name": "",
+      "conference_place": "",
+      "bibkey": "ding2020practical",
+      "legacy_verified": false,
+      "verification_method": "",
+      "quarantined": false,
+      "created_at": "",
+      "authors": [
+        "Lirong Ding",
+        "Ji Zhou",
+        "Lingxuan Meng",
+        "Zhiyong Long"
+      ],
+      "bibkey_aliases": [],
+      "numeric_aliases": [
+        "1"
+      ],
+      "merged_from": [],
+      "discovery_sources": [
+        "openalex"
+      ],
+      "field_provenance": [
+        [
+          "title",
+          "openalex"
+        ]
+      ],
+      "verification_events": [
+        {
+          "event_id": "04022855db1d",
+          "kind": "verified",
+          "source": "crossref",
+          "provenance": "registry",
+          "authority": "final",
+          "identifier_type": "doi",
+          "identifier": "10.3390/rs13010047",
+          "checked_at": "2026-08-01T10:40:11.385261+00:00",
+          "target_event_id": "",
+          "details": ""
+        },
+        {
+          "event_id": "112e6b494458",
+          "kind": "verified",
+          "source": "openalex",
+          "provenance": "aggregator",
+          "authority": "final",
+          "identifier_type": "openalex_work",
+          "identifier": "W3115854999",
+          "checked_at": "2026-08-01T10:40:12.166148+00:00",
+          "target_event_id": "",
+          "details": ""
+        }
+      ],
+      "field_conflicts": []
+    }
+  ],
+  "dedup_suggestions": [],
+  "known_numbers": [],
+  "claims": {},
+  "relevance_store": [
+    {
+      "reference_id": "rbcd77a06e91d",
+      "task_fingerprint": "2dac30318a886a93",
+      "reference_content_hash": "6814f3b0a7192d82",
+      "judge_key": "openai|gpt-5.6-sol-2026-07-09|relevance-a2a-v1|relevance-schema-v1",
+      "status": "SUCCESS",
+      "verdict": "weakly_relevant",
+      "confidence": "high",
+      "basis": "title_and_abstract",
+      "matched_aspects": [
+        "研究图像匹配方法，采用归一化互相关并讨论亚像素定位精度",
+        "评估空间分辨率变化对匹配误差、误匹配率和运动检出率的影响，可作为尺度/分辨率因素的一般方法背景"
+      ],
+      "mismatch_aspects": [
+        "研究对象是重复光学影像中的地表位移测量，而非空地协同视觉定位",
+        "未涉及空中视角与地面视角之间的跨视角匹配",
+        "未处理由空地成像造成的大视角差、显著外观变化或跨平台定位",
+        "所谓不同尺度主要是影像重采样和像元分辨率变化，不是目标任务中的跨尺度空地匹配"
+      ],
+      "reason_code": "ADJACENT_METHOD_DIFFERENT_SCENARIO",
+      "rationale": "该文直接研究亚像素图像匹配及分辨率对匹配性能的影响，对图像匹配精度分析可提供通用背景；但其核心问题是同类重复影像上的地表运动测量，没有面向空地协同、跨视角视觉定位或大视角差匹配，因此不能直接支撑本章节的核心研究，仅属邻近方法参考。",
+      "error_kind": null,
+      "assessed_at": "2026-08-01T10:38:48.334432+00:00"
+    },
+    {
+      "reference_id": "r26cd6d7dd049",
+      "task_fingerprint": "2dac30318a886a93",
+      "reference_content_hash": "217beeb5877bb0ec",
+      "judge_key": "openai|gpt-5.6-sol-2026-07-09|relevance-a2a-v1|relevance-schema-v1",
+      "status": "SUCCESS",
+      "verdict": "unrelated",
+      "confidence": "high",
+      "basis": "title_and_abstract",
+      "matched_aspects": [],
+      "mismatch_aspects": [
+        "标题指向地下水水力学，而非空地协同视觉任务",
+        "摘要仅含影响区域及水力学相关符号，未涉及图像匹配、跨视角、跨尺度或视觉定位",
+        "无法服务大视角、大尺度差图像匹配章节目的"
+      ],
+      "reason_code": "topic_object_method_mismatch",
+      "rationale": "候选文献的研究对象和方法均属于地下水水力学，未呈现任何空地协同、跨视角/跨尺度图像匹配或视觉定位内容；与任务核心研究问题及章节用途不匹配。",
+      "error_kind": null,
+      "assessed_at": "2026-08-01T10:38:56.002827+00:00"
+    },
+    {
+      "reference_id": "r421b8a87b8fa",
+      "task_fingerprint": "2dac30318a886a93",
+      "reference_content_hash": "00a72b1315fb38f5",
+      "judge_key": "openai|gpt-5.6-sol-2026-07-09|relevance-a2a-v1|relevance-schema-v1",
+      "status": "SUCCESS",
+      "verdict": "weakly_relevant",
+      "confidence": "medium",
+      "basis": "title_only",
+      "matched_aspects": [
+        "标题涉及Structure-from-Motion摄影测量，与图像匹配和视觉定位存在方法层面的邻近关系"
+      ],
+      "mismatch_aspects": [
+        "标题聚焦地球科学应用中的低成本摄影测量工具",
+        "未明确涉及空地协同场景",
+        "未明确涉及跨视角或大视角差异",
+        "未明确涉及跨尺度或大尺度差图像匹配",
+        "无摘要，无法确认具体研究对象与方法是否直接支撑章节用途"
+      ],
+      "reason_code": "ADJACENT_METHOD_TITLE_ONLY",
+      "rationale": "仅依据标题，该文可作为摄影测量与三维重建/定位的一般方法背景，但不能确认其直接研究面向空地协同的大视角、大尺度差图像匹配。按无摘要候选最高只能判为weakly_relevant，故判弱相关。",
+      "error_kind": null,
+      "assessed_at": "2026-08-01T10:39:02.454245+00:00"
+    },
+    {
+      "reference_id": "r74568b7025da",
+      "task_fingerprint": "2dac30318a886a93",
+      "reference_content_hash": "b905e7ed6da40a21",
+      "judge_key": "openai|gpt-5.6-sol-2026-07-09|relevance-a2a-v1|relevance-schema-v1",
+      "status": "SUCCESS",
+      "verdict": "unrelated",
+      "confidence": "high",
+      "basis": "title_and_abstract",
+      "matched_aspects": [
+        "泛泛涉及深度学习与图像处理技术"
+      ],
+      "mismatch_aspects": [
+        "研究对象是医学影像，而非空地协同场景中的航空/地面图像",
+        "未研究跨视角图像匹配",
+        "未研究跨尺度或大尺度差图像匹配",
+        "未涉及视觉定位或空地协同应用",
+        "文献类型与章节目的不匹配：其为医学影像深度学习综述"
+      ],
+      "reason_code": "DOMAIN_AND_TASK_MISMATCH",
+      "rationale": "该文综述深度学习在医学影像中的架构、标注、联邦学习、可解释性及临床案例。尽管同属图像技术领域，但其研究问题、应用对象和章节用途均与空地协同条件下的大视角、大尺度差图像匹配及视觉定位不符，不能直接或作为相邻专门背景支撑当前核心任务。",
+      "error_kind": null,
+      "assessed_at": "2026-08-01T10:39:08.795519+00:00"
+    },
+    {
+      "reference_id": "rea63d35aea3e",
+      "task_fingerprint": "2dac30318a886a93",
+      "reference_content_hash": "f08fcc5aaa033f46",
+      "judge_key": "openai|gpt-5.6-sol-2026-07-09|relevance-a2a-v1|relevance-schema-v1",
+      "status": "SUCCESS",
+      "verdict": "unrelated",
+      "confidence": "high",
+      "basis": "title_only",
+      "matched_aspects": [],
+      "mismatch_aspects": [
+        "标题对象是STEREO任务搭载的日球层成像仪",
+        "未涉及空地协同场景",
+        "未体现跨视角、跨尺度图像匹配",
+        "未体现视觉定位或大视角大尺度差匹配方法"
+      ],
+      "reason_code": "TOPIC_OBJECT_METHOD_MISMATCH",
+      "rationale": "仅依据标题，该文献聚焦航天任务中的日球层成像仪设备，与面向空地协同的跨视角、跨尺度图像匹配及视觉定位研究在对象、问题和章节用途上均不匹配。",
+      "error_kind": null,
+      "assessed_at": "2026-08-01T10:39:15.674863+00:00"
+    },
+    {
+      "reference_id": "rc5abf5fc6c5c",
+      "task_fingerprint": "2dac30318a886a93",
+      "reference_content_hash": "fd749cba4fe0b0ef",
+      "judge_key": "openai|gpt-5.6-sol-2026-07-09|relevance-a2a-v1|relevance-schema-v1",
+      "status": "SUCCESS",
+      "verdict": "unrelated",
+      "confidence": "high",
+      "basis": "title_and_abstract",
+      "matched_aspects": [
+        "涉及成像传感技术及其应用任务的一般介绍"
+      ],
+      "mismatch_aspects": [
+        "研究主题是被动毫米波成像，而非跨视角、跨尺度图像匹配",
+        "未涉及空地协同场景",
+        "未涉及大视角差或大尺度差条件下的特征对应与图像匹配方法",
+        "未涉及视觉定位技术或定位实验"
+      ],
+      "reason_code": "TOPIC_METHOD_SCENARIO_MISMATCH",
+      "rationale": "标题与摘要仅综述被动毫米波成像的原理、性能现象、技术进展及传感器任务，没有研究空地协同中的跨视角、跨尺度图像匹配或视觉定位问题。仅同属广义成像领域不足以直接支撑目标章节。",
+      "error_kind": null,
+      "assessed_at": "2026-08-01T10:39:20.859317+00:00"
+    },
+    {
+      "reference_id": "r56d77e9027d7",
+      "task_fingerprint": "2dac30318a886a93",
+      "reference_content_hash": "31701294789bf609",
+      "judge_key": "openai|gpt-5.6-sol-2026-07-09|relevance-a2a-v1|relevance-schema-v1",
+      "status": "SUCCESS",
+      "verdict": "unrelated",
+      "confidence": "high",
+      "basis": "title_and_abstract",
+      "matched_aspects": [],
+      "mismatch_aspects": [
+        "研究主题为地下水水文学基础，与空地协同视觉定位无关",
+        "不涉及跨视角或跨尺度图像匹配",
+        "不涉及大视角、大尺度差条件下的图像匹配方法或应用"
+      ],
+      "reason_code": "TOPIC_METHOD_OBJECT_MISMATCH",
+      "rationale": "标题与摘要仅指向基础地下水水文学，研究对象、问题、方法及章节用途均与面向空地协同的跨视角、跨尺度图像匹配和视觉定位不匹配。",
+      "error_kind": null,
+      "assessed_at": "2026-08-01T10:39:27.442779+00:00"
+    },
+    {
+      "reference_id": "rf833d685c59e",
+      "task_fingerprint": "2dac30318a886a93",
+      "reference_content_hash": "cdd717dfb1720bb7",
+      "judge_key": "openai|gpt-5.6-sol-2026-07-09|relevance-a2a-v1|relevance-schema-v1",
+      "status": "SUCCESS",
+      "verdict": "weakly_relevant",
+      "confidence": "high",
+      "basis": "title_and_abstract",
+      "matched_aspects": [
+        "涉及街景图像这一地面视角影像来源",
+        "综述计算机视觉、机器学习支持下的街景影像应用，可作为地面视觉数据与GIS应用的通用背景"
+      ],
+      "mismatch_aspects": [
+        "核心问题是街景影像在城市分析与GIS中的应用综述，并非空地协同",
+        "未涉及航空/无人机影像与地面影像之间的跨视角匹配",
+        "未讨论大尺度差、大视角差条件下的图像匹配方法",
+        "未直接涉及跨尺度视觉定位或空地对应关系建模"
+      ],
+      "reason_code": "ADJACENT_BACKGROUND_ONLY",
+      "rationale": "该文可为街景数据来源及其城市GIS应用提供外围背景，但摘要所述研究对象和章节目的均集中于街景影像的广泛应用，而不是面向空地协同的跨视角、跨尺度图像匹配与视觉定位，因此不能直接支撑核心研究，仅属弱相关。",
+      "error_kind": null,
+      "assessed_at": "2026-08-01T10:39:32.711638+00:00"
+    },
+    {
+      "reference_id": "r2c476439b7b5",
+      "task_fingerprint": "2dac30318a886a93",
+      "reference_content_hash": "3e1f828d90a5fc41",
+      "judge_key": "openai|gpt-5.6-sol-2026-07-09|relevance-a2a-v1|relevance-schema-v1",
+      "status": "SUCCESS",
+      "verdict": "unrelated",
+      "confidence": "high",
+      "basis": "title_and_abstract",
+      "matched_aspects": [],
+      "mismatch_aspects": [
+        "研究对象为植物根系、根际生态与农业资源获取，而非空地协同视觉系统",
+        "不涉及跨视角或跨尺度图像匹配",
+        "不涉及视觉定位、特征匹配或大视角大尺度差处理方法",
+        "章节用途是植物学与可持续农业综述，无法支撑空地协同图像匹配研究"
+      ],
+      "reason_code": "TOPIC_OBJECT_METHOD_MISMATCH",
+      "rationale": "标题中的“Matching”指根系与环境适配，并非图像匹配。摘要围绕植物根系演化、土壤资源获取、生物地球化学循环、作物根系表型及筛选方法展开，与面向空地协同的大视角、大尺度差图像匹配和视觉定位问题均不匹配，因此应排除。",
+      "error_kind": null,
+      "assessed_at": "2026-08-01T10:39:40.576928+00:00"
+    },
+    {
+      "reference_id": "rdc2f149157cb",
+      "task_fingerprint": "2dac30318a886a93",
+      "reference_content_hash": "91f01a0a49877323",
+      "judge_key": "openai|gpt-5.6-sol-2026-07-09|relevance-a2a-v1|relevance-schema-v1",
+      "status": "SUCCESS",
+      "verdict": "weakly_relevant",
+      "confidence": "high",
+      "basis": "title_and_abstract",
+      "matched_aspects": [
+        "涉及无人机航空影像与地面控制点等空地相关数据采集要素",
+        "讨论基于特征检测与尺度不变特征的多影像自动定向",
+        "涉及不同尺度下的SfM摄影测量处理与精度评估"
+      ],
+      "mismatch_aspects": [
+        "核心研究问题是地貌测量中的三维表面重建与SfM工作流综述，而非空中视角与地面视角之间的图像匹配",
+        "未针对大视角差、大尺度差条件设计或评测跨视角图像匹配方法",
+        "主要目标是点云/三维或四维地貌模型生成及误差实践总结，不是视觉定位",
+        "未体现空地协同场景下的跨平台对应关系建立或定位任务"
+      ],
+      "reason_code": "ADJACENT_SFM_PHOTOGRAMMETRY_NOT_CROSS_VIEW_MATCHING",
+      "rationale": "该文可为无人机摄影测量、SfM、多尺度特征及影像定向提供相邻背景，但其研究对象和章节目的集中于地貌三维表面重建。摘要未显示对空地跨视角、跨尺度图像匹配或视觉定位这一核心问题的直接研究，因此不能仅因出现UAV、SIFT和尺度等词判为直接相关。",
+      "error_kind": null,
+      "assessed_at": "2026-08-01T10:39:47.711260+00:00"
+    },
+    {
+      "reference_id": "r1e5fafbe6a58",
+      "task_fingerprint": "2dac30318a886a93",
+      "reference_content_hash": "6142783eb1aa3fd1",
+      "judge_key": "openai|gpt-5.6-sol-2026-07-09|relevance-a2a-v1|relevance-schema-v1",
+      "status": "SUCCESS",
+      "verdict": "weakly_relevant",
+      "confidence": "high",
+      "basis": "title_and_abstract",
+      "matched_aspects": [
+        "研究主题涉及图像匹配",
+        "综述覆盖手工特征到深度特征的检测、描述与匹配流程",
+        "可为大视角、大尺度差图像匹配提供通用方法背景与技术脉络"
+      ],
+      "mismatch_aspects": [
+        "摘要未明确面向空地协同场景",
+        "未明确研究跨视角匹配或空中—地面图像对应",
+        "未明确聚焦大尺度差或大视角差条件下的匹配难题",
+        "视觉定位仅可能作为一般应用被涉及，不能确认直接支撑目标章节"
+      ],
+      "reason_code": "GENERAL_IMAGE_MATCHING_SURVEY_NOT_SCENARIO_SPECIFIC",
+      "rationale": "该文是综合性图像匹配综述，能够用于介绍通用特征匹配方法和发展背景，但从标题与摘要无法确认其直接研究空地协同、跨视角及大尺度差图像匹配。依据不能仅凭“image matching”关键词重合判为直接相关，故判为弱相关。",
+      "error_kind": null,
+      "assessed_at": "2026-08-01T10:39:58.241519+00:00"
+    },
+    {
+      "reference_id": "r26e77106d5c5",
+      "task_fingerprint": "2dac30318a886a93",
+      "reference_content_hash": "1b6e1af7d6312155",
+      "judge_key": "openai|gpt-5.6-sol-2026-07-09|relevance-a2a-v1|relevance-schema-v1",
+      "status": "SUCCESS",
+      "verdict": "weakly_relevant",
+      "confidence": "high",
+      "basis": "title_and_abstract",
+      "matched_aspects": [
+        "涉及无人机视觉应用",
+        "综述包含视觉位姿估计、建图与导航，可为视觉定位提供一般背景"
+      ],
+      "mismatch_aspects": [
+        "未直接研究空地协同场景",
+        "未聚焦跨视角图像匹配",
+        "未聚焦跨尺度或大尺度差图像匹配",
+        "摘要所述方法覆盖位姿控制、建图、避障、跟踪和多传感器融合，不能直接支撑目标章节的核心匹配问题"
+      ],
+      "reason_code": "GENERAL_UAV_VISION_BACKGROUND",
+      "rationale": "该文是无人机计算机视觉应用的综合综述，可作为空中平台视觉导航与定位的宽泛背景，但从标题和摘要看，没有直接处理空—地图像之间的大视角、大尺度差异匹配，也未围绕空地协同展开，因此仅属相邻主题，不能判为直接相关。",
+      "error_kind": null,
+      "assessed_at": "2026-08-01T10:40:06.444287+00:00"
+    },
+    {
+      "reference_id": "r6ac577f9e9e5",
+      "task_fingerprint": "2dac30318a886a93",
+      "reference_content_hash": "d93899714c388144",
+      "judge_key": "openai|gpt-5.6-sol-2026-07-09|relevance-a2a-v1|relevance-schema-v1",
+      "status": "SUCCESS",
+      "verdict": "relevant",
+      "confidence": "high",
+      "basis": "title_and_abstract",
+      "matched_aspects": [
+        "研究对象直接对应空地协同中的无人机视图与卫星视图",
+        "明确研究斜视UAV图像与垂直卫星图像之间的大视角差跨视角匹配",
+        "方法用于UAV地理定位与导航，符合视觉定位任务",
+        "提出并评估双向UAV—卫星图像匹配方法，直接服务章节目的",
+        "包含真实场景评估及Recall@K、AP等匹配性能指标"
+      ],
+      "mismatch_aspects": [
+        "摘要未明确将大尺度差建模为核心问题，也未专门提出尺度不变或多尺度匹配机制"
+      ],
+      "reason_code": "DIRECT_CROSS_VIEW_UAV_SATELLITE_MATCHING",
+      "rationale": "该文并非仅有关键词重合，而是直接研究UAV斜视图与卫星垂直视图的跨视角图像匹配，并将匹配用于无人机地理定位和导航，与空地协同的大视角差图像匹配研究高度一致。虽然对“大尺度差”的专门处理不突出，但不影响其对核心章节任务的直接相关性。",
+      "error_kind": null,
+      "assessed_at": "2026-08-01T10:40:12.167642+00:00"
+    },
+    {
+      "reference_id": "rbee3bbfa7e29",
+      "task_fingerprint": "2dac30318a886a93",
+      "reference_content_hash": "75da3d99cf03b3a4",
+      "judge_key": "openai|gpt-5.6-sol-2026-07-09|relevance-a2a-v1|relevance-schema-v1",
+      "status": "SUCCESS",
+      "verdict": "weakly_relevant",
+      "confidence": "high",
+      "basis": "title_and_abstract",
+      "matched_aspects": [
+        "涉及无人机影像与基于图像的三维重建",
+        "提到大倾角、阴影和弱纹理对图像匹配的干扰",
+        "可为航空视角影像匹配的困难提供场景性背景"
+      ],
+      "mismatch_aspects": [
+        "核心问题是桥梁巡检中的三维点云重建、质量评估与损伤检测",
+        "未研究空地协同或空中—地面跨视角匹配",
+        "未针对大尺度差图像匹配或视觉定位提出方法与实验",
+        "图像匹配仅作为重建流程中的局部困难被提及"
+      ],
+      "reason_code": "ADJACENT_UAV_IMAGE_MATCHING_CONTEXT",
+      "rationale": "该文可用于说明无人机影像在大倾角、遮阴和弱纹理条件下的匹配困难，但其研究对象和章节目的集中于桥梁三维重建及巡检质量评价，不能直接支撑面向空地协同的大视角、大尺度差图像匹配研究，因此仅属相邻背景。",
+      "error_kind": null,
+      "assessed_at": "2026-08-01T10:40:19.809135+00:00"
+    },
+    {
+      "reference_id": "rc212c2f6c5d4",
+      "task_fingerprint": "2dac30318a886a93",
+      "reference_content_hash": "860ee507d99ece0c",
+      "judge_key": "openai|gpt-5.6-sol-2026-07-09|relevance-a2a-v1|relevance-schema-v1",
+      "status": "SUCCESS",
+      "verdict": "weakly_relevant",
+      "confidence": "high",
+      "basis": "title_and_abstract",
+      "matched_aspects": [
+        "研究使用无人机图像，属于空中视觉场景",
+        "采用基于极线约束的半全局/稠密匹配以生成点云，涉及图像匹配与空间测量"
+      ],
+      "mismatch_aspects": [
+        "核心任务是输电线路巡检、三维点云提取和障碍物检测，而非空地协同视觉定位",
+        "摘要未涉及空中视角与地面视角之间的跨视角匹配",
+        "未针对大视角差、大尺度差条件设计或评估匹配方法",
+        "方法依赖立体影像极线约束，主要解决同平台或相近视角的立体稠密匹配问题"
+      ],
+      "reason_code": "ADJACENT_UAV_STEREO_MATCHING_NOT_CROSS_VIEW_SCALE",
+      "rationale": "该文可为无人机影像的立体匹配和三维测量提供相邻方法背景，但不能直接支撑面向空地协同的大视角、大尺度差图像匹配研究，因此判为弱相关。",
+      "error_kind": null,
+      "assessed_at": "2026-08-01T10:40:26.965578+00:00"
+    },
+    {
+      "reference_id": "r2b8ed805c083",
+      "task_fingerprint": "2dac30318a886a93",
+      "reference_content_hash": "ef9243b9566a99ff",
+      "judge_key": "openai|gpt-5.6-sol-2026-07-09|relevance-a2a-v1|relevance-schema-v1",
+      "status": "SUCCESS",
+      "verdict": "unrelated",
+      "confidence": "high",
+      "basis": "title_and_abstract",
+      "matched_aspects": [
+        "涉及UAV影像与SfM重建",
+        "讨论不同采集方式的覆盖范围与精度"
+      ],
+      "mismatch_aspects": [
+        "核心问题是地质露头三维重建及构造测量，不是跨视角图像匹配",
+        "未研究空中与地面图像之间的匹配或空地协同",
+        "未涉及大视角差、大尺度差条件下的匹配方法",
+        "未涉及视觉定位"
+      ],
+      "reason_code": "TOPIC_METHOD_MISMATCH",
+      "rationale": "该文比较LiDAR、UAV-SfM和传统野外测量在虚拟露头重建与地质构造分析中的表现。UAV仅作为影像采集平台，研究目标和方法均不直接服务于空地协同场景中的跨视角、跨尺度图像匹配或视觉定位，因此应排除。",
+      "error_kind": null,
+      "assessed_at": "2026-08-01T10:40:33.438190+00:00"
+    },
+    {
+      "reference_id": "r5a05cb666d9c",
+      "task_fingerprint": "2dac30318a886a93",
+      "reference_content_hash": "075dff8752d2d4de",
+      "judge_key": "openai|gpt-5.6-sol-2026-07-09|relevance-a2a-v1|relevance-schema-v1",
+      "status": "SUCCESS",
+      "verdict": "weakly_relevant",
+      "confidence": "high",
+      "basis": "title_and_abstract",
+      "matched_aspects": [
+        "研究对象涉及无人机航拍图像",
+        "讨论尺度变化、目标旋转和复杂背景等问题，可为大尺度差场景提供一般性背景"
+      ],
+      "mismatch_aspects": [
+        "核心任务是无人机目标检测综述，而非跨视角图像匹配",
+        "不涉及空中与地面图像之间的对应关系或空地协同",
+        "不研究大视角差条件下的特征匹配、图像配准或视觉定位",
+        "尺度变化讨论服务于目标检测，并非跨尺度图像匹配"
+      ],
+      "reason_code": "ADJACENT_UAV_VISION_TASK",
+      "rationale": "该文献仅在无人机视觉和尺度变化方面与主题相邻，可作为一般背景；其研究问题、方法目的和章节用途均集中于航拍目标检测，不能直接支撑空地协同场景下的大视角、大尺度差图像匹配研究，因此判为弱相关。",
+      "error_kind": null,
+      "assessed_at": "2026-08-01T10:40:40.502019+00:00"
+    }
+  ],
+  "pending_batches": [],
+  "committed_batch_ids": [
+    "batch_7e7d8369e4a1"
+  ],
+  "pending_literature_flows": [],
+  "pending_search_intents": []
+}

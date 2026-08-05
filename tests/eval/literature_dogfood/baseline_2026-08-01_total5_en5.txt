@@ -1,0 +1,57 @@
+
+=== dogfood: topic='面向空地协同的大视角大尺度差图像匹配研究' 配额 total≥5 zh≥0 en≥5 ===
+[0] 合成检索意图(hybrid planner): status=ready
+    主题='面向空地协同场景的跨视角、跨尺度图像匹配与视觉定位技术' seeds=[('air-ground cross-view image matching', 'language.en'), ('UAV-ground large viewpoint scale difference matching', 'language.en'), ('aerial terrestrial visual localization cross-scale', 'language.en'), ('空地协同 跨视角 图像匹配', 'language.zh'), ('大视角差 大尺度差 图像匹配', 'language.zh')]
+
+[1] 初始缺口: [('total', 5), ('language.en', 5)]
+[2] 检索中（打真实源 + reviewer 判相关性）…
+    · attempt: cand=10 accept=0 reject=10 verify_calls=20 loop_elapsed=69.859s wall=69.9s
+    · attempt: cand=10 accept=1 reject=7 verify_calls=34 loop_elapsed=121.25s wall=121.2s
+    停止原因=budget_exhausted 诊断={'stop_reason': 'budget_exhausted', 'iterations': 1, 'search_calls': 2, 'verify_calls': 34, 'llm_calls': 18, 'candidates': 20, 'elapsed_s': 121.266, 'exhausted_dimensions': ['provider_time_budget_s'], 'tried_queries': 2}
+[3] 候选处置分布: {'reject': 17, 'accept_new': 1}
+    被排除原因分布: {'relevance:weakly_relevant': 10, 'relevance:unrelated': 7}
+
+[detail] 逐候选（判定质量核对用；同时写 candidates.jsonl）:
+  #01 [reject] rel=weakly_relevant/high/title_and_abstract lang=en/high verify=- reasons=['relevance:weakly_relevant']
+        Sub-pixel precision image matching for measuring surface displacements on mass movements u
+  #02 [reject] rel=unrelated/high/title_and_abstract lang=en/high verify=- reasons=['relevance:unrelated']
+        Ground-Water Hydraulics
+  #03 [reject] rel=weakly_relevant/medium/title_only lang=en/high verify=- reasons=['relevance:weakly_relevant']
+        ‘Structure-from-Motion’ photogrammetry: A low-cost, effective tool for geoscience applicat
+  #04 [reject] rel=unrelated/high/title_and_abstract lang=en/high verify=- reasons=['relevance:unrelated']
+        A Review of Deep Learning in Medical Imaging: Imaging Traits, Technology Trends, Case Stud
+  #05 [reject] rel=unrelated/high/title_only lang=en/high verify=- reasons=['relevance:unrelated']
+        The Heliospheric Imagers Onboard the STEREO Mission
+  #06 [reject] rel=unrelated/high/title_and_abstract lang=en/high verify=- reasons=['relevance:unrelated']
+        Passive millimeter-wave imaging
+  #07 [reject] rel=unrelated/high/title_and_abstract lang=en/high verify=- reasons=['relevance:unrelated']
+        Basic ground-water hydrology
+  #08 [reject] rel=weakly_relevant/high/title_and_abstract lang=en/high verify=- reasons=['relevance:weakly_relevant']
+        Street view imagery in urban analytics and GIS: A review
+  #09 [reject] rel=unrelated/high/title_and_abstract lang=en/high verify=- reasons=['relevance:unrelated']
+        Matching roots to their environment
+  #10 [reject] rel=weakly_relevant/high/title_and_abstract lang=en/high verify=- reasons=['relevance:weakly_relevant']
+        Image-based surface reconstruction in geomorphometry – merits, limits and developments
+  #11 [reject] rel=weakly_relevant/medium/title_only lang=en/high verify=- reasons=['relevance:weakly_relevant']
+        ‘Structure-from-Motion’ photogrammetry: A low-cost, effective tool for geoscience applicat
+  #12 [reject] rel=weakly_relevant/high/title_and_abstract lang=en/high verify=- reasons=['relevance:weakly_relevant']
+        Image Matching from Handcrafted to Deep Features: A Survey
+  #13 [reject] rel=weakly_relevant/high/title_and_abstract lang=en/high verify=- reasons=['relevance:weakly_relevant']
+        Survey on Computer Vision for UAVs: Current Developments and Trends
+  #14 [accept_new] rel=relevant/high/title_and_abstract lang=en/high verify=doi=verified@crossref/final;openalex_work=verified@openalex/final reasons=[]
+        A Practical Cross-View Image Matching Method between UAV and Satellite for UAV-Based Geo-L
+  #15 [reject] rel=weakly_relevant/high/title_and_abstract lang=en/high verify=- reasons=['relevance:weakly_relevant']
+        UAV Bridge Inspection through Evaluated 3D Reconstructions
+  #16 [reject] rel=weakly_relevant/high/title_and_abstract lang=en/high verify=- reasons=['relevance:weakly_relevant']
+        Automatic Power Line Inspection Using UAV Images
+  #17 [reject] rel=unrelated/high/title_and_abstract lang=en/high verify=- reasons=['relevance:unrelated']
+        LiDAR, UAV or compass-clinometer? Accuracy, coverage and the effects on structural models
+  #18 [reject] rel=weakly_relevant/high/title_and_abstract lang=en/high verify=- reasons=['relevance:weakly_relevant']
+        A Survey of Object Detection for UAVs Based on Deep Learning
+
+[4] 入库 1 条;语言桶/置信分布: {'en/high': 1}
+    high_only 下实际可计数: zh=0 en=1
+    可用统计(过滤+相关+核验后): total=1
+
+[MISS] 仍缺: [('total', 4), ('language.en', 4)]
+    → 这就是当前真实瓶颈所在（按上面的排除原因/语言分布判因）。
