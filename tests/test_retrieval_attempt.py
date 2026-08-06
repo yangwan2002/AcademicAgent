@@ -283,6 +283,9 @@ def test_run_attempt_relevance_cache_reused():
     deps = _deps(candidates=[_cand()], reviewer=reviewer)
     deps.relevance_store = store
     run_attempt("q", _CRIT, _quota(), _batch(), deps)
+    # 第一轮必须真的调过 reviewer —— 否则「第二轮没调用」可能只是因为两轮都没调，
+    # 那样这个缓存测试就是空转的（原实现取了 calls_first 却从未断言）。
+    assert reviewer.last_messages is not None             # 第一轮确实调用了
     # 第二轮同候选同 criteria → 命中缓存，不再调 reviewer
     reviewer2 = _ReviewerStub()
     deps2 = _deps(candidates=[_cand()], reviewer=reviewer2)
