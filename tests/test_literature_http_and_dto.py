@@ -18,8 +18,9 @@ from paper_agent.providers.retrieval.base import (
 
 
 class _Resp:
-    def __init__(self, status_code: int) -> None:
+    def __init__(self, status_code: int, headers: dict | None = None) -> None:
         self.status_code = status_code
+        self.headers = headers or {}
 
     def raise_for_status(self) -> None:
         if self.status_code >= 400:
@@ -82,6 +83,53 @@ def test_429_retries_then_unavailable(patch_httpx):
     patch_httpx([_Resp(429)])
     with pytest.raises(RetrievalUnavailable):
         http_util.get_with_retry("http://x", {}, max_retries=1, backoff=0)
+
+
+def test_429_without_retry_after_still_retries(patch_httpx):
+    """无 Retry-After 时无法判定，保持原有退避重试（宁可多试）。"""
+
+    fake = patch_httpx([_Resp(429)])
+    with pytest.raises(RetrievalUnavailable):
+        http_util.get_with_retry("http://x", {}, max_retries=2, backoff=0)
+    assert fake.calls == 3
+
+
+def test_quota_exhausted_429_does_not_retry_and_reports_wait():
+    """配额耗尽型 429（Retry-After 远超退避窗口）必须只发一次、不白烧额度。
+
+    真机（2026-08-06）：OpenAlex 日额度 $0.1 用尽后回
+    429 + `Retry-After: 55256`（≈15.3h，UTC 午夜重置，信用点计费）。
+    原实现把 429 一律当瞬时故障，退避 1.5/3/6s 重试 3 次 —— 注定失败，
+    只是多烧 3 个额度、多等 10.5s，并把「等 15 小时」的信息丢掉，
+    错误信息只剩「已重试 3 次」，让人误以为是短时限流而反复探测。
+    """
+
+    import pytest as _pytest
+
+    fake = _FakeHttpx([_Resp(429, {"Retry-After": "55256"})])
+    with _pytest.MonkeyPatch.context() as mp:
+        mp.setattr(http_util, "get_httpx", lambda: fake)
+        with _pytest.raises(RetrievalUnavailable) as excinfo:
+            http_util.get_with_retry("http://x", {}, max_retries=3, backoff=0)
+
+    assert fake.calls == 1, "配额耗尽不应重试（每次重试都白烧额度）"
+    # 等待时长必须出现在错误信息里，否则调用方只能靠猜。
+    assert "15.3 小时" in str(excinfo.value)
+    assert "55256" in str(excinfo.value)
+
+
+def test_short_rate_window_429_still_retries():
+    """短时速率窗口（Retry-After 小）仍要重试 —— 别把修复扩大成「429 一律不重试」。"""
+
+    import pytest as _pytest
+
+    fake = _FakeHttpx([_Resp(429, {"Retry-After": "2"}), _Resp(200)])
+    with _pytest.MonkeyPatch.context() as mp:
+        mp.setattr(http_util, "get_httpx", lambda: fake)
+        resp = http_util.get_with_retry("http://x", {}, max_retries=3, backoff=0)
+
+    assert resp.status_code == 200
+    assert fake.calls == 2
 
 
 def test_timeout_retries_then_unavailable(patch_httpx):
