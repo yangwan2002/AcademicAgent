@@ -807,6 +807,73 @@ env 两处）。注意二者**必须同改** —— `_active_relevance_runtime` 
 
 ---
 
+#### F-8 · 预算耗尽被谎报成 provider_failed（B1 转默认后放大 10 倍，已修）
+
+转默认后的第一次**纯默认**跑（不带任何 env 覆盖）反而比 A/B 臂差：
+`stop_reason` 退回 `budget_exhausted`、入库可用 10（A/B 臂 17）。
+处置分布里有 `relevance:provider_failed` **×10**，而同一轮
+`relevance_llm_calls=0` —— 一次 LLM 都没发出，却报「模型失败」。
+
+链路（三层各自都"合理"，叠起来变成谎报）：
+
+```
+预算耗尽 → BudgetAwareLLMProvider.complete 抛 ExternalCallRejected
+        → structured_call 的宽 except Exception 压成 PROVIDER_FAILED
+        → _assess_once 把「整窗」batch_size 条全判 ERROR
+```
+
+**爆炸半径随 batch_size 放大**：单篇路径下预算停止只损失 1 条，size=10 时
+损失 10 条。这正是上一轮当作"假设风险"提过的 size=10 降级半径 —— 它是真的，
+且由 B1 转默认引入。ERROR 不入 `relevance_store`（`_remember_success` 只收
+SUCCESS），故无缓存污染，复跑会重判。
+
+**修法**：`_flush` 补窗前预算检查（与 `_judge_b2` 第 633 行对齐），未判定候选
+显式落 `relevance:budget_exhausted`。注意**不能只 break** —— `pending.clear()`
+会把未判定候选整批丢掉，连 disposition 都不产生，`candidates` 计数与处置分布
+对不上，比理由写错更难查。
+
+真机复验（纯默认）：`provider_failed` 归零、`stop_reason=quota_satisfied`、
+入库可用 10→16。回归测试注入验证（`cp` 备份而非 `git checkout`）确认变红。
+
+**教训**：宽 `except Exception` 会把**控制流信号**（预算/取消/超时）和**真实故障**
+折叠成同一个状态。批量化放大了后果：一条错误的状态归因现在污染整窗。
+诊断字段自相矛盾（`llm_calls=0` 却报 `provider_failed`）是这类 bug 的指纹 ——
+真机跑要交叉核对计数与理由，不能只看理由分布。
+
+---
+
+#### F-9 · B2 首轮 A/B：verify 降 45% 但 LLM 升 24%，未达成配额（待复测）
+
+同预算（120s）下 B2 开/关对比：
+
+| | B2 关 | B2 开 |
+|---|---|---|
+| verify | 53 次 / 54.7s | **29 次 / 30.4s** |
+| LLM | 67.8s | **83.9s** |
+| 入库可用 | **16** | 13 |
+| stop_reason | **quota_satisfied** | budget_exhausted |
+
+verify 收益如期兑现（-24.3s，-45%），但被 LLM 的 +16.1s 吃掉大半，净收益仅
+约 8s，且配额未达成。两个原因，都说明**这组数据还不能定论**：
+
+1. **两臂都撞了 120s 天花板**，比较的是"预算内做了多少"而非"做完要多久"，
+   净收益被预算截断。
+2. B2 开臂出现 `verify:budget_exhausted` **×6** —— 这 6 条**已经付了 LLM 判定
+   成本**才死在 verify 上。B2 把便宜的操作（verify 1s）挪到贵的（LLM 14s）之后，
+   预算耗尽时浪费的是更贵的那一半。这是重排的固有代价，不是 bug。
+
+**下一步**：放宽预算到 300s 让两臂都跑到 `quota_satisfied`，比较"达成同一配额
+各花多少秒"。首次尝试被 OpenAlex **HTTP 429** 打断（连续 5 次真机跑触发限流，
+`.env` 里的 `OPENALEX_MAILTO` polite pool 也未能豁免），需等限流窗口恢复后复测。
+在此之前 B2 **保持默认关闭**。
+
+**教训**：预算封顶时的 A/B 只能比较吞吐、不能比较总成本。要论证"某优化省了多少秒"，
+必须让两臂都跑到同一个终止条件（这里是 `quota_satisfied`），否则天花板会同时
+压住两边、把差异吸收掉。另外真机 A/B 有速率限制预算：连续跑会触发 429，
+排实验顺序时要把"源的配额"当成一种资源。
+
+---
+
 ### P-1（原始记录：跑之前的状态与理由）
 
 **现状**：`tests/eval/literature_dogfood/last_run.txt` 停在
@@ -1047,7 +1114,8 @@ E2E 跑通后，优先级发生了实质变化。**新的第一优先级是检�
 | ~~1~~ | ~~检索召回质量（F-1）~~ **已修** | 真因是 `search=` 词袋语法非查询词粒度；短语优先已上，受控 A/B `unrelated` 12→5。见 F-3b |
 | ~~1~~ | ~~时间预算与单候选成本（F-5）~~ **已解** | B1 默认开启后 LLM 秒/候选 4.50→2.15，`iterations=3`、`stop_reason=quota_satisfied`。未动预算值。见 F-7 |
 | ~~3~~ | ~~重估 B1 vs B2 优先级（F-4）~~ **已定** | 归因否定了 F-4：verify 只占 25%（31.7s），relevance LLM 占 72%（89.9s）。B1 先上、已默认。见 F-7 |
-| **1** | B2 管线重排（先判相关性、只核验 survivor） | B1 上线后 verify 升为最大单项：43%、49.4s / 50 次。收益上限即这 49s；代码已在（`pipeline_reorder` flag 关），需受控 A/B |
+| **1** | B2 管线重排：**复测待做**（首轮不定论） | 首轮 A/B：verify -45%（54.7→30.4s）但 LLM +24%（67.8→83.9s），净约 -8s，入库 16→13。两臂都撞 120s 天花板 ⇒ 只比了吞吐、没比总成本。需放宽到 300s 让两臂都 `quota_satisfied` 后复测；被 OpenAlex 429 打断。B2 暂保持默认关。见 F-9 |
+| ~~2~~ | ~~预算耗尽误报 provider_failed（F-8）~~ **已修** | B1 转默认后放大：整窗 10 条被谎报模型失败（`llm_calls=0` 却 `provider_failed`×10）。`_flush` 补窗前检查 + 显式落 `budget_exhausted`。入库 10→16。见 F-8 |
 | **2** | `accept_weakly_relevant` 按 section_purpose 分场景（F-3） | 10 个 weakly 被拒，其中含引言必引的综述（注：dogfood 已见 `mode=by_purpose` 生效，需重新确认此条是否仍成立） |
 | **3** | 批量判定的规模上限与降级行为 | 当前 `size=10` 未经调优；`retry_limit=1` 下整批 schema 失败会让**整窗**判 ERROR。真机尚未观察到，但 size 越大爆炸半径越大 |
 | 5 | B-2 bibliography（受 F-6 上限约束） | 元数据缺 container_title/volume/pages |
