@@ -144,9 +144,14 @@ def call_with_deadline(call: Callable[[], _T], timeout_s: float) -> _T:
     try:
         succeeded, value = result.get(timeout=timeout_s)
     except queue.Empty:
+        # from None：queue.Empty 只是"等超时"的实现细节，真正的原因是预算耗尽。
+        # 把它挂在链上会让日志里出现一个和业务无关的根因，误导排查（对照今天
+        # 那次把预算耗尽误报成 provider_failed 的教训：预算信号要说自己的话）。
         if context is not None:
-            raise context.expire_deadline()
-        raise BudgetExceededError("deadline", limit=timeout_s, observed=timeout_s)
+            raise context.expire_deadline() from None
+        raise BudgetExceededError(
+            "deadline", limit=timeout_s, observed=timeout_s
+        ) from None
     if context is not None:
         # The provider and timeout wake-up may race at the boundary.  A result
         # that arrived after the global deadline is still a late result.

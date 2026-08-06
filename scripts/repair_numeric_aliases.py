@@ -37,7 +37,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from paper_agent.gates.diff_gate import extract_citation_tokens  # noqa: E402
+from paper_agent.gates.diff_gate import extract_citation_tokens
 
 WORKSPACE = Path(".paper_workspace")
 

@@ -14,7 +14,6 @@ from paper_agent.application.literature_composition import (
     _limits,
 )
 from paper_agent.config import Config, load_config
-from paper_agent.literature.retrieval.attempt import RelevanceAcceptancePolicy
 from paper_agent.literature.relevance import RelevanceAssessment
 
 

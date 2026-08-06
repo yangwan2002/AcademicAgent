@@ -268,7 +268,9 @@ def _dispatch(coordinator, intent_name, work, **route_data):
         try:
             return work(bus, ct)
         except KeyboardInterrupt:  # Ctrl-C → 统一取消模型
-            raise OperationCancelled()
+            # from None：用户主动中断不是"错误的根因"，链上挂个 KeyboardInterrupt
+            # 只会让 traceback 更吵。
+            raise OperationCancelled() from None
 
     report = coordinator.run(fn, cancel_token=CancellationToken())
     if report.run_status == "cancelled":
@@ -358,7 +360,7 @@ def main(argv: list[str]) -> int:
                 kana_min=config.literature_lang_kana_min,
                 hangul_min=config.literature_lang_hangul_min,
             )
-            lit_classifier = lambda rec: classify_record_language(rec, _th)  # noqa: E731
+            lit_classifier = lambda rec: classify_record_language(rec, _th)
             _bc = config.literature_bundle_budget_chars
             print("引用配额写作已启用（supervised：检索/证据集需人工确认）。"
                   + f"\n  证据集上下文预算：{'不限' if _bc <= 0 else f'{_bc} 字符'}"
@@ -643,7 +645,7 @@ def main(argv: list[str]) -> int:
                     bus=bus, cancel_token=ct, stream=config.stream_enabled,
                 )
             except KeyboardInterrupt:  # Ctrl-C → 统一取消模型
-                raise OperationCancelled()
+                raise OperationCancelled() from None
 
         report = coordinator.run(_do_polish, cancel_token=CancellationToken())
         result = report.value

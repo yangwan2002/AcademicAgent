@@ -154,7 +154,7 @@ def _git_available() -> bool:
     try:
         subprocess.run(["git", "--version"], capture_output=True, check=True)
         return True
-    except Exception:  # noqa: BLE001
+    except Exception:
         return False
 
 

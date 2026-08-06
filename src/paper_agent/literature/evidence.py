@@ -16,7 +16,7 @@ from __future__ import annotations
 import hashlib
 import json
 import unicodedata
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 
 from paper_agent.literature.language import counts_toward
@@ -282,7 +282,7 @@ def build_bundle(
             continue
         have = sum(1 for rid in selected
                    if counts_toward(classifier(by_id[rid][0]), bucket, policy))
-        for rec, _v, _c, b in eligible:
+        for rec, _v, _c, _b in eligible:
             if have >= need:
                 break
             if rec.reference_id in selected:

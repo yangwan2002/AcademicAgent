@@ -25,7 +25,6 @@ from dataclasses import dataclass
 
 from paper_agent.literature import identifiers as _ids
 from paper_agent.literature.models import (
-    DedupSuggestion,
     FieldConflict,
     ReferenceRecord,
 )

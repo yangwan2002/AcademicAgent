@@ -11,7 +11,6 @@
 from __future__ import annotations
 
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -22,16 +21,16 @@ for p in (str(_SRC), str(_HERE)):
     if p not in sys.path:
         sys.path.insert(0, p)
 
-from paper_agent.providers.llm.base import LLMProvider  # noqa: E402
-from paper_agent.tasking.contracts import AnalyzeResult, CallStatus, Task_Plan  # noqa: E402
-from paper_agent.tasking.extractors import build_extractor  # noqa: E402
-from paper_agent.tasking.operation_analyzer import (  # noqa: E402
+from paper_agent.providers.llm.base import LLMProvider
+from paper_agent.tasking.contracts import AnalyzeResult, CallStatus, Task_Plan
+from paper_agent.tasking.extractors import build_extractor
+from paper_agent.tasking.operation_analyzer import (
     analyze,
     requirements_for,
 )
-from paper_agent.tasking.plan_builder import build_plan  # noqa: E402
+from paper_agent.tasking.plan_builder import build_plan
 
-import scorer  # noqa: E402  (同目录)
+import scorer
 
 GOLDEN_PATH = _HERE / "golden.json"
 BASELINE_PATH = _HERE / "baseline.json"

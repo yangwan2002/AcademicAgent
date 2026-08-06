@@ -67,7 +67,7 @@ def _all_schemas() -> dict[str, dict]:
     merged = dict(_all_project_tool_schemas())
     try:
         merged.update(_dynamic_extractor_schemas())
-    except Exception:  # noqa: BLE001 - 动态部分拿不到就只测静态，不让护栏本身变脆
+    except Exception:
         pass
     return merged
 

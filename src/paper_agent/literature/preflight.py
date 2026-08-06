@@ -19,7 +19,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 
 from paper_agent.literature.quota import (
     CountConstraint,

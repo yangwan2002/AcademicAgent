@@ -27,7 +27,6 @@ from paper_agent.literature.retrieval.search_intent import (
     SearchIntentError,
     SearchIntentOrigin,
     SearchSeed,
-    SeedTarget,
     build_seeds,
     is_informative_title,
     normalize_text,

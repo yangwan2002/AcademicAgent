@@ -9,11 +9,9 @@
 
 from __future__ import annotations
 
-import json
 import os
 import sys
 
-import pytest
 
 _SRC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")
 if _SRC not in sys.path:
@@ -22,7 +20,7 @@ if _SRC not in sys.path:
 from paper_agent.coordinator import Coordinator
 from paper_agent.errors import OperationCancelled
 from paper_agent.observability.events import Event, EventKind
-from paper_agent.observability.recorder import LocalJsonExporter, SimpleTraceRecorder
+from paper_agent.observability.recorder import SimpleTraceRecorder
 from paper_agent.session.file_session import FileBackedSession
 
 

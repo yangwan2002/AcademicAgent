@@ -51,7 +51,7 @@ class DocxDocumentError(RuntimeError):
 
 def _docx_module():
     try:
-        import docx  # noqa: PLC0415 - 惰性导入：未装 python-docx 时不影响其他格式
+        import docx
     except ImportError as exc:  # pragma: no cover - 环境相关
         raise DocxDocumentError(
             "处理 .docx 需要 python-docx：pip install python-docx"

@@ -15,7 +15,7 @@ plan_commit 只据 `canonical_record_payload` 材料化，**不再重跑去重/�
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from paper_agent.literature.ledger import ReferenceLedger
 from paper_agent.literature.migration import record_from_dict

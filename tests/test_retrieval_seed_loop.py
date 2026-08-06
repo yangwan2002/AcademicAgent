@@ -12,7 +12,6 @@ if _SRC not in sys.path:
     sys.path.insert(0, _SRC)
 
 from paper_agent.literature.language import DEFAULT_THRESHOLDS, classify_record_language
-from paper_agent.literature.models import ReferenceRecord
 from paper_agent.literature.quota import (
     CountConstraint,
     CountDimension,
@@ -47,7 +46,6 @@ from paper_agent.literature.retrieval.registry import ProviderRegistry, named
 from paper_agent.literature.retrieval.search_intent import (
     SearchIntent,
     SearchSeed,
-    SeedTarget,
 )
 from paper_agent.providers.retrieval.capabilities import FetchResult, FetchStatus
 from paper_agent.workspace.models import RetrievalCandidate
@@ -181,7 +179,7 @@ def test_all_seeds_then_planner_continuation():
     req = RetrievalRequest(
         quota=_quota(total_min=1), criteria=_CRIT, task_fingerprint=_CRIT.fingerprint(),
         search_intent=_si([SearchSeed(text="seed one"), SearchSeed(text="seed two")]))
-    res = run_retrieval_loop(req, deps=deps, limits=RetrievalLimits(), planner=planner)
+    run_retrieval_loop(req, deps=deps, limits=RetrievalLimits(), planner=planner)
     assert "seed one" in stub.queries and "seed two" in stub.queries
     assert planner.calls >= 1                         # seed 用尽仍缺 → 进 planner 续搜
 

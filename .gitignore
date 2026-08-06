@@ -18,3 +18,7 @@ runs/
 .env
 .venv/
 venv/
+
+# A/B 实验输出：一次性对照结果，随跑随生成，不进版本控制。
+# （结论应落到 spec 或 backlog，不是把原始输出留在仓库里）
+tests/eval/**/ab_*.txt

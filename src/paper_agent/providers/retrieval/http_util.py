@@ -11,7 +11,6 @@ from __future__ import annotations
 import time
 
 from paper_agent.providers.retrieval.base import (
-    RetrievalError,
     RetrievalNotFound,
     RetrievalUnavailable,
 )
@@ -92,7 +91,7 @@ def get_with_retry(
             raise                       # 不重试、不降级
         except _Transient as exc:
             last_exc = exc
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             # 连接/超时类视为可重试；其余（含非 404 的 4xx）判不可用、直接抛。
             name = type(exc).__name__
             if "Timeout" in name or "Connect" in name or "Read" in name:

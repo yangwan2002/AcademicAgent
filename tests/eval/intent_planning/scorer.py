@@ -288,11 +288,11 @@ __all__ = [
 # 才问」。故 RecordingInteractor 分开计数 `field_asks` 与 `confirm_calls`，指标只用
 # 前者。
 
-from paper_agent.tasking.clarifier import (  # noqa: E402
+from paper_agent.tasking.clarifier import (
     ConfirmDecision,
     UnmappedDisposition,
 )
-from paper_agent.tasking.contracts import FieldStatus, SlotSource  # noqa: E402
+from paper_agent.tasking.contracts import FieldStatus, SlotSource
 
 
 class RecordingInteractor:

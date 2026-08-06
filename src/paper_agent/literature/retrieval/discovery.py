@@ -19,7 +19,7 @@ IdentifierResolution 逻辑与隔离规则。**不提供**永远返回空却伪�
 from __future__ import annotations
 
 import warnings
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from difflib import SequenceMatcher
 
 from paper_agent.literature import dedup as _dedup
@@ -122,7 +122,7 @@ def resolve_identifier(
         return ResolutionOutcome("unresolved_no_match", lead=unresolved)
 
     matched = None
-    for name, provider in registry.verify_pairs():
+    for _name, provider in registry.verify_pairs():
         search_bib = getattr(provider, "search_bibliographic", None)
         if search_bib is None:
             continue

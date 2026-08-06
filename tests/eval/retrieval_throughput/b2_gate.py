@@ -24,45 +24,45 @@ for path in (str(SRC), str(HERE)):
     if path not in sys.path:
         sys.path.insert(0, path)
 
-from baseline import build_legacy_snapshot  # noqa: E402
-from paper_agent.config import Config  # noqa: E402
-from paper_agent.literature.ledger import ReferenceLedger  # noqa: E402
-from paper_agent.literature.quota import (  # noqa: E402
+from baseline import build_legacy_snapshot
+from paper_agent.config import Config
+from paper_agent.literature.ledger import ReferenceLedger
+from paper_agent.literature.quota import (
     CountConstraint, CountDimension, CountOperator, EligibilityFilter,
     FilterField, FilterOperator, QuotaKind, QuotaScope, QuotaSpec,
 )
-from paper_agent.literature.relevance import (  # noqa: E402
+from paper_agent.literature.relevance import (
     JudgeVersion, RelevanceCriteria, RelevanceJudge, RelevanceStore,
 )
-from paper_agent.literature.relevance_batch import (  # noqa: E402
+from paper_agent.literature.relevance_batch import (
     BatchRelevanceJudge, make_batch_judge_version,
 )
-from paper_agent.literature.relevance_runtime import (  # noqa: E402
+from paper_agent.literature.relevance_runtime import (
     ActiveRelevanceRuntime, RelevanceTextPolicy,
 )
-from paper_agent.literature.retrieval.attempt import (  # noqa: E402
+from paper_agent.literature.retrieval.attempt import (
     AttemptDeps, RelevanceAcceptancePolicy,
     _run_attempt_b2_verify_first_reference, run_attempt,
 )
-from paper_agent.literature.retrieval.batch import (  # noqa: E402
+from paper_agent.literature.retrieval.batch import (
     BatchDisposition, RetrievalBatch,
 )
-from paper_agent.literature.retrieval.budget import (  # noqa: E402
+from paper_agent.literature.retrieval.budget import (
     BudgetLedger, RetrievalLimits,
 )
-from paper_agent.literature.retrieval.cross_verify import (  # noqa: E402
+from paper_agent.literature.retrieval.cross_verify import (
     CrossVerifier, VerificationCache,
 )
-from paper_agent.literature.retrieval.registry import ProviderRegistry, named  # noqa: E402
-from paper_agent.literature.retrieval.window_packer import (  # noqa: E402
+from paper_agent.literature.retrieval.registry import ProviderRegistry, named
+from paper_agent.literature.retrieval.window_packer import (
     BatchInputBudget, WindowLimits,
 )
-from paper_agent.literature.verification import VerificationPolicy  # noqa: E402
-from paper_agent.providers.llm.base import LLMResponse, ToolCall  # noqa: E402
-from paper_agent.providers.retrieval.capabilities import (  # noqa: E402
+from paper_agent.literature.verification import VerificationPolicy
+from paper_agent.providers.llm.base import LLMResponse, ToolCall
+from paper_agent.providers.retrieval.capabilities import (
     FetchResult, FetchStatus,
 )
-from paper_agent.workspace.models import RetrievalCandidate  # noqa: E402
+from paper_agent.workspace.models import RetrievalCandidate
 
 
 PROFILE_PATH = HERE / "benchmark_profile.json"
@@ -306,7 +306,9 @@ def _run_mode(mode: str, candidates=None) -> dict:
     )
     accepted = [
         (candidate, item)
-        for candidate, item in zip(candidates, result.items)
+        # strict=True：items 应与 candidates 一一对应，不等长说明上游丢了候选，
+        # 该炸出来而不是悄悄少统计几条。
+        for candidate, item in zip(candidates, result.items, strict=True)
         if item.disposition in {
             BatchDisposition.ACCEPT_NEW,
             BatchDisposition.REUSE_EXISTING,
@@ -408,9 +410,11 @@ def build_b2_gate_report(profile_path: Path = PROFILE_PATH, *, runs: int | None 
     reference_rows = [_run_mode("b2_reference") for _ in range(run_count)]
     paired_semantics = all(
         legacy["semantic"] == b1["semantic"] == b2["semantic"] == reference["semantic"]
+        # strict=True：四臂必须等长。少了一臂就静默截断的话，"配对语义一致"会在
+        # 只比了前几轮的情况下报 True —— 这是 gate 结论失真，不是小瑕疵。
         for legacy, b1, b2, reference in zip(
             mode_rows["legacy"], mode_rows["b1"],
-            mode_rows["b1_b2"], reference_rows,
+            mode_rows["b1_b2"], reference_rows, strict=True,
         )
     )
     b1_verify = mode_rows["b1"][0]["calls"]["verify"]

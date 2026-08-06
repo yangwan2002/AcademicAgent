@@ -45,7 +45,7 @@ from paper_agent.tasking.contracts import (
     SlotValue,
     Task_Plan,
 )
-from paper_agent.tasking.intent_spec import IntentSpec, SlotSpec, spec_for
+from paper_agent.tasking.intent_spec import SlotSpec, spec_for
 
 # 承载「实际取值」的字段态（用于判断槽位是否已被填上值）。
 _VALUED = (FieldStatus.PRESENT, FieldStatus.AMBIGUOUS, FieldStatus.INVALID)
@@ -319,7 +319,9 @@ def build_plan(
     missing_all: list[str] = []
     leftover_text = list(unmapped_text)
 
-    for raw, ext in zip(raw_operations, extractions):
+    # strict=True 与上面的显式长度检查冗余，但把契约就地写明：一一对应靠身份，
+    # 不靠位置巧合。参见 tests/test_analyzer_extractor_registry_parity.py。
+    for raw, ext in zip(raw_operations, extractions, strict=True):
         op, consumed, missing = _build_operation(raw, ext, canonical_ids)
         if op is None:
             leftover_text.append(raw.verbatim)

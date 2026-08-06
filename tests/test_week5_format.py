@@ -12,7 +12,7 @@ if _SRC not in sys.path:
     sys.path.insert(0, _SRC)
 
 docx = pytest.importorskip("docx")
-from docx.shared import Pt  # noqa: E402
+from docx.shared import Pt
 
 from paper_agent.session.section_index import SectionIndex
 from paper_agent.session.file_session import FileBackedSession
@@ -29,7 +29,7 @@ def _make_docx(path):
     d.add_heading("Introduction", level=1)
     d.add_paragraph("This is the introduction body text with number 0.87.")
     d.add_heading("Method", level=1)
-    p = d.add_paragraph("We describe the method here.")
+    d.add_paragraph("We describe the method here.")
     table = d.add_table(rows=2, cols=2)
     table.cell(0, 0).text = "a"
     table.cell(0, 1).text = "b"

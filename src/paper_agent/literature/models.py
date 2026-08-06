@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import hashlib
 import unicodedata
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 
 from paper_agent.literature import identifiers as _ids
 from paper_agent.literature.verification import (

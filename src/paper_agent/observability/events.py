@@ -195,7 +195,7 @@ class EventSink(Protocol):
 class NullSink:
     """默认空实现：丢弃所有事件（无可观测开销）。"""
 
-    def emit(self, event: Event) -> None:  # noqa: D401
+    def emit(self, event: Event) -> None:
         return None
 
 

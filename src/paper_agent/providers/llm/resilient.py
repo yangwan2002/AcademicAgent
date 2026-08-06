@@ -311,7 +311,7 @@ class ResilientLLMProvider(LLMProvider):
                 # 内层已是终态错误（如具体 provider 自身耗尽兜底重试后抛出），
                 # 直接上抛，不在本层重复重试。
                 raise
-            except Exception as exc:  # noqa: BLE001 - 需区分可重试与否
+            except Exception as exc:
                 last_exc = exc
                 # 已产出增量：不重试，避免重复输出（#1）。
                 if produced_any:
@@ -374,7 +374,7 @@ class ResilientLLMProvider(LLMProvider):
                 # 内层已是终态错误（如具体 provider 自身耗尽兜底重试后抛出），
                 # 直接上抛、不在本层重试，与 complete() 行为保持一致。
                 raise
-            except Exception as exc:  # noqa: BLE001 - 需区分可重试与否
+            except Exception as exc:
                 last_exc = exc
                 # 已产出至少一个增量：不可重试，抛 LLMError 并保留底层原因；
                 # 已产出增量保留、不回滚（Req 5.7 / 5.8 / 4.9）。

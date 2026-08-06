@@ -14,8 +14,6 @@ locate 定位**（不让 LLM 算字符位）。失败分四态（provider/parse/
 
 from __future__ import annotations
 
-import json
-import os
 import uuid
 from collections.abc import Sequence
 

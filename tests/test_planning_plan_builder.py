@@ -231,7 +231,7 @@ def test_build_revision_excludes_completed_ops():
         _ext({"section_id": _present("sec:intro")}),
     ]
     plan0 = build_plan("turnB", raws0, exts0, canonical_requirements=())
-    done_id = plan0.operations[0].operation_id
+    _done_id = plan0.operations[0].operation_id
     remaining_id = plan0.operations[1].operation_id
 
     # needs_replan：只重规划未执行的 polish

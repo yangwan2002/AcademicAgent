@@ -12,7 +12,6 @@ from __future__ import annotations
 import os
 import sys
 
-import pytest
 
 _SRC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")
 if _SRC not in sys.path:
@@ -20,7 +19,6 @@ if _SRC not in sys.path:
 
 from paper_agent.observability.events import Event, EventKind
 from paper_agent.providers.llm.base import (
-    CancellationToken,
     LLMProvider,
     LLMResponse,
     Message,

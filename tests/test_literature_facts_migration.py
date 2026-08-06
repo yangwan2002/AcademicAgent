@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 import json
-import os
 
-import pytest
 
-from paper_agent.session.facts import KnownNumber, KnownRef, SessionFacts
+from paper_agent.session.facts import KnownRef, SessionFacts
 
 
 def test_save_load_roundtrip_v2(tmp_path):

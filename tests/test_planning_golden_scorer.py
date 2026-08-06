@@ -17,12 +17,12 @@ for _p in (_SRC, _EVAL):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-import scorer  # noqa: E402
-from runner import run_case  # noqa: E402
+import scorer
+from runner import run_case
 
-from paper_agent.intents.router import Intent  # noqa: E402
-from paper_agent.providers.llm.mock import MockLLMProvider  # noqa: E402
-from paper_agent.tasking.contracts import (  # noqa: E402
+from paper_agent.intents.router import Intent
+from paper_agent.providers.llm.mock import MockLLMProvider
+from paper_agent.tasking.contracts import (
     AnalyzeResult,
     AtomicRequirement,
     CallStatus,
@@ -32,7 +32,7 @@ from paper_agent.tasking.contracts import (  # noqa: E402
     SlotSource,
     SlotValue,
 )
-from paper_agent.tasking.plan_builder import build_plan  # noqa: E402
+from paper_agent.tasking.plan_builder import build_plan
 
 _GOLDEN = os.path.join(_EVAL, "golden.json")
 
@@ -113,7 +113,7 @@ def test_score_wrong_intent_and_missed_requirement():
 
 def test_aggregate_math():
     from paper_agent.tasking.contracts import AnalyzeResult as AR
-    cases = scorer.load_golden(_GOLDEN)
+    _cases = scorer.load_golden(_GOLDEN)
     # 造两个 CaseScore 手动聚合
     good = scorer.CaseScore("a", True, True, 1, 1, 2, 0, 0)
     bad = scorer.CaseScore("b", False, True, 0, 0, 2, 1, 0)

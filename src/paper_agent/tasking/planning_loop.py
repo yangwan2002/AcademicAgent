@@ -31,7 +31,6 @@ from paper_agent.tasking.contracts import (
     PlanRevisionRequest,
     PlanStatus,
     RevisionReason,
-    Task_Plan,
 )
 from paper_agent.tasking.extractors import build_extractor
 from paper_agent.tasking.operation_analyzer import ATTRIBUTION_FALLBACK_ALL

@@ -149,8 +149,8 @@ def test_other_4xx_is_unavailable_not_notfound(patch_httpx):
     with pytest.raises(RetrievalError):
         try:
             http_util.get_with_retry("http://x", {}, max_retries=0, backoff=0)
-        except RetrievalNotFound:  # pragma: no cover
-            raise AssertionError("403 不应判为 not_found")
+        except RetrievalNotFound as exc:  # pragma: no cover
+            raise AssertionError("403 不应判为 not_found") from exc
 
 
 def test_200_returns_response(patch_httpx):

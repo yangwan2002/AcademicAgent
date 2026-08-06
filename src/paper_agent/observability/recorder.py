@@ -406,7 +406,9 @@ class SimpleTraceRecorder:
         try:
             self._exporter.export(self.trace)
         except Exception as exc:  # noqa: BLE001 - 导出失败不拖垮业务
-            print(
+            # T201 在此豁免（见行尾 noqa）：同 fanout —— trace 导出已经失败，
+            # 只能直写 stderr。
+            print(  # noqa: T201
                 f"[observability] trace export failed: {type(exc).__name__}",
                 file=sys.stderr,
             )

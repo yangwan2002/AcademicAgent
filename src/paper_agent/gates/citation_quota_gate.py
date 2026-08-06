@@ -16,7 +16,7 @@ rewrite 语义：原文已有的引用可原样保留（记 `preserved_legacy_to
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from paper_agent.gates.diff_gate import extract_citation_tokens
 from paper_agent.literature.ledger import ResolutionStatus

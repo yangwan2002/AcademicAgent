@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from paper_agent.literature.untrusted import clean_external_text, wrap_as_data

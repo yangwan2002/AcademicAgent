@@ -94,7 +94,7 @@ def main() -> int:
             kana_min=config.literature_lang_kana_min,
             hangul_min=config.literature_lang_hangul_min,
         )
-        lit_classifier = lambda rec: classify_record_language(rec, _th)  # noqa: E731
+        lit_classifier = lambda rec: classify_record_language(rec, _th)
         check("build_writing_orchestrator", lit_orchestrator is not None)
     except CompositionUnavailable as exc:
         check("build_writing_orchestrator", False, f"CompositionUnavailable: {exc}")

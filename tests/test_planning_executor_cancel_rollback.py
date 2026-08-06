@@ -269,7 +269,7 @@ def test_cleanup_only_removes_new_outputs(tmp_path, monkeypatch):
     out.mkdir()
     src = tmp_path / "p.tex"
     src.write_text("\\section{Introduction}\nx\n", encoding="utf-8")
-    session = FileBackedSession(str(src), workspace_root=str(tmp_path / "ws"))
+    _session = FileBackedSession(str(src), workspace_root=str(tmp_path / "ws"))
 
     # 执行前就存在的用户文件（不得被删）
     pre_existing = out / "p.docx"

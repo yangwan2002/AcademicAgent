@@ -18,7 +18,7 @@ from __future__ import annotations
 import hashlib
 import json
 import unicodedata
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 
 from paper_agent.literature.untrusted import clean_external_text

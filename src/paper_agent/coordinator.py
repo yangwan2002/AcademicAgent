@@ -17,7 +17,6 @@
 
 from __future__ import annotations
 
-import sys
 from dataclasses import dataclass, field
 from typing import Any, Callable
 from uuid import uuid4
@@ -80,7 +79,6 @@ class Coordinator:
         recorder: SimpleTraceRecorder | None = None
 
         if self.observing:
-            downstreams = []
             fan = FanOutSink(health=health)
             if self._renderer is not None:
                 fan.add_renderer(self._renderer)

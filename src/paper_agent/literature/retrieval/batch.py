@@ -178,7 +178,7 @@ __all__ = [
 # Task 3：RetrievalBatch 状态机 + 派生计数 + 结构化摘要
 # ===========================================================================
 
-from paper_agent.literature.quota import QuotaScope  # noqa: E402
+from paper_agent.literature.quota import QuotaScope
 
 
 class BatchStatus(str, Enum):
@@ -350,9 +350,9 @@ __all__ += [
 # A2c-5：pending batch 序列化（供 project facts 单 envelope 持久化 + 恢复）
 # ===========================================================================
 
-from paper_agent.literature.language import LanguageVerdict  # noqa: E402
-from paper_agent.literature.quota import QuotaKind, QuotaScope, QuotaSpec  # noqa: E402
-from paper_agent.literature.verification import (  # noqa: E402
+from paper_agent.literature.language import LanguageVerdict
+from paper_agent.literature.quota import QuotaKind, QuotaSpec
+from paper_agent.literature.verification import (
     EventKind,
     VerificationEvent,
     VerificationPolicy,

@@ -329,7 +329,7 @@ class ExecutionOutcome:
 
 # --- 会话基线（定义在 session 层，此处 re-export，保持依赖方向 tasking→session）---
 
-from paper_agent.session.file_session import SessionBaseline  # noqa: E402,F401
+from paper_agent.session.file_session import SessionBaseline
 
 
 # --- 规划循环出口（值对象，frozen）---

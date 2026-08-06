@@ -14,7 +14,7 @@ SEARCH → 清洗/快照(A2a/A2c-2) → 语言(A2a) → 精确去重(A1) → 资
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from paper_agent.literature import dedup as _dedup
 from paper_agent.literature import identifiers as _ids
@@ -32,7 +32,7 @@ from paper_agent.literature.retrieval.batch import (
 # **已迁至 `literature/relevance.py`**（F-3）：接受语义原先散落三处，其中
 # `preflight` 与 `evidence` 硬编码 `("relevant",)`，导致「也收 weakly」只改摄入
 # 不改消费。现统一定义在判定词汇的定义地，此处 re-export 保持既有导入不破。
-from paper_agent.literature.relevance import (  # noqa: E402
+from paper_agent.literature.relevance import (
     STRICT_ACCEPTANCE,
     WEAKLY_ACCEPTANCE,
     RelevanceAcceptancePolicy,
