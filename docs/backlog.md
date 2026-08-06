@@ -460,8 +460,18 @@ Passive millimeter-wave imaging
 
 7 个 `unrelated` 全是此类噪声。**GPT-5 reviewer 把它们全判对了 —— 判定层没问题，是输入太脏。**
 
+> **状态：已修（2026-08-05），真机受控 A/B 验收通过 —— 见 F-3b。**
+> 上面「关键词检索语义完全失效」的直觉是对的，但归因的**机制**当时没找准：
+> 不是 OpenAlex 不认语义、也不是查询词太宽，而是 `search=` 的 OR-ish **词袋语法丢词序**。
+> 同样的词加引号即 10/10 切题。受控 A/B：`unrelated` 12 → 5。
+> 上面 `air-ground` 被拆成 ground+water 的观察，正是词袋丢相邻性的直接证据。
+
 **结论：优化 relevance 吞吐（B1）之前，先提高检索召回质量的收益更大。**
 候选池 20 个里只有 1 个切题，再怎么加速判定也造不出文献。
+
+> **后续（2026-08-06）：F-1 修完后 B1 随即验收并转默认开启 —— 见 F-7。**
+> 上面这个先后判断是对的（先修召回、再优化吞吐），但「B1 只优化 63s 里的一部分」
+> 低估了它：实测 relevance LLM 占 125s 里的 89.9s（72%），B1 是最大的那一块。
 
 #### F-2 · reviewer 判定谱系合理，GPT-5 可用
 
@@ -614,8 +624,76 @@ runner 现在首行打印 `接受策略: mode=... section_kind=... → 接受判
 - 可能的方向（待验证）：seeds 更长更专（`cross-view` + `viewpoint change` + `scale difference`
   组合而非单 `UAV`）、限定 OpenAlex 的 concept/field、按年份加权、或改用支持语义检索的源
 
+> **⚠️ 上面这条「更长更专」的方向已被实测否证（2026-08-05）**，见 F-3b。
+> 真因是**查询语法**（词袋丢词序），不是查询词粒度；合成器早已在给长组合 seed。
+
 **尚未触达的路径**：runner 在 `[OK] 配额可满足` 就结束，**没有调 `build_bundle`**。
 所以 P-3a 质疑的「补满预算」那步、以及 `READY_TO_WRITE` 之后的写作链路仍未跑过。
+
+#### F-3b · F-1 的真因是查询语法，不是查询词粒度（2026-08-05，已修）
+
+F-3a 建议「seeds 更长更专」。直连 OpenAlex 实测（零 LLM、可复跑）**否证**了它，
+且发现合成器**早就在做**它建议的事 —— `last_run.txt` 记录的真实 seeds 是
+`cross-view image matching UAV ground vehicle` 这类长组合，不是单 `UAV`。再加长反而更差：
+
+| 查询 | total | 前 10 条切题 |
+|---|---|---|
+| `cross-view image matching UAV ground vehicle`（现状 seed） | 9423 | 2/10 |
+| 加长到 `... large viewpoint change scale difference air-ground`（F-3a 建议） | 7370 | **1/10** |
+| `"cross-view image matching"`（同样的词，**加引号**） | 215 | **10/10** |
+
+**真因**：OpenAlex `search=` 是 OR-ish 词袋 + 相关性排序，词越多匹配面越大、越向
+该领域高被引大热门倾斜，**词序相邻性在词袋里被丢掉**。所以 `air-ground` 招来
+Ground-Water Hydraulics，`UAV` 招来树皮甲虫和作物表型。这也顺带解释了 F-3a
+观察到的「OpenAlex 偏好被引量而非主题匹配度」——不是排序器偏心，是**候选池本身**
+就是宽词袋捞出的高被引集合，排序器只能在这个池子里挑。**症状在排序，病在语法。**
+
+**已实施**（`openalex.py::build_phrase_first_query` + 两级阶梯）：
+引住前 3 词、其余留自由词；命中 < `min(limit,5)` 则**丢弃并回退裸词**。
+⇒ 召回下界与改造前完全相同，最坏只多一次 GET（≈1.6s，对照单 attempt ~72s）。
+flag `literature_openalex_phrase_first`（默认开）；核验路径（`verify_adapters`）
+**显式关掉**——书目反查给的是完整标题，短语优先只会白花 HTTP（基线 34 次 verify）。
+
+跨 4 主题验证，无一例显著变差（联邦学习裸词已 10/10，持平）：
+跨视角 2/10→**7/10**、大模型代码生成 5/10→**10/10**、知识图谱问答 7/10→**10/10**。
+
+**引号会打穿到 0**：`"air-ground visual localization"` → 0 命中；整句引住同样 → 0；
+中文 seed 加引号也有害（`"空地协同" …` 2 条 vs 裸词 202 条）。故三重守卫 + 回退缺一不可。
+
+##### 真机验收（2026-08-05，受控 A/B）
+
+**先踩了一个坑**：直接跑两臂 A/B **不干净** —— LLM planner 每次吐的 seeds 都不同，
+其中一臂它**自己**就吐出了带引号的 seed（`"cross-view image matching" UAV ground`），
+那一臂策略是 `bare`（已含引号则不二次加工）、结果也不差。
+⇒ 必须 `PAPER_LIT_SEARCH_SYNTHESIS=0` + 钉死 `--query`，才能让两臂唯一差异是本改动。
+
+同 query（`cross-view image matching UAV ground vehicle`）、同配额（total≥5 en≥5）：
+
+| 指标 | A 关闭 | B 开启 |
+|---|---|---|
+| `relevance:unrelated` | **12** | **5** |
+| 入库可用 | 4（配额未满足） | 6（满足） |
+| verify_calls | 32 | 26 |
+| llm_calls | 16 | 11 |
+
+A 臂捞的是「UAV 应用大全」：树皮甲虫、作物表型、火星硫酸盐、冰湖识别、土壤湿度降尺度。
+B 臂是 UAV-VisLoc 数据集、跨视角注意力掩码、卫星影像实时地理定位、UAV 大倾斜影像定位。
+**顺带收益**：脏候选少了 ⇒ 不用挨个核验，verify/llm 调用同步下降；某次非受控跑
+停止原因从 `budget_exhausted` 变成 `quota_satisfied`。
+
+关键词代理预测 2/10→7/10，reviewer 实测 unrelated 12→5，方向与量级一致
+⇒ 该代理指标可以继续当先导指标用。
+
+**局限**：单主题、每臂 n=1。LLM 判定有随机性，给不出置信区间。12→5 的量级不像噪声
+（配合 4 主题代理指标 + 多次非受控跑的一致方向），但**不声称统计显著**。
+
+**连带修掉 2 个接线漏洞**（都属第七节「能力写对了，接线送不到」）：
+- `PROVIDER_SEARCH` 没进 `recorder.py` 白名单 ⇒ 事件发了但 trace.json 里没有。
+  已补 + 加测试专盯白名单。**教训重复了**：见记忆 observability-blind-spot-literature。
+- **dogfood runner 从来没有观测**：它直装 orchestrator、不走 Coordinator ⇒ 没人登记
+  ambient bus ⇒ provider 层与 `structured_call` 埋点在这条路径上全是 no-op、`runs/` 不产 trace。
+  已在 runner 内自建 bus 并打印查询策略分布（上表的 `phrase_first`/`bare` 归因即出自它）。
+- flag 只在 `Config` 有默认值、`from_env` 未映射 ⇒ 已加 `PAPER_LIT_PHRASE_FIRST`（A/B 开关）。
 
 ---
 
@@ -646,6 +724,14 @@ verify 从 **34 次降到 ~2 次（-94%）**。
 原因：离线样本的相关性通过率远高于真实检索。**B2 应按真实数据重新评估优先级 ——
 它可能比 B1 更该先上**（B1 省的是 63s 里的一部分，B2 省的是 34 次网络往返里的 32 次）。
 
+> **状态：结论已被真机时间归因否定（2026-08-06）—— 见 F-7。**
+> `-94% verify` 这个数字是对的，但它省的是**只占 25% 总时间**的那部分：
+> 34 次 verify 累计 31.7s（均值 0.93s），而 15 次 relevance LLM 累计 89.9s（72%）。
+>
+> **方法论教训：归因要用「秒」，不能用「省掉调用的百分比」。**
+> `-94%` 听起来远比 B1 唬人，但摊在 0.93s 的调用上；B1 省的是 6s/次的调用。
+> 这是本轮最值得记住的推理错误 —— 比较收益时两边必须换算到同一个单位（时间）。
+
 #### F-5 · 多轮迭代能力在真实条件下从未被执行
 
 `iterations=1`，预算在第一轮就耗尽 → planner 续搜、`_prioritize_seeds` 的多轮逼近、
@@ -653,6 +739,10 @@ verify 从 **34 次降到 ~2 次（-94%）**。
 条件（6s/候选）太紧。要么调大预算，要么先解决 F-1/F-4 降低单候选成本。
 
 （`--zh 0` 时 2 个中文 seed 被正确跳过：`search_calls=2` 只用了英文 seed ✓ 设计如预期。）
+
+> **状态：已解（2026-08-06，B1 默认开启后）。** 走的是「降低单候选成本」这条路、
+> 没动预算：`iterations=3`、`search_calls=3`，`stop_reason` 首次为 `quota_satisfied`。
+> `_prioritize_seeds` 与 planner 续搜第一次真正执行。见 F-7。
 
 #### F-6 · 落盘记录质量（B-2 的直接输入）
 
@@ -674,6 +764,46 @@ B-2 的「补全 `\bibitem`」要接受这个上限，或增加一次 Crossref �
 
 （另注：OpenAlex 给的 `year=2020`，而 DOI `10.3390/rs13010047` 实际是 Remote Sensing
 2021 年卷期 —— 单源元数据存在偏差，交叉核验目前只验存在性、不校对年份。）
+
+#### F-7 · 时间归因：relevance LLM 占 72%，B1 已验收并转默认（2026-08-06）
+
+**先补埋点。** 做归因时发现 verify 路径**完全没有埋点** —— 要优化的东西没被测量。
+补了 `VERIFY_FETCH`（含缓存命中标记），并给 `LLM_CALL_END` 加了 `label` 字段
+（judge_relevance / propose_search_plan 分桶用；此前 label **只存在于 span 名**里，
+attributes 读不到）。两者都被 recorder 白名单挡过 —— 详见下方「白名单」教训。
+
+**归因结果**（真机，phrase_first ON、synthesis OFF、`--total 5 --en 5`）：
+
+| | 次数 | 累计 | 均值 |
+|---|---|---|---|
+| relevance LLM | 15 | **89.9s（72%）** | 5.99s |
+| verify 网络往返 | 34 | 31.7s（25%） | 0.93s |
+
+**B1 受控 A/B**（同上条件，约 120s 预算）：
+
+| 指标 | B1 关 | B1 开（size=10） |
+|---|---|---|
+| relevance LLM 调用 / 累计 | 15 / 89.9s | **5 / 51.1s** |
+| **LLM 秒 / 候选** | 4.50 | **2.15（-52%）** |
+| 候选数 / 入库可用 | 20 / 6 | **30 / 17** |
+| iterations | 2 | **3** |
+| `stop_reason` | `budget_exhausted` | **`quota_satisfied`** |
+
+**最关键的一行是 `stop_reason`：项目首次在受控条件下正常收工而非预算耗尽。**
+省下的时间被用于多跑一轮检索 ⇒ 连带解决 F-5（多轮迭代首次执行）。
+
+**判定质量未退化**：`unrelated` 占比 25%→20%（6/30）。新入库的是 CVM-Net、
+Lending Orientation to Neural Networks、Optimal Feature Transport 等跨视角匹配核心工作，
+未见「同批里前一篇判 relevant 就跟着放宽」的迹象（这是批量判定的主要风险）。
+
+**已转默认**：`literature_relevance_batch_enabled=True`、`batch_size=10`（dataclass 与
+env 两处）。注意二者**必须同改** —— `_active_relevance_runtime` 对 `size<2` 直接抛
+`CompositionUnavailable`，「开了 batch 但 size=1」是不可装配的组合。
+改默认值连带修了 4 处依赖旧默认的测试（详见下方「改默认值」教训）。
+
+**新瓶颈是 verify**：占比 25%→43%（49.4s / 50 次）。均值稳定在 0.93→0.99s，
+即 verify 没变慢，是候选变多自然要多核验。**现在轮到 B2 了** —— 但先后顺序不能反：
+先 B1 把 LLM 从 72% 压到 43% 是对的，若按 F-4 原建议先上 B2，那 90s 的 LLM 仍会顶死预算。
 
 ---
 
@@ -914,22 +1044,30 @@ E2E 跑通后，优先级发生了实质变化。**新的第一优先级是检�
 
 | 优先级 | 事项 | 依据 |
 |---|---|---|
-| **1** | 检索召回质量（F-1） | 20 候选只 1 个切题；OpenAlex 关键词语义失效。造不出文献时，加速判定无意义 |
-| **2** | `accept_weakly_relevant` 按 section_purpose 分场景（F-3） | 10 个 weakly 被拒，其中含引言必引的综述 |
-| **3** | 重估 B1 vs B2 优先级（F-4） | B2 真实收益 -94% verify ≫ 自报的 -21%；可能该先上 B2 |
-| **4** | 时间预算与单候选成本（F-5） | 120s 预算 / 6s 每候选 → iterations=1，多轮能力从未执行 |
+| ~~1~~ | ~~检索召回质量（F-1）~~ **已修** | 真因是 `search=` 词袋语法非查询词粒度；短语优先已上，受控 A/B `unrelated` 12→5。见 F-3b |
+| ~~1~~ | ~~时间预算与单候选成本（F-5）~~ **已解** | B1 默认开启后 LLM 秒/候选 4.50→2.15，`iterations=3`、`stop_reason=quota_satisfied`。未动预算值。见 F-7 |
+| ~~3~~ | ~~重估 B1 vs B2 优先级（F-4）~~ **已定** | 归因否定了 F-4：verify 只占 25%（31.7s），relevance LLM 占 72%（89.9s）。B1 先上、已默认。见 F-7 |
+| **1** | B2 管线重排（先判相关性、只核验 survivor） | B1 上线后 verify 升为最大单项：43%、49.4s / 50 次。收益上限即这 49s；代码已在（`pipeline_reorder` flag 关），需受控 A/B |
+| **2** | `accept_weakly_relevant` 按 section_purpose 分场景（F-3） | 10 个 weakly 被拒，其中含引言必引的综述（注：dogfood 已见 `mode=by_purpose` 生效，需重新确认此条是否仍成立） |
+| **3** | 批量判定的规模上限与降级行为 | 当前 `size=10` 未经调优；`retry_limit=1` 下整批 schema 失败会让**整窗**判 ERROR。真机尚未观察到，但 size 越大爆炸半径越大 |
 | 5 | B-2 bibliography（受 F-6 上限约束） | 元数据缺 container_title/volume/pages |
 | 6 | P-4 只读 agent loop | 不依赖上述，可并行 |
 | 7 | P-2 / P-3（记忆 / 上下文工程） | facts.json 结构已验证可用；暂无证据表明需要改造 |
 
 **降级的判断**：
-- **B1（批量相关性）从"进行中的重点"降级** —— 它优化的是 63s 里的一部分，
-  而 F-1 才是决定产出的因素。B1 代码已在（flag 关），不必回滚，但不该继续投入。
+- ~~**B1（批量相关性）从"进行中的重点"降级**~~ —— ~~它优化的是 63s 里的一部分，
+  而 F-1 才是决定产出的因素。B1 代码已在（flag 关），不必回滚，但不该继续投入。~~
+  → **此判断已推翻（2026-08-06）**：B1 优化的不是"一部分"，而是 72% 的大头。
+  「先修 F-1 再优化吞吐」的**顺序**是对的，但对 B1 收益量级的估计错了。
+  已默认开启，见 F-7。教训同 F-4：估算收益占比时必须落到秒。
 - **P-2 记忆系统进一步确认不必新建** —— `facts.json` v4 落盘结构完整、
   `relevance_store` 缓存有效、幂等键正常。唯一缺口仍是 `CitationUsage`（哪章引了哪篇）。
 - **P-3 上下文工程尚无数据支撑** —— 本次只有 1 篇入库，`build_bundle` 的
   "补满预算"路径（P-3a 质疑的那步）根本没触发。要验证 context rot 假设，
   需要先有 ≥10 篇的证据集，即先解决 F-1。
+  → **F-1 已修后此前提解除**：非受控跑已见入库 10 篇（`quota_satisfied`）。
+  P-3a 质疑的那步现在**够条件跑了**，但 runner 仍在 `[OK] 配额可满足` 就结束、
+  没调 `build_bundle`。要验 context rot，下一步是让 runner 跑完 BUILD_BUNDLE。
 
 ---
 

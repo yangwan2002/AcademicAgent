@@ -37,14 +37,30 @@ from paper_agent.session.facts import SessionFacts
 
 
 class _Reviewer:
-    """stub reviewer：恒判 relevant/high（走 tool call，同 test_literature_flow）。"""
+    """stub reviewer：恒判 relevant/high（走 tool call，同 test_literature_flow）。
+
+    B1 默认开启后，装配出的是批量判定 ⇒ 必须同时会说 `report_relevance_batch`：
+    该协议按 `candidate_key` 绑定、**不按数组顺序**对齐，所以要从 prompt 里回读
+    key 再逐条回。只会单篇协议的 stub 会让 batch 全条 ERROR、bundle 空。
+    """
 
     def complete(self, messages, **opts):
+        import re as _re
+
         from paper_agent.providers.llm.base import LLMResponse, ToolCall
 
-        return LLMResponse(content="", tool_calls=[ToolCall(
-            id="1", name="report_relevance",
-            arguments={"verdict": "relevant", "confidence": "high"})])
+        tool_name = opts.get("forced_tool_name", "") or "report_relevance"
+        if tool_name == "report_relevance_batch":
+            user = "\n".join(m.content for m in messages if m.role == "user")
+            keys = _re.findall(r"candidate_key=(\S+)", user)
+            arguments = {"results": [
+                {"candidate_key": k, "verdict": "relevant", "confidence": "high"}
+                for k in keys
+            ]}
+        else:
+            arguments = {"verdict": "relevant", "confidence": "high"}
+        return LLMResponse(content="", tool_calls=[
+            ToolCall(id="1", name=tool_name, arguments=arguments)])
 
 
 def _cfg(**over):

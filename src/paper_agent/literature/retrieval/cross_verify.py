@@ -28,6 +28,8 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+
+from paper_agent.observability.current import ambient_publish
 from difflib import SequenceMatcher
 from typing import Callable, Sequence
 
@@ -188,8 +190,23 @@ class CrossVerifier:
             if result is None:
                 t0 = self._clock()
                 result = provider.fetch_metadata(id_type, norm_id)
-                budget.charge(elapsed_s=self._clock() - t0)
+                _elapsed = self._clock() - t0
+                budget.charge(elapsed_s=_elapsed)
                 cache.put(cache_key, result, now=self._clock())
+                # 归因用：verify 是网络往返，与 relevance LLM 争同一个时间预算。
+                # 不出耗时就无法判断 B2（先判相关性、只核验 survivor）到底能省多少。
+                ambient_publish(
+                    "VERIFY_FETCH",
+                    provider=name,
+                    id_type=id_type,
+                    status=getattr(result.status, "value", str(result.status)),
+                    elapsed_ms=round(_elapsed * 1000, 1),
+                    cached=False,
+                )
+            else:
+                ambient_publish("VERIFY_FETCH", provider=name, id_type=id_type,
+                                status=getattr(result.status, "value", str(result.status)),
+                                elapsed_ms=0.0, cached=True)
 
             events.append(self._to_event(result, name, authority, id_type, norm_id, candidate, seq))
 

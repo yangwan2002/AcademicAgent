@@ -149,6 +149,57 @@ class TurnMetrics:
             lines.append("  归属干净：无静默降级")
         return "\n".join(lines)
 
+    # ---- 读回（绝不抛）----
+
+    @classmethod
+    def load(cls, path: str) -> "TurnMetrics":
+        """从 JSON 读回累积计数；文件不存在/损坏 → 全零实例（绝不抛）。
+
+        **为什么必须有**：本模块的定位是「跨 Turn 累积、崩溃后仍反映已发生的事」，
+        但此前只有 `save` 没有 `load` ⇒ 每次启动 REPL 从零开始，
+        `runs/turn_metrics.json` 只剩最后一次会话的最后状态（实测 `turns: 1`）。
+        累积计数不跨会话，就无法回答「新栈这周降级了几次」——B-4 要的正是这个。
+
+        损坏文件按**全零**处理而非报错：一份读不懂的计数不该阻止 REPL 启动，
+        且下一次 `save` 会以正确结构覆盖它。
+        """
+        try:
+            with open(path, encoding="utf-8") as fh:
+                raw = json.load(fh)
+            if not isinstance(raw, dict):
+                return cls()
+        except Exception:  # noqa: BLE001 - 不存在/损坏/无权限一律退回全零
+            return cls()
+
+        def _counter(key: str) -> dict[str, int]:
+            value = raw.get(key)
+            if not isinstance(value, dict):
+                return {}
+            out: dict[str, int] = {}
+            for k, v in value.items():
+                if isinstance(v, bool) or not isinstance(v, int):
+                    continue     # 只接受整数计数，异常值丢弃而非崩
+                out[str(k)] = v
+            return out
+
+        def _int(value) -> int:
+            return value if isinstance(value, int) and not isinstance(value, bool) else 0
+
+        shadow = raw.get("shadow")
+        shadow = shadow if isinstance(shadow, dict) else {}
+        return cls(
+            turns=_int(raw.get("turns")),
+            served_by=_counter("served_by"),
+            plan_status=_counter("plan_status"),
+            planning_exit=_counter("planning_exit"),
+            active_failed=_counter("active_failed"),
+            fallback_to_legacy=_counter("fallback_to_legacy"),
+            cancelled=_int(raw.get("cancelled")),
+            shadow_matches_legacy=_int(shadow.get("matches_legacy")),
+            shadow_differs_from_legacy=_int(shadow.get("differs_from_legacy")),
+            shadow_incomplete=_int(shadow.get("incomplete")),
+        )
+
     # ---- 落盘（原子、绝不抛）----
 
     def save(self, path: str) -> bool:

@@ -373,6 +373,9 @@ def test_b2_config_and_snapshot_are_independent_from_batch(monkeypatch, tmp_path
     config = Config(
         literature_writing_integration=True,
         literature_pipeline_reorder_enabled=True,
+        # 本测试要证的是「两个 flag 相互独立」⇒ batch 必须显式关。
+        # B1 默认已开（2026-08-06），不显式关就测不到 reorder 单独生效的组合。
+        literature_relevance_batch_enabled=False,
         retrieval_provider="mock",
     )
     facts = SessionFacts(path=str(tmp_path / "facts.json"))

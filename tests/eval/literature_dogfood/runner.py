@@ -263,14 +263,69 @@ def run(topic: str, total: int, zh: int, en: int, query: str) -> int:
               f"reject={rec.get('reject')} verify_calls={rec.get('verify_calls')} "
               f"loop_elapsed={rec.get('elapsed_s')}s wall={rec['wall_s']}s")
 
-    loop = run_retrieval_loop(
-        RetrievalRequest(
-            quota=retrieval_quota, criteria=criteria,
-            initial_query="" if search_intent is not None else (query or topic),
-            task_fingerprint=task_fp, search_intent=search_intent),
-        deps=orch._deps_with_acceptance(acceptance), limits=orch._limits,
-        planner=orch._planner, trace_sink=_sink)
+    # 本 runner 直接装 orchestrator、**不走 Coordinator**，所以没人登记 ambient bus
+    # ⇒ `structured_call` / provider 层的埋点全部退化为 no-op，`runs/` 下也不会有 trace。
+    # 诊断脚本恰恰最需要这些细节（如 PROVIDER_SEARCH 的策略分布），故在此自建一个：
+    # 收集到内存，跑完按种类汇总打印。
+    from paper_agent.observability.bus import EventBus, RunContext
+    from paper_agent.observability.current import use_bus
+    from paper_agent.observability.health import ObservabilityHealth
+
+    _events: list = []
+
+    class _MemSink:
+        def emit(self, event):
+            _events.append(event)
+
+    _bus = EventBus(_MemSink(), RunContext("dogfood"), ObservabilityHealth())
+
+    with use_bus(_bus):
+        loop = run_retrieval_loop(
+            RetrievalRequest(
+                quota=retrieval_quota, criteria=criteria,
+                initial_query="" if search_intent is not None else (query or topic),
+                task_fingerprint=task_fp, search_intent=search_intent),
+            deps=orch._deps_with_acceptance(acceptance), limits=orch._limits,
+            planner=orch._planner, trace_sink=_sink)
     _trace_fh.close()
+
+    def _kind(e) -> str:
+        return getattr(e.kind, "value", str(e.kind))
+
+    _ps = [e for e in _events if _kind(e) == "provider_search"]
+    if _ps:
+        _dist: dict = {}
+        for e in _ps:
+            _dist[e.data.get("strategy")] = _dist.get(e.data.get("strategy"), 0) + 1
+        _emit(f"    provider 查询策略分布: {_dist}"
+              f"（命中数: {[e.data.get('results') for e in _ps]}）")
+
+    # 时间归因：把 elapsed_s 拆成 relevance LLM / verify 网络两块，
+    # 用于决定该先上 B1（批量判相关性）还是 B2（先判相关性、只核验 survivor）。
+    _llm = [e for e in _events if _kind(e) == "llm_call_end"]
+    _vf = [e for e in _events if _kind(e) == "verify_fetch"]
+    if _llm or _vf:
+        def _ms(evs) -> float:
+            return sum(float(e.data.get("latency_ms") or e.data.get("elapsed_ms") or 0)
+                       for e in evs)
+
+        _by_label: dict = {}
+        for e in _llm:
+            lb = e.data.get("label") or e.data.get("purpose") or "unnamed"
+            d = float(e.data.get("latency_ms") or e.data.get("elapsed_ms") or 0)
+            agg = _by_label.setdefault(lb, [0, 0.0])
+            agg[0] += 1
+            agg[1] += d
+
+        _vf_net = [e for e in _vf if not e.data.get("cached")]
+        _emit("\n[2.5] 时间归因（决定 B1 vs B2 优先级）:")
+        for lb, (n, ms) in sorted(_by_label.items(), key=lambda kv: -kv[1][1]):
+            _emit(f"    LLM {lb:28s} calls={n:3d} 累计={ms/1000:7.1f}s 均值={ms/max(n,1)/1000:5.2f}s")
+        _emit(f"    verify 网络往返            calls={len(_vf_net):3d} "
+              f"累计={_ms(_vf_net)/1000:7.1f}s 均值="
+              f"{_ms(_vf_net)/max(len(_vf_net),1)/1000:5.2f}s"
+              f"（另有 {len(_vf) - len(_vf_net)} 次缓存命中，~0s）")
+        _emit(f"    ⇒ LLM 合计 {_ms(_llm)/1000:.1f}s vs verify 合计 {_ms(_vf_net)/1000:.1f}s")
     _emit(f"    停止原因={loop.stop_reason.value} 诊断={loop.diagnostics}")
 
     # 候选处置 + 被排除原因直方图

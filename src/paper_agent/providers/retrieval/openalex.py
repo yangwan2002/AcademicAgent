@@ -10,11 +10,66 @@ from __future__ import annotations
 
 import os
 
+from paper_agent.observability.current import ambient_publish
 from paper_agent.providers.retrieval.base import RetrievalNotFound, RetrievalProvider
 from paper_agent.providers.retrieval.http_util import get_with_retry
 from paper_agent.workspace.models import ReferenceEntry
 
 _WORKS = "https://api.openalex.org/works"
+
+#: 短语优先：引住前 N 个词，其余留作自由词。
+_PHRASE_WORDS = 3
+
+#: rung 0 至少要拿到这么多条才采纳（不足则丢弃、回退裸词）。
+_PHRASE_MIN_RESULTS = 5
+
+
+def _has_cjk(text: str) -> bool:
+    """是否含 CJK 字符。中文 seed 加引号实测有害（`"空地协同" 跨视角 图像匹配`
+    只剩 2 条，裸词 202 条）—— OpenAlex 对 CJK 的分词与短语匹配不是一回事。"""
+    return any("㐀" <= ch <= "鿿" or "豈" <= ch <= "﫿" for ch in text)
+
+
+def _publish_search(strategy: str, query: str, phrase_query: str, results: int) -> None:
+    """发 `PROVIDER_SEARCH`：短语优先到底有没有生效、回退了几次，在 trace 里可读。
+
+    与 `RETRIEVAL_START/END` 同一隐私口径（design D15）：**只出长度与计数，
+    不出查询原文**。
+    """
+    ambient_publish(
+        "PROVIDER_SEARCH",
+        source="openalex",
+        strategy=strategy,
+        results=results,
+        query_len=len(query),
+        phrase_len=len(phrase_query),
+    )
+
+
+def build_phrase_first_query(query: str) -> str:
+    """把裸词查询改写为「短语优先」形式，不适用时返回空串。
+
+    **为什么需要**：OpenAlex `search=` 是 OR-ish 词袋 + 相关性排序，词给得越多
+    匹配面越大、越向该领域高被引大热门倾斜，词序相邻信息被丢掉。实测
+    `cross-view image matching UAV ground vehicle` 前 10 条只 2 条切题（招来
+    Ground-Water Hydraulics / 树皮甲虫 / 作物表型），而 `"cross-view image matching"`
+    10/10 切题。引号把相邻性要回来。
+
+    返回 "" 表示**不改写**（调用方直接用裸词），三种情形：
+    - query 已含 `"`：用户/planner 显式给了短语，尊重原样，不二次加工；
+    - 词数 <= `_PHRASE_WORDS`：没有自由词余量。整句引住会打穿到 0 命中
+      （实测 `"cross-view image matching UAV ground vehicle"` → 0），故不做；
+    - 前 N 词含 CJK：见 `_has_cjk`。
+    """
+    if '"' in query:
+        return ""
+    tokens = query.split()
+    if len(tokens) <= _PHRASE_WORDS:
+        return ""
+    head, tail = tokens[:_PHRASE_WORDS], tokens[_PHRASE_WORDS:]
+    if _has_cjk(" ".join(head)):
+        return ""
+    return '"' + " ".join(head) + '" ' + " ".join(tail)
 
 
 def reconstruct_abstract(inverted_index: dict | None) -> str:
@@ -43,10 +98,14 @@ class OpenAlexRetrievalProvider(RetrievalProvider):
         self,
         mailto: str | None = None,
         timeout: float = 15.0,
+        *,
+        phrase_first: bool = True,
     ) -> None:
         # 提供 mailto 进入 polite pool（更稳定）。可从环境变量读取。
         self._mailto = mailto or os.environ.get("OPENALEX_MAILTO")
         self._timeout = timeout
+        # 按构造参数注入（由 factory 读 config 传入），provider 内部不读全局 config。
+        self._phrase_first = phrase_first
 
     def _base_params(self) -> dict:
         params: dict = {}
@@ -54,7 +113,7 @@ class OpenAlexRetrievalProvider(RetrievalProvider):
             params["mailto"] = self._mailto
         return params
 
-    def search(self, query: str, limit: int = 10) -> list[ReferenceEntry]:
+    def _search_raw(self, query: str, limit: int) -> list[ReferenceEntry]:
         params = {
             **self._base_params(),
             "search": query,
@@ -62,6 +121,28 @@ class OpenAlexRetrievalProvider(RetrievalProvider):
         }
         resp = get_with_retry(_WORKS, params=params, timeout=self._timeout)
         return [self._to_entry(w) for w in resp.json().get("results", [])]
+
+    def search(self, query: str, limit: int = 10) -> list[ReferenceEntry]:
+        """两级阶梯：短语优先，命中不足则回退裸词。
+
+        **召回下界与改造前完全相同** —— rung 0 只在拿到足够结果时被采纳，
+        否则整批丢弃、老老实实发裸词请求。最坏情况只是多一次 GET（实测 ≈1.6s，
+        相对单次 attempt 的 ~72s（relevance LLM 占大头）在噪声范围内）。
+        """
+        phrase_query = build_phrase_first_query(query) if self._phrase_first else ""
+        if phrase_query:
+            entries = self._search_raw(phrase_query, limit)
+            if len(entries) >= min(limit, _PHRASE_MIN_RESULTS):
+                _publish_search("phrase_first", query, phrase_query, len(entries))
+                return entries
+            # 命中太少 → 短语过窄（`"air-ground visual localization"` 实测 0 命中）。
+            # 丢弃本批、回退裸词，绝不把「召回不准」换成「召回归零」。
+            entries = self._search_raw(query, limit)
+            _publish_search("bare_fallback", query, phrase_query, len(entries))
+            return entries
+        entries = self._search_raw(query, limit)
+        _publish_search("bare", query, "", len(entries))
+        return entries
 
     def fetch_metadata(self, identifier: str) -> ReferenceEntry | None:
         # 支持 DOI 或 OpenAlex id。

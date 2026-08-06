@@ -53,6 +53,11 @@ try:  # 观测事件（可选，None-safe）
 except Exception:  # noqa: BLE001
     EventKind = None  # type: ignore
 
+try:  # 脱敏（可选，None-safe）：`OperationResult.message` 是业务文本，按发布方纪律先脱敏
+    from paper_agent.observability.sanitize import sanitize_text
+except Exception:  # noqa: BLE001
+    sanitize_text = None  # type: ignore
+
 from paper_agent.intents.router import Intent
 
 # 视为「该步没成」的终态：触发停后续
@@ -81,6 +86,20 @@ def _publish(bus, kind_name: str, **payload) -> None:
         bus.publish(kind, **payload)
     except Exception:  # noqa: BLE001 - 观测失败不拖垮执行
         pass
+
+
+def _safe(text: str):
+    """业务文本 → SafeText（hash/preview/length）。脱敏模块缺失时退回空串。
+
+    退回**空串而非原文**：脱敏不可用时宁可少一条线索，也不把未过滤的文本写进
+    trace.json（用户可能在消息里粘过密钥）。
+    """
+    if sanitize_text is None:
+        return ""
+    try:
+        return sanitize_text(text or "")
+    except Exception:  # noqa: BLE001 - 观测失败不拖垮执行
+        return ""
 
 
 class _NullSpan:
@@ -456,11 +475,27 @@ def execute_plan(
 
 
 def _emit_op_result(bus, res: OperationResult) -> None:
+    """发 OPERATION_RESULT，**含 `message`（脱敏后）**。
+
+    `message` 里装的是「这一步为什么没成」——Gate 违反原因、文献预检的
+    `needs_gap_decision`、`_failed()` 塞进去的异常类别。此前只发状态不发原因，
+    于是 trace 里 `status: "rejected"` 后面是空白：真机四次 rejected/failed 的
+    原因一次都没留下（只印在滚掉的控制台上），事后无从复盘。
+
+    走 `sanitize_text` 而非原文：与 recorder 的契约是「文本字段由发布方先转
+    SafeText，recorder 只存 hash/preview/length」。preview 上限 500 字符，
+    足以容纳 Gate 的「最后一次违反：…」那几行。
+
+    键名 `result_message` 而非 `message`：`EventBus.publish(kind, message="", **data)`
+    把 `message` 当自己的形参，传它会落进 `Event.message`（类型是 `str`，装不下
+    SafeText），而非 `Event.data`。
+    """
     _publish(bus, "OPERATION_RESULT",
              operation_id=res.operation_id,
              status=res.status.value,
              changed_working_copy=res.changed_working_copy,
-             generated_outputs=list(res.generated_outputs))
+             generated_outputs=list(res.generated_outputs),
+             result_message=_safe(res.message))
 
 
 def _remaining(plan: Task_Plan, results: list[OperationResult]) -> tuple[Operation, ...]:

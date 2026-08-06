@@ -95,6 +95,12 @@ class Config:
     literature_query_planner: str = "deterministic"     # deterministic | llm | hybrid
     literature_max_search_intent_revisions: int = 2     # 澄清/修改重合成上限
 
+    # ---- F-1 检索召回质量：OpenAlex 短语优先（默认开）----
+    # OpenAlex `search=` 是 OR-ish 词袋，词多则向领域高被引大热门倾斜（实测前 10 条
+    # 只 2 条切题）；引住前 3 词后 10/10 切题。命中不足自动回退裸词，故召回下界不变，
+    # 默认开。关掉则 search 行为与改造前逐字节相同。
+    literature_openalex_phrase_first: bool = True
+
     # ---- literature-evidence / A2c 检索 Loop（组合层据此构造 RetrievalLimits 注入）----
     literature_discovery_enabled: bool = False          # Discovery 兜底默认关（无真实 Web 后端）
     literature_retrieval_max_iters: int = 6
@@ -128,8 +134,12 @@ class Config:
     literature_bundle_budget_chars: int = 24000
 
     # ---- retrieval-throughput / B1（默认关；size=1 保持逐篇语义）----
-    literature_relevance_batch_enabled: bool = False
-    literature_relevance_batch_size: int = 1
+    # B1 默认开启（2026-08-06 受控 A/B）：单篇判定时 relevance LLM 占 125s 里的
+    # 89.9s（72%），批量后 5 次调用 51.1s、LLM 秒/候选 4.50→2.15。省下的预算够多跑
+    # 一轮检索 ⇒ 停止原因首次从 budget_exhausted 变 quota_satisfied、入库 6→17。
+    # size 与 enabled 必须同改：`_active_relevance_runtime` 对 size<2 直接拒绝装配。
+    literature_relevance_batch_enabled: bool = True
+    literature_relevance_batch_size: int = 10
     literature_relevance_batch_input_chars: int = 12000
     literature_relevance_batch_input_tokens: int | None = None
     literature_relevance_batch_output_chars: int = 8000
@@ -202,6 +212,7 @@ def load_config() -> Config:
         literature_query_planner=_env_query_planner("PAPER_LIT_QUERY_PLANNER", "deterministic"),
         literature_max_search_intent_revisions=_env_int(
             "PAPER_LIT_MAX_SEARCH_INTENT_REVISIONS", 2, minimum=0),
+        literature_openalex_phrase_first=_env_flag("PAPER_LIT_PHRASE_FIRST", True),
         literature_discovery_enabled=_env_flag("PAPER_LIT_DISCOVERY_ENABLED", False),
         literature_retrieval_max_iters=_env_int("PAPER_LIT_RETRIEVAL_MAX_ITERS", 6, minimum=1),
         literature_retrieval_max_provider_calls=_env_int(
@@ -217,9 +228,9 @@ def load_config() -> Config:
         literature_bundle_budget_chars=_env_int(
             "PAPER_LIT_BUNDLE_BUDGET_CHARS", 24000, minimum=0),
         literature_relevance_batch_enabled=_env_flag(
-            "PAPER_LIT_RELEVANCE_BATCH_ENABLED", False),
+            "PAPER_LIT_RELEVANCE_BATCH_ENABLED", True),
         literature_relevance_batch_size=_env_int(
-            "PAPER_LIT_RELEVANCE_BATCH_SIZE", 1, minimum=1),
+            "PAPER_LIT_RELEVANCE_BATCH_SIZE", 10, minimum=1),
         literature_relevance_batch_input_chars=_env_int(
             "PAPER_LIT_RELEVANCE_BATCH_INPUT_CHARS", 12000, minimum=1),
         literature_relevance_batch_input_tokens=_env_optional_int(

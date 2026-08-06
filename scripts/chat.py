@@ -403,8 +403,10 @@ def main(argv: list[str]) -> int:
 
     # B-4：Turn 归属计数。每轮落盘一次，使崩溃/强杀后仍能看到已发生的归属，
     # 且能回答「这次 E2E 的结论是否可直接采信」（attribution_is_clean）。
-    metrics = TurnMetrics()
     metrics_path = os.path.join(config.runs_dir, "turn_metrics.json")
+    # 读回既有累积值：计数要跨会话累积才能回答「新栈这周降级了几次」。
+    # 文件不存在/损坏 → 全零，不阻塞启动。
+    metrics = TurnMetrics.load(metrics_path)
 
     index = _build_index(session)
     print(f"已载入 {source}（working: {session.working_path}）")

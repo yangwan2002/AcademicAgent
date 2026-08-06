@@ -96,17 +96,30 @@ def _build(tmp_path, config, reviewer=None, *, estimator=None, entries=()):
     return orchestrator, facts, reviewer
 
 
-def test_b1_defaults_are_zero_regression_off():
+def test_b1_defaults_are_batch_on():
+    """B1 自 2026-08-06 起默认开启（受控 A/B：LLM 秒/候选 4.50→2.15，
+    停止原因 budget_exhausted→quota_satisfied）。
+
+    `size` 必须 >=2：`_active_relevance_runtime` 对 size<2 抛
+    `CompositionUnavailable`，所以「开了 batch 但 size=1」是不可装配的组合，
+    两个默认值得一起改。B2（`pipeline_reorder`）仍默认关 —— 它的收益待重估。
+    """
     config = Config()
-    assert config.literature_relevance_batch_enabled is False
-    assert config.literature_relevance_batch_size == 1
+    assert config.literature_relevance_batch_enabled is True
+    assert config.literature_relevance_batch_size >= 2
     assert config.literature_relevance_batch_input_tokens is None
     assert config.literature_batch_retry_limit == 1
     assert config.literature_pipeline_reorder_enabled is False
 
 
 def test_disabled_b1_does_not_construct_active_runtime(tmp_path):
-    orchestrator, _facts, _reviewer = _build(tmp_path, _config())
+    """显式关掉时不装 active runtime（回退单篇判定的逃生阀仍要可用）。
+
+    B1 默认已开，故此处必须**显式** `enabled=False`，不能依赖 `_config()` 的默认。
+    """
+    orchestrator, _facts, _reviewer = _build(
+        tmp_path, _config(literature_relevance_batch_enabled=False)
+    )
     assert orchestrator._deps.active_relevance_runtime is None
 
 
@@ -126,10 +139,14 @@ def test_enabled_b1_builds_one_frozen_active_runtime(tmp_path):
 
 
 def test_enabled_b1_rejects_size_one_and_unbounded_retry(tmp_path):
+    # size=1 要显式给：默认已是 10，不再靠「默认 size=1」触发这条校验。
     with pytest.raises(CompositionUnavailable, match="batch_size"):
         _build(
             tmp_path,
-            _config(literature_relevance_batch_enabled=True),
+            _config(
+                literature_relevance_batch_enabled=True,
+                literature_relevance_batch_size=1,
+            ),
         )
     with pytest.raises(CompositionUnavailable, match="retry_limit"):
         _build(
