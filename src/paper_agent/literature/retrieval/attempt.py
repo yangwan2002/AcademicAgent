@@ -14,7 +14,7 @@ SEARCH → 清洗/快照(A2a/A2c-2) → 语言(A2a) → 精确去重(A1) → 资
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from paper_agent.literature import dedup as _dedup
 from paper_agent.literature import identifiers as _ids
@@ -32,7 +32,7 @@ from paper_agent.literature.retrieval.batch import (
 # **已迁至 `literature/relevance.py`**（F-3）：接受语义原先散落三处，其中
 # `preflight` 与 `evidence` 硬编码 `("relevant",)`，导致「也收 weakly」只改摄入
 # 不改消费。现统一定义在判定词汇的定义地，此处 re-export 保持既有导入不破。
-from paper_agent.literature.relevance import (  # noqa: E402
+from paper_agent.literature.relevance import (
     STRICT_ACCEPTANCE,
     WEAKLY_ACCEPTANCE,
     RelevanceAcceptancePolicy,
@@ -1060,6 +1060,7 @@ def _run_attempt_b1(
             )
 
     def _flush() -> None:
+        nonlocal budget_stopped
         if not pending:
             return
         frozen_pending = tuple(pending)
@@ -1068,6 +1069,29 @@ def _run_attempt_b1(
         )
         by_key = {item.window_item.candidate_key: item for item in frozen_pending}
         for window in windows:
+            # 开窗前先看预算：预算耗尽时 `BudgetAwareLLMProvider` 会抛
+            # `ExternalCallRejected`，而 `structured_call` 的宽 `except Exception`
+            # 会把它压成 `PROVIDER_FAILED` ⇒ **整窗** batch_size 条被判 ERROR、
+            # 落成 `relevance:provider_failed`（谎报「模型失败」，实为预算停止）。
+            # 单篇路径下这只损失 1 条，size=10 时损失 10 条 —— 爆炸半径随 size 放大。
+            # 与 `_judge_b2` 的窗前检查对齐；未判定的候选走下面 `rel is None`
+            # 分支得到诚实的 `relevance:budget_exhausted`，且不进 relevance_store。
+            if _expensive_budget_exhausted():
+                budget_stopped = True
+                # 未判定的候选必须显式落 REJECT：`pending.clear()` 会把它们
+                # 一并丢掉 ⇒ 连 disposition 都不产生（candidates 计数与处置
+                # 分布对不上，比理由写错更难查）。
+                for window_item in window.items:
+                    item = by_key[window_item.candidate_key]
+                    _emit(
+                        item.ordinal,
+                        _reject(
+                            item.snapshot,
+                            ("relevance:budget_exhausted",),
+                            language=item.language,
+                        ),
+                    )
+                continue
             assessments, batch_stats = runtime.assess_window_with_stats(
                 window, criteria, call_control=call_control
             )

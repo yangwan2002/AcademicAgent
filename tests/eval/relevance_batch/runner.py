@@ -27,32 +27,32 @@ for path in (str(SRC), str(HERE)):
     if path not in sys.path:
         sys.path.insert(0, path)
 
-from paper_agent.literature.relevance import (  # noqa: E402
+from paper_agent.literature.relevance import (
     JudgeVersion,
     RelevanceCriteria,
     RelevanceJudge,
 )
-from paper_agent.literature.relevance_batch import (  # noqa: E402
+from paper_agent.literature.relevance_batch import (
     BatchRelevanceJudge,
     make_batch_judge_version,
 )
-from paper_agent.literature.relevance_runtime import (  # noqa: E402
+from paper_agent.literature.relevance_runtime import (
     ActiveRelevanceRuntime,
     RelevanceTextPolicy,
 )
-from paper_agent.literature.retrieval.budget import (  # noqa: E402
+from paper_agent.literature.retrieval.budget import (
     BudgetLedger,
     RetrievalLimits,
 )
-from paper_agent.literature.retrieval.call_control import (  # noqa: E402
+from paper_agent.literature.retrieval.call_control import (
     BudgetAwareLLMProvider,
     ExternalCallControl,
 )
-from paper_agent.literature.retrieval.window_packer import (  # noqa: E402
+from paper_agent.literature.retrieval.window_packer import (
     BatchInputBudget,
     WindowLimits,
 )
-from paper_agent.providers.llm.base import LLMResponse, ToolCall  # noqa: E402
+from paper_agent.providers.llm.base import LLMResponse, ToolCall
 
 _SCORER_SPEC = importlib.util.spec_from_file_location(
     "relevance_batch_eval_scorer", HERE / "scorer.py"

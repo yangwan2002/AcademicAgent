@@ -96,7 +96,10 @@ class OpenAlexVerifyProvider:
         if inner is None:
             from paper_agent.providers.retrieval.openalex import OpenAlexRetrievalProvider
 
-            inner = OpenAlexRetrievalProvider()
+            # 核验路径**关掉短语优先**：那是「主题发现」策略，不是「按标识/书目精确回查」
+            # 策略。反查给的是完整标题，引住前 3 词几乎必然命中不足 → 每次核验白花一次
+            # HTTP（基线单次 attempt 有 34 次 verify），且反查要的是精确匹配、不是召回纯度。
+            inner = OpenAlexRetrievalProvider(phrase_first=False)
         self._inner = inner
 
     def fetch_metadata(self, identifier_type: str, identifier: str) -> FetchResult:

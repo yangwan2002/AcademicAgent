@@ -23,9 +23,14 @@ import hashlib
 import json
 import os
 from dataclasses import dataclass, asdict
+from typing import TYPE_CHECKING
 
 # 注意：literature 包依赖本模块的 KnownRef（literature.models / ledger 都 import 它），
 # 故本模块**不能**在顶层 import literature，否则成环。全部 literature 导入惰性化。
+if TYPE_CHECKING:
+    # 仅供类型标注：TYPE_CHECKING 块运行时不执行，故不会与上述循环依赖冲突。
+    # 靠 `from __future__ import annotations` 让签名里的标注延迟求值。
+    from paper_agent.literature.ledger import ReferenceLedger
 
 
 def project_facts_path(workspace_root: str, source_path: str) -> str:

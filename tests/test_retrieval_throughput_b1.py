@@ -404,3 +404,52 @@ def test_active_preflight_backfill_and_availability_share_hash_policy():
         content_hasher=runtime.content_hash,
     )
     assert availability.available_ids == (record.reference_id,)
+
+
+def test_budget_exhaustion_mid_window_does_not_slander_whole_batch_as_provider_failed():
+    """预算在开窗前耗尽时，整窗候选必须落 `budget_exhausted`、不得谎报模型失败。
+
+    真机现象（2026-08-06 纯默认跑）：`relevance_llm_calls=0` 却有 10 条
+    `relevance:provider_failed` —— 一次 LLM 都没发，却报「模型失败」。
+
+    链路：预算耗尽 → `BudgetAwareLLMProvider.complete` 抛 `ExternalCallRejected`
+    → `structured_call` 的宽 `except Exception` 压成 `PROVIDER_FAILED`
+    → `_assess_once` 把**整窗** batch_size 条判 ERROR。
+    单篇路径下只损失 1 条，size=10 时损失 10 条：爆炸半径随 batch_size 放大。
+
+    两条断言分别盯两种失败模式：
+    - 理由必须是 budget_exhausted（不是 provider_failed）——「谎报」
+    - 候选必须仍产生 disposition ——「静默丢弃」（比理由写错更难查：
+      candidates 计数会和处置分布对不上）
+    """
+    reviewer = _BatchReviewer()
+    candidates = [_candidate(i) for i in range(3)]
+    # 预算必须在候选**已进 pending 之后**才耗尽 —— 这才是真机的时序：
+    # 攒够一窗（或走到末尾 flush）时才发现没预算了。若一开始就耗尽，外层
+    # 循环第一轮就 break，根本进不到 _flush，测不到本 bug；若让 verify 也
+    # 缺预算，候选会先落 verify:unverified，同样绕过 relevance 判定。
+    # 故：verify 预算充足，只把 LLM 维度掐掉（真机是时间预算，等价地
+    # 表现为「候选已核验、要判定时没预算了」）。
+    # 注意：外层候选循环用的是同一个 `_expensive_budget_exhausted` 谓词，
+    # 所以不能无条件报耗尽（那样第一轮就 break，又回到进不了 _flush 的情形）。
+    # 让它在 3 个候选都已核验入 pending 之后才转为耗尽。
+    deps, ledger, _search, verify = _deps(candidates, reviewer)
+    real = deps.budget_ledger.exhausted_dimensions
+    deps.budget_ledger.exhausted_dimensions = (
+        lambda: {"max_llm_calls"} if verify.calls >= 3 else real()
+    )
+
+    result = run_attempt("agents", CRITERIA, _quota(), _batch(), deps)
+
+    assert reviewer.calls == 0, "预算耗尽后不应真的发出批量调用"
+    assert ledger.llm_calls == 0
+    # 静默丢弃检查：3 个候选都要有处置，不能凭空消失。
+    assert len(result.items) == 3
+    assert [item.disposition for item in result.items] == [
+        BatchDisposition.REJECT
+    ] * 3
+    # 谎报检查：理由是预算，不是 provider_failed。
+    for item in result.items:
+        assert item.rejection_reasons == ("relevance:budget_exhausted",), (
+            f"预算停止被谎报成 {item.rejection_reasons}"
+        )

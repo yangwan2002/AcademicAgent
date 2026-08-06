@@ -109,19 +109,9 @@ def test_digest_stable_and_no_preview():
 # ---------------------------------------------------------------- Handler 端到端（合成 → 多 seed → READY）
 
 from paper_agent.literature.language import DEFAULT_THRESHOLDS, classify_record_language
-from paper_agent.literature.models import ReferenceRecord
-from paper_agent.literature.quota import (
-    CountConstraint,
-    CountDimension,
-    CountOperator,
-    QuotaKind,
-    QuotaScope,
-    QuotaSpec,
-)
 from paper_agent.literature.relevance import (
     JudgeVersion,
     RelevanceJudge,
-    RelevanceStore,
 )
 from paper_agent.literature.retrieval.attempt import AttemptDeps, RelevanceAcceptancePolicy
 from paper_agent.literature.retrieval.budget import RetrievalLimits
@@ -148,7 +138,6 @@ from paper_agent.tasking.contracts import (
     SlotSource,
     SlotValue,
 )
-from paper_agent.providers.retrieval.capabilities import FetchResult, FetchStatus
 from paper_agent.providers.retrieval.mock import MockRetrievalProvider, MockVerifyProvider
 from paper_agent.session.facts import SessionFacts
 from paper_agent.session.file_session import FileBackedSession

@@ -156,7 +156,7 @@ def test_raw_models_carry_clauses():
 # Task 2：finalize_quota（分流 / 年份固化 / 区间求交 / 冲突检测）
 # ==========================================================================
 
-from paper_agent.literature.quota import finalize_quota  # noqa: E402
+from paper_agent.literature.quota import finalize_quota
 
 
 def _raw(filters=(), constraints=(), explicit_scope="") -> RawQuotaSpec:
@@ -410,14 +410,12 @@ def test_misplaced_clause_rerouted_by_token():
 # Task 3：评估器（filter/count/gap）+ summary DTO
 # ==========================================================================
 
-from paper_agent.literature.quota import (  # noqa: E402
+from paper_agent.literature.quota import (
     DimensionCounts,
-    GapDirection,
     build_quota_summary,
     count_by_dimension,
     evaluate_constraints,
     filter_matches,
-    passes_all_filters,
 )
 
 

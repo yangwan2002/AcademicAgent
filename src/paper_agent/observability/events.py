@@ -45,6 +45,12 @@ class EventKind(str, Enum):
     INTERVIEW_QA = "interview_qa"
     RETRIEVAL_START = "retrieval_start"
     RETRIEVAL_END = "retrieval_end"
+    #: 单次 provider 检索调用的查询策略（如 OpenAlex 短语优先 / 回退裸词）。
+    #: 隐私口径同 RETRIEVAL_*：只出长度与计数，不出查询原文。
+    PROVIDER_SEARCH = "provider_search"
+    #: 单次书目核验网络往返（含缓存命中）。用于把时间预算拆成
+    #: relevance LLM / verify 网络两块，为 B1 vs B2 的优先级提供实测依据。
+    VERIFY_FETCH = "verify_fetch"
 
     # --- 生成尝试 ---
     GENERATION_ATTEMPT_START = "generation_attempt_start"
@@ -189,7 +195,7 @@ class EventSink(Protocol):
 class NullSink:
     """默认空实现：丢弃所有事件（无可观测开销）。"""
 
-    def emit(self, event: Event) -> None:  # noqa: D401
+    def emit(self, event: Event) -> None:
         return None
 
 

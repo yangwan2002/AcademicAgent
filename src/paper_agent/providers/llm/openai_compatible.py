@@ -260,7 +260,9 @@ class OpenAICompatibleProvider(LLMProvider):
             stream = self._client.chat.completions.create(
                 model=self._model, messages=payload, **call_opts
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 - 探测性重试：仅去掉一个可选参数再试一次，
+            # 失败照常向上抛，不吞异常、不改判状态（对比 structured_call 曾把预算
+            # 信号压成 PROVIDER_FAILED 那类问题——那里的宽 except 才是有害的）。
             # 个别网关不认 stream_options，去掉重试一次。
             call_opts.pop("stream_options", None)
             stream = self._client.chat.completions.create(
@@ -308,7 +310,7 @@ class OpenAICompatibleProvider(LLMProvider):
             stream = self._client.chat.completions.create(
                 model=self._model, messages=payload, **opts
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 - 同上：探测性重试，异常不被吞掉。
             # 个别网关不认 stream_options，去掉重试一次。
             opts.pop("stream_options", None)
             stream = self._client.chat.completions.create(

@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:      # 允许手动触发，便于验证 workflow 本身
+
+concurrency:
+  # 同一分支的新 push 取消旧运行，省 runner 时间。
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read           # 只读即可；不给写权限，避免 workflow 被利用改仓库
+
+jobs:
+  lint:
+    name: ruff
+    runs-on: ubuntu-latest
+    # lint 秒级完成，与测试并行跑，不必串在前面当门槛。
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: 安装 ruff
+        # 只装 ruff，不装项目依赖 —— lint 不需要它们，能省一分多钟。
+        run: pip install "ruff>=0.6,<1"
+      - name: ruff check
+        run: ruff check . --output-format=github
+
+  test:
+    name: pytest (${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false     # 一个版本挂了也要看到另一个的结果
+      matrix:
+        # 3.10 是 requires-python 下界，3.12 是本地开发版本。两端都测，
+        # middle 版本由这两端覆盖（本项目无版本敏感的语法特性）。
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: 安装项目与依赖
+        # 必须带 [all]：实测缺 python-docx 会让 18 个测试文件在**收集期**就
+        # ImportError（不是 skip，是硬错误，整个 run 被 Interrupted）。
+        run: pip install -e ".[all,dev]"
+      - name: pytest
+        # 跳过 tests/eval：那是打真实 API 的 dogfood/gate，要 key 且消耗配额，
+        # 不能进 CI。单元与集成测试全在 tests/ 其余部分。
+        run: pytest tests/ -q --ignore=tests/eval
+        env:
+          PYTHONIOENCODING: utf-8
+          # 兜底：确保没有测试意外走真实 provider。
+          PAPER_LLM: mock
+
+  import-check:
+    name: 无可选依赖时可导入
+    runs-on: ubuntu-latest
+    # 项目声明 dependencies = []（核心不依赖第三方），这个 job 守住那个承诺：
+    # 光装项目本体、不装 openai/httpx，核心包必须仍能 import 且 mock 链路可跑。
+    # 否则"可选依赖"名不副实，新用户 pip install 后直接 ImportError。
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e . && pip install "pytest>=8,<10"
+      - name: 导入核心包
+        run: |
+          python -c "
+          import paper_agent
+          from paper_agent.coordinator import Coordinator
+          from paper_agent.session.facts import SessionFacts
+          from paper_agent.tasking.plan_builder import build_plan
+          print('核心包在无可选依赖时导入正常')
+          "

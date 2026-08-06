@@ -28,7 +28,6 @@ from paper_agent.literature.relevance import (
     WEAKLY_ACCEPTANCE,
     JudgeVersion,
     RelevanceJudge,
-    RelevanceStore,
     acceptance_for_purpose,
     relevance_content_hash,
 )

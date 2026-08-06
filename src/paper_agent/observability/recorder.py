@@ -53,6 +53,17 @@ def _plain(value):
     return value
 
 
+def _present(data, *keys):
+    """只取 ``data`` 里**实际存在**的 ``keys``。
+
+    与固定键白名单的区别：缺席的键不会被写成 ``None``。用于 `LLM_CALL_END`
+    这类「不同发布方带的字段不一样」的事件 —— generator 的 completed 事件没有
+    `error`，写成 `error: null` 只是噪声；而 `structured_call` 带的
+    latency_ms / label 又必须留住。
+    """
+    return {k: data[k] for k in keys if k in data}
+
+
 @dataclass
 class Span:
     span_id: str
@@ -204,14 +215,19 @@ class SimpleTraceRecorder:
                 },
             )
         elif kind is EventKind.LLM_CALL_END:
+            # `_present` 而非固定四键：`structured_call` 的埋点还带
+            # provider_attempts / compatibility_retries / latency_ms（重试与耗时
+            # 归因所需）、label（按用途分桶所需）。此前白名单只取四键，多带的字段
+            # 静默丢失；且缺失键会被写成 `None`（generator 的 completed 事件无
+            # error → `error: null`），徒增噪声。改为「只并入实际存在的键」。
             self._attach(
                 event,
-                {
-                    "status": event.data.get("status"),
-                    "response": event.data.get("response"),
-                    "delta_count": event.data.get("delta_count"),
-                    "error": event.data.get("error"),
-                },
+                _present(
+                    event.data,
+                    "status", "response", "delta_count", "error",
+                    "provider_attempts", "compatibility_retries", "latency_ms",
+                    "label",
+                ),
             )
         elif kind is EventKind.LLM_USAGE:
             self._attach(
@@ -243,6 +259,8 @@ class SimpleTraceRecorder:
             EventKind.INTERVIEW_QA,
             EventKind.RETRIEVAL_START,
             EventKind.RETRIEVAL_END,
+            EventKind.PROVIDER_SEARCH,
+            EventKind.VERIFY_FETCH,
             EventKind.GATE_START,
             EventKind.WORKING_COPY_UPDATE,
             EventKind.WORKSPACE_COMMIT,
@@ -388,7 +406,9 @@ class SimpleTraceRecorder:
         try:
             self._exporter.export(self.trace)
         except Exception as exc:  # noqa: BLE001 - 导出失败不拖垮业务
-            print(
+            # T201 在此豁免（见行尾 noqa）：同 fanout —— trace 导出已经失败，
+            # 只能直写 stderr。
+            print(  # noqa: T201
                 f"[observability] trace export failed: {type(exc).__name__}",
                 file=sys.stderr,
             )

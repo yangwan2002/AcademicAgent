@@ -1,55 +1,19 @@
 
 === dogfood: topic='面向空地协同的大视角大尺度差图像匹配研究' 配额 total≥5 zh≥0 en≥5 ===
     接受策略: mode=by_purpose section_kind='引言' → 接受判定=['relevant', 'weakly_relevant']
-[0] 合成检索意图(hybrid planner): status=ready
-    主题='空地协同场景下应对大视角与大尺度差异的跨视角图像匹配与视觉定位方法' seeds=[('cross-view image matching UAV ground vehicle', 'any'), ('large viewpoint scale variation image matching', 'any'), ('air-ground visual localization cross-view', 'any'), ('aerial terrestrial image matching scale difference', 'any'), ('cross-view geo-localization scale invariant', 'any'), ('空地协同 跨视角 图像匹配', 'language.zh')]
 
 [1] 初始缺口: [('total', 5), ('language.en', 5)]
 [2] 检索中（打真实源 + reviewer 判相关性）…
-    · attempt: cand=10 accept=5 reject=5 verify_calls=20 loop_elapsed=72.719s wall=72.7s
-    · attempt: cand=10 accept=4 reject=3 verify_calls=34 loop_elapsed=123.625s wall=123.6s
-    停止原因=budget_exhausted 诊断={'stop_reason': 'budget_exhausted', 'iterations': 1, 'search_calls': 2, 'verify_calls': 34, 'llm_calls': 17, 'candidates': 20, 'elapsed_s': 123.625, 'exhausted_dimensions': ['provider_time_budget_s'], 'tried_queries': 2}
-[3] 候选处置分布: {'reject': 8, 'accept_new': 9}
-    被排除原因分布: {'relevance:unrelated': 7, 'relevance:weakly_relevant': 1}
+    · attempt: cand=0 accept=0 reject=0 verify_calls=0 loop_elapsed=11.406s wall=11.4s
+    停止原因=all_sources_unavailable 诊断={'stop_reason': 'all_sources_unavailable', 'iterations': 1, 'search_calls': 1, 'verify_calls': 0, 'llm_calls': 0, 'candidates': 0, 'elapsed_s': 11.406, 'exhausted_dimensions': [], 'tried_queries': 1}
+[3] 候选处置分布: {}
+    被排除原因分布: {}
 
 [detail] 逐候选（判定质量核对用；同时写 candidates.jsonl）:
-  #01 [reject] rel=unrelated/high/title_and_abstract lang=en/high verify=- reasons=['relevance:unrelated']
-        Unmanned Aerial Vehicles (UAVs): A Survey on Civil Applications and Key Research Challenge
-  #02 [accept_new] rel=relevant/high/title_and_abstract lang=en/high verify=doi=verified@crossref/final;openalex_work=verified@openalex/final reasons=[]
-        UAV-Satellite View Synthesis for Cross-View Geo-Localization
-  #03 [accept_new] rel=weakly_relevant/high/title_and_abstract lang=en/high verify=doi=verified@crossref/final;openalex_work=verified@openalex/final reasons=[]
-        Using Unmanned Aerial Vehicles (UAV) for High-Resolution Reconstruction of Topography: The
-  #04 [accept_new] rel=weakly_relevant/high/title_and_abstract lang=en/high verify=doi=verified@crossref/final;openalex_work=verified@openalex/final reasons=[]
-        An Automated Technique for Generating Georectified Mosaics from Ultra-High Resolution Unma
-  #05 [accept_new] rel=relevant/high/title_and_abstract lang=en/high verify=doi=verified@crossref/final;openalex_work=verified@openalex/final reasons=[]
-        A Practical Cross-View Image Matching Method between UAV and Satellite for UAV-Based Geo-L
-  #06 [reject] rel=unrelated/high/title_and_abstract lang=en/high verify=- reasons=['relevance:unrelated']
-        The use of unmanned aerial vehicles (UAVs) for engineering geology applications
-  #07 [accept_new] rel=weakly_relevant/high/title_and_abstract lang=en/high verify=doi=verified@crossref/final;openalex_work=verified@openalex/final reasons=[]
-        UAV PHOTOGRAMMETRY FOR MAPPING AND 3D MODELING – CURRENT STATUS AND FUTURE PERSPECTIVES
-  #08 [reject] rel=unrelated/high/title_and_abstract lang=en/high verify=- reasons=['relevance:unrelated']
-        Individual Tree Detection and Classification with UAV-Based Photogrammetric Point Clouds a
-  #09 [reject] rel=unrelated/high/title_and_abstract lang=en/high verify=- reasons=['relevance:unrelated']
-        Using UAV-Based Photogrammetry and Hyperspectral Imaging for Mapping Bark Beetle Damage at
-  #10 [reject] rel=unrelated/high/title_and_abstract lang=en/high verify=- reasons=['relevance:unrelated']
-        Unmanned Aerial Vehicle Remote Sensing for Field-Based Crop Phenotyping: Current Status an
-  #11 [accept_new] rel=weakly_relevant/high/title_and_abstract lang=en/high verify=doi=verified@crossref/final;openalex_work=verified@openalex/final reasons=[]
-        Image Matching from Handcrafted to Deep Features: A Survey
-  #12 [reject] rel=unrelated/high/title_only lang=en/high verify=- reasons=['relevance:unrelated']
-        The Pascal Visual Object Classes (VOC) Challenge
-  #13 [reject] rel=unrelated/high/title_and_abstract lang=en/high verify=- reasons=['relevance:unrelated']
-        A Spatial-Temporal Attention-Based Method and a New Dataset for Remote Sensing Image Chang
-  #14 [reject] rel=weakly_relevant/medium/title_only lang=en/high verify=- reasons=['relevance:weakly_relevant']
-        Large-Scale Data for Multiple-View Stereopsis
-  #15 [accept_new] rel=weakly_relevant/high/title_and_abstract lang=en/high verify=doi=verified@crossref/final;openalex_work=verified@openalex/final reasons=[]
-        Flexible syntactic matching of curves and its application to automatic hierarchical classi
-  #16 [accept_new] rel=relevant/high/title_and_abstract lang=en/high verify=doi=verified@crossref/final;openalex_work=verified@openalex/final reasons=[]
-        Accurate Geo-Registration by Ground-to-Aerial Image Matching
-  #17 [accept_new] rel=weakly_relevant/high/title_and_abstract lang=en/high verify=doi=verified@crossref/final;openalex_work=verified@openalex/final reasons=[]
-        Photo tourism
 
-[4] 入库 9 条;语言桶/置信分布: {'en/high': 9}
-    high_only 下实际可计数: zh=0 en=9
-    可用统计(过滤+相关+核验后): total=9
+[4] 入库 0 条;语言桶/置信分布: {}
+    high_only 下实际可计数: zh=0 en=0
+    可用统计(过滤+相关+核验后): total=0
 
-[OK] 配额可满足:检索阶段已凑够,链路可进入写作。
+[MISS] 仍缺: [('total', 5), ('language.en', 5)]
+    → 这就是当前真实瓶颈所在（按上面的排除原因/语言分布判因）。

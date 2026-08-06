@@ -17,7 +17,6 @@
 
 from __future__ import annotations
 
-import unicodedata
 from dataclasses import dataclass, field
 
 from paper_agent.literature.untrusted import clean_external_text
@@ -171,15 +170,16 @@ def classify_language(
 ) -> LanguageVerdict:
     """按 design D1 融合矩阵产出 LanguageVerdict（范围=中/英）。
 
-    先复用不可信输入清洗,再分别算 title/abstract/source 信号,标题为主。
+    先复用不可信输入清洗,再由 **title + source** 两路信号融合。
+
+    ``abstract`` **刻意不参与判定**（保留在签名里是为调用方与golden set 的
+    形状稳定）：中文论文常配长篇英文摘要,让摘要参与会把它误判成 en。
+    见 ``test_english_abstract_does_not_override_chinese_title``。
     """
     t = clean_external_text(title or "", max_chars=1000)
-    a = clean_external_text(abstract or "", max_chars=4000)
     title_sig = script_signal(t, thresholds)
     source = normalize_language_hint(language_hint)
     ratios = tuple(sorted(_ratios(script_counts(t)).items()))
-
-    reasons: list[str] = []
 
     # 1) 假名/Hangul/Cyrillic → 非中英目标语言
     if title_sig == "ja":

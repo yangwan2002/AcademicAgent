@@ -79,4 +79,7 @@ class FanOutSink(EventSink):
         )
         self.health.add_warning(detail)
         # 只打类型信息到 stderr，不打 payload。
-        print(f"[observability] {detail}", file=sys.stderr)
+        # T201 在此豁免（见行尾 noqa）：可观测层自身的兜底出口 —— 此处正是
+        # "下游 sink 已失败"的分支，不能再经事件总线上报（会递归回同一个坏
+        # sink），只能直写 stderr。
+        print(f"[observability] {detail}", file=sys.stderr)  # noqa: T201

@@ -49,6 +49,7 @@ from paper_agent.literature.verification import (
     VerificationStatus,
     status_under_policy,
 )
+from paper_agent.observability.current import ambient_publish, ambient_span
 
 
 @dataclass(frozen=True)
@@ -144,11 +145,17 @@ def _sig(counted, gaps) -> tuple:
     )
 
 
+def _query_hash(query: str) -> str:
+    """query 的 trace 标识。`RETRIEVAL_START` 与 `_trace_record` 必须共用它，
+    否则同一次 attempt 的两个事件带不同 hash，无法关联。"""
+    return hashlib.sha1(query.encode("utf-8")).hexdigest()[:12]
+
+
 def _trace_record(query, res, ledger, gaps) -> dict:
     """隐私安全 trace（D15）：只 hash/计数/预算，不落原始 query/候选文本。"""
     throughput = getattr(res, "throughput", None)
     return {
-        "query_hash": hashlib.sha1(query.encode("utf-8")).hexdigest()[:12],
+        "query_hash": _query_hash(query),
         "query_len": len(query),
         "candidates": res.stats.candidates,
         "accept_new": res.stats.accept_new,
@@ -231,17 +238,37 @@ def run_retrieval_loop(
     stop: StopReason | None = None
 
     def _run_one(q: str) -> object:
-        """跑一次 attempt + 记账 + trace；返回 AttemptResult。"""
+        """跑一次 attempt + 记账 + trace；返回 AttemptResult。
+
+        观测：每次 attempt 一个 `retrieval_attempt:<n>` span，并把已有的
+        `_trace_record`（隐私安全：只 hash/计数/预算）同时发到 ambient bus。
+        此前 `trace_sink` 只有 dogfood runner 注入，生产路径恒为 None ⇒
+        `RETRIEVAL_START/END` 两个 EventKind 定义了却全仓库无人发布，
+        检索这段在 trace.json 里完全不可见。
+        """
+        attempt_no = ledger_budget.search_calls + 1
         ledger_budget.charge_search()
-        res = run_attempt(q, criteria, quota, batch, attempt_deps, limit=search_limit)
-        ledger_budget.charge_candidates(res.stats.candidates)
-        if res.throughput is None:
-            # Legacy relevance is charged after the logical per-item calls.
-            # B1/B2 settle or charge calls inside their staged paths.
-            ledger_budget.charge_llm(res.stats.relevance_calls)
-        tried_queries.append(q)
-        if trace_sink is not None:
-            trace_sink(_trace_record(q, res, ledger_budget, gaps))
+        with ambient_span(f"retrieval_attempt:{attempt_no}"):
+            ambient_publish(
+                "RETRIEVAL_START",
+                # 与 `_trace_record` 同一套 hash（同函数、同长度）：否则同一 query
+                # 在 START/END 上出两个不同 hash，correlate 不起来。
+                query_hash=_query_hash(q),
+                query_len=len(q),
+                attempt=attempt_no,
+                search_limit=search_limit,
+            )
+            res = run_attempt(q, criteria, quota, batch, attempt_deps, limit=search_limit)
+            ledger_budget.charge_candidates(res.stats.candidates)
+            if res.throughput is None:
+                # Legacy relevance is charged after the logical per-item calls.
+                # B1/B2 settle or charge calls inside their staged paths.
+                ledger_budget.charge_llm(res.stats.relevance_calls)
+            tried_queries.append(q)
+            record = _trace_record(q, res, ledger_budget, gaps)
+            if trace_sink is not None:
+                trace_sink(record)
+            ambient_publish("RETRIEVAL_END", **record)
         return res
 
     # ---- A2f 自适应 seed 阶段（仅当 search_intent 提供 seeds）：逐 attempt 重算、满足即停 ----

@@ -19,7 +19,7 @@ for path in (str(SRC), str(HERE)):
     if path not in sys.path:
         sys.path.insert(0, path)
 
-from baseline import build_legacy_snapshot  # noqa: E402
+from baseline import build_legacy_snapshot
 
 
 def canonical_hash(value: dict) -> str:

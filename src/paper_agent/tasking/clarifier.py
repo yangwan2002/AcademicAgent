@@ -26,7 +26,6 @@ from paper_agent.intents.router import Intent
 from paper_agent.tasking.contracts import (
     DispositionStatus,
     FieldStatus,
-    Operation,
     SlotSource,
     SlotValue,
     Task_Plan,

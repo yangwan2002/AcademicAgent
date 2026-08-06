@@ -11,9 +11,29 @@ dependencies = []
 
 [project.optional-dependencies]
 # 真实 LLM / 检索 provider 的可选依赖。骨架与测试用 mock，无需安装。
-llm = ["openai>=1.0"]
-retrieval = ["httpx>=0.27"]
-dev = ["pytest>=8", "pytest-cov"]
+# 版本钉上下界：下界是实测可用的最低版本，上界挡住下一个大版本的破坏性变更。
+llm = [
+    "openai>=1.0,<3",
+    # anthropic_provider.py 在用，此前漏声明（装了 llm 也跑不起 Anthropic 链路）。
+    "anthropic>=0.40,<1",
+]
+retrieval = ["httpx>=0.27,<1"]
+# docx 读写与排版：session/docx_document.py、tools/convert.py、tools/docx_format.py、
+# tools/doc_stats.py、gates/format_gate.py 都直接 import docx。此前**完全未声明**，
+# 只靠开发机上恰好装过；干净环境里 18 个测试文件在收集期就 ImportError。
+docx = ["python-docx>=1.1,<2"]
+dev = [
+    "pytest>=8,<10",
+    "pytest-cov>=5",
+    "ruff>=0.6,<1",
+]
+# 一次装齐真实跑所需的全部依赖（CI 与真机 dogfood 用）。
+all = [
+    "openai>=1.0,<3",
+    "anthropic>=0.40,<1",
+    "httpx>=0.27,<1",
+    "python-docx>=1.1,<2",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -21,3 +41,34 @@ where = ["src"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+
+[tool.ruff]
+# 100 而非默认 88：实测现有 27830 行里 P99=88、最长 116，选 88 会有 267 行
+# 立刻报错、把有价值的告警淹掉。100 只有 40 行超标，可以逐步收拾。
+line-length = 100
+target-version = "py310"          # 与 requires-python 一致，别让 ruff 放过 3.10 不支持的语法
+src = ["src", "tests", "scripts"]
+
+[tool.ruff.lint]
+# 首批只开"能抓真 bug"的规则。风格类（引号、import 排序）暂不开：
+# 27830 行存量代码一次性重排会淹掉 review，且与本轮目标（防回归）无关。
+select = [
+    "F",      # pyflakes：未定义名、未使用 import/变量 —— 真错误
+    "E9",     # 语法错误 / IO 错误
+    "B",      # flake8-bugbear：可变默认参数、except 顺序等易踩坑
+    "BLE",    # 禁止裸 except Exception —— 正是今天那个 bug 的形状
+    "T20",    # 禁止 print（本项目用事件与 recorder 出信息，不用 print）
+    "RUF100", # 无用的 noqa
+]
+ignore = [
+    "B008",   # 函数调用作默认值：本项目 dataclass field(default_factory=...) 模式误报
+]
+
+[tool.ruff.lint.per-file-ignores]
+# 脚本与 dogfood runner 就是要往终端打东西，print 是它们的正当输出方式。
+# B023：chat.py 的 REPL 里闭包全是"定义后在同一轮迭代内立即调用"（交给
+# coordinator.run / _dispatch 同步执行），不跨迭代泄漏，故 7 处均为误报。
+"scripts/**" = ["T20", "B023"]
+"tests/eval/**" = ["T20"]
+# 测试里断言用的宽 except 是刻意的，不该被 BLE 拦。
+"tests/**" = ["BLE"]

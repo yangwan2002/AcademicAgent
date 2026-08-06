@@ -17,8 +17,8 @@ from paper_agent.session.file_session import FileBackedSession
 from paper_agent.session.section_index import SectionIndex, supports_sections
 
 docx = pytest.importorskip("docx")
-from docx.enum.text import WD_ALIGN_PARAGRAPH  # noqa: E402
-from docx.shared import Inches, Pt  # noqa: E402
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.shared import Inches, Pt
 
 
 HEADER_TEXT = "某某大学硕士学位论文"

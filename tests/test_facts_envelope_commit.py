@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 import json
-import os
 
 import pytest
 
-from paper_agent.literature.ledger import ReferenceLedger
 from paper_agent.literature.migration import record_to_dict
 from paper_agent.literature.models import ReferenceRecord
 from paper_agent.literature.quota import QuotaKind, QuotaScope, QuotaSpec
@@ -167,7 +165,7 @@ def test_commit_batch_fault_injection_leaves_state_unchanged(tmp_path, monkeypat
 def test_commit_non_confirmed_rejected(tmp_path):
     p = str(tmp_path / "facts.json")
     f = SessionFacts(path=p)
-    b = _confirmed_batch_with_new()
+    _b = _confirmed_batch_with_new()
     b_running = RetrievalBatch(batch_id="b2", task_fingerprint="tf",
                                quota=QuotaSpec(QuotaKind.RETRIEVAL, QuotaScope.NEW_ONLY),
                                verification_policy=VerificationPolicy.STRICT_FINAL_V1)

@@ -22,7 +22,6 @@ from paper_agent.coordinator import Coordinator
 from paper_agent.observability.events import Event, EventKind
 from paper_agent.intents.interview import interview_polish
 from paper_agent.intents.polish import execute_polish
-from paper_agent.providers.llm.base import CancellationToken
 from paper_agent.providers.llm.mock import MockLLMProvider
 from paper_agent.session.file_session import FileBackedSession
 from paper_agent.session.section_index import SectionIndex

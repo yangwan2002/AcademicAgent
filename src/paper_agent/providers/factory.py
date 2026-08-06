@@ -233,7 +233,9 @@ def build_retrieval_provider(config: Config) -> RetrievalProvider:
     if name == "openalex":
         from paper_agent.providers.retrieval.openalex import OpenAlexRetrievalProvider
 
-        return OpenAlexRetrievalProvider()
+        return OpenAlexRetrievalProvider(
+            phrase_first=config.literature_openalex_phrase_first,
+        )
     if name == "arxiv":
         from paper_agent.providers.retrieval.api import ArxivRetrievalProvider
 

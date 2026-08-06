@@ -8,7 +8,6 @@
 后果：`resolve_token(ext="md")` 对这些号返回 AMBIGUOUS ⇒ md 论文里相关引用一律被判
 「无法解析」，CitationQuotaGate 永远差满额，rewrite 重试到预算耗尽也不可能通过。
 """
-import json
 
 from paper_agent.literature.ledger import ReferenceLedger
 from paper_agent.literature.migration import record_from_dict

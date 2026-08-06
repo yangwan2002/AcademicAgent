@@ -21,7 +21,7 @@ from paper_agent.providers.llm.mock import MockLLMProvider
 from paper_agent.tasking.contracts import CallStatus, FieldStatus, RawOperation
 from paper_agent.tasking.extractors import build_extractor
 from paper_agent.tasking.extractors.format_docx import FormatDocxExtractor
-from paper_agent.tools.docx_format import REGISTRY, FormatOp, apply_ops
+from paper_agent.tools.docx_format import REGISTRY, FormatOp
 
 
 def _mock(obj) -> MockLLMProvider:

@@ -159,7 +159,7 @@ def run_polish(
                         except OperationCancelled:
                             bus.publish(EventKind.LLM_CALL_END, status="cancelled")
                             raise
-                        except Exception as exc:  # noqa: BLE001
+                        except Exception as exc:
                             bus.publish(
                                 EventKind.LLM_CALL_END,
                                 status="failed",

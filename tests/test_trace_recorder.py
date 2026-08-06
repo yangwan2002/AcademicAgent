@@ -21,9 +21,7 @@ if _SRC not in sys.path:
 from paper_agent.observability.events import Event, EventKind
 from paper_agent.observability.recorder import (
     LocalJsonExporter,
-    RunTrace,
     SimpleTraceRecorder,
-    Span,
     TraceExporter,
 )
 from paper_agent.observability.sanitize import sanitize_messages, sanitize_text

@@ -14,7 +14,6 @@ if _SRC not in sys.path:
 from paper_agent.literature.retrieval.search_intent import (
     SearchIntent,
     SearchIntentError,
-    SearchIntentOrigin,
     SearchIntentPreparationOutcome,
     SearchIntentPreparationStatus,
     SearchSeed,

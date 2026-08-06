@@ -29,7 +29,6 @@ from paper_agent.providers.llm.base import (
     CancellationToken,
     LLMProvider,
     LLMResponse,
-    Message,
     StreamChunk,
 )
 from paper_agent.providers.llm.mock import MockLLMProvider

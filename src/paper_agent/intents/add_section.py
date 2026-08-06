@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from paper_agent.gates.diff_gate import AddSectionGate, data_numbers
 from paper_agent.generate.context_builder import build_add_section_messages

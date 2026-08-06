@@ -17,7 +17,6 @@
 
 from __future__ import annotations
 
-import sys
 from dataclasses import dataclass, field
 from typing import Any, Callable
 from uuid import uuid4
@@ -27,6 +26,7 @@ from paper_agent.observability.bus import EventBus, NullEventBus, RunContext
 from paper_agent.observability.events import EventKind
 from paper_agent.observability.fanout import FanOutSink
 from paper_agent.observability.health import ObservabilityHealth
+from paper_agent.observability.current import use_bus
 from paper_agent.observability.recorder import (
     LocalJsonExporter,
     SimpleTraceRecorder,
@@ -79,7 +79,6 @@ class Coordinator:
         recorder: SimpleTraceRecorder | None = None
 
         if self.observing:
-            downstreams = []
             fan = FanOutSink(health=health)
             if self._renderer is not None:
                 fan.add_renderer(self._renderer)
@@ -96,7 +95,9 @@ class Coordinator:
 
         bus.publish(EventKind.WORKFLOW_START)
         try:
-            with bus.span("run"):
+            # `use_bus` 把 bus 登记为 run 作用域的 ambient bus，供显式传不到的深层
+            # 埋点取用（`structured_call` 等）。退出必还原，生命周期严格等于本次 run。
+            with use_bus(bus), bus.span("run"):
                 report.value = fn(bus, cancel_token)
                 self._absorb_value(report)
         except OperationCancelled:

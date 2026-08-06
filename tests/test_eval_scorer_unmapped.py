@@ -17,7 +17,6 @@
 from __future__ import annotations
 
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -26,14 +25,14 @@ for p in (str(_ROOT / "src"), str(_ROOT / "tests" / "eval" / "intent_planning"))
     if p not in sys.path:
         sys.path.insert(0, p)
 
-import scorer  # noqa: E402
+import scorer
 
-from paper_agent.intents.router import Intent                        # noqa: E402
-from paper_agent.tasking.contracts import (                          # noqa: E402
+from paper_agent.intents.router import Intent
+from paper_agent.tasking.contracts import (
     AnalyzeResult, AtomicRequirement, CallStatus, ExtractionResult,
     FieldStatus, RawOperation, SlotSource, SlotValue,
 )
-from paper_agent.tasking.plan_builder import build_plan              # noqa: E402
+from paper_agent.tasking.plan_builder import build_plan
 
 GOLDEN = _ROOT / "tests" / "eval" / "intent_planning" / "golden.json"
 

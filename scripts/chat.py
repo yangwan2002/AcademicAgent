@@ -268,7 +268,9 @@ def _dispatch(coordinator, intent_name, work, **route_data):
         try:
             return work(bus, ct)
         except KeyboardInterrupt:  # Ctrl-C → 统一取消模型
-            raise OperationCancelled()
+            # from None：用户主动中断不是"错误的根因"，链上挂个 KeyboardInterrupt
+            # 只会让 traceback 更吵。
+            raise OperationCancelled() from None
 
     report = coordinator.run(fn, cancel_token=CancellationToken())
     if report.run_status == "cancelled":
@@ -358,7 +360,7 @@ def main(argv: list[str]) -> int:
                 kana_min=config.literature_lang_kana_min,
                 hangul_min=config.literature_lang_hangul_min,
             )
-            lit_classifier = lambda rec: classify_record_language(rec, _th)  # noqa: E731
+            lit_classifier = lambda rec: classify_record_language(rec, _th)
             _bc = config.literature_bundle_budget_chars
             print("引用配额写作已启用（supervised：检索/证据集需人工确认）。"
                   + f"\n  证据集上下文预算：{'不限' if _bc <= 0 else f'{_bc} 字符'}"
@@ -403,8 +405,10 @@ def main(argv: list[str]) -> int:
 
     # B-4：Turn 归属计数。每轮落盘一次，使崩溃/强杀后仍能看到已发生的归属，
     # 且能回答「这次 E2E 的结论是否可直接采信」（attribution_is_clean）。
-    metrics = TurnMetrics()
     metrics_path = os.path.join(config.runs_dir, "turn_metrics.json")
+    # 读回既有累积值：计数要跨会话累积才能回答「新栈这周降级了几次」。
+    # 文件不存在/损坏 → 全零，不阻塞启动。
+    metrics = TurnMetrics.load(metrics_path)
 
     index = _build_index(session)
     print(f"已载入 {source}（working: {session.working_path}）")
@@ -641,7 +645,7 @@ def main(argv: list[str]) -> int:
                     bus=bus, cancel_token=ct, stream=config.stream_enabled,
                 )
             except KeyboardInterrupt:  # Ctrl-C → 统一取消模型
-                raise OperationCancelled()
+                raise OperationCancelled() from None
 
         report = coordinator.run(_do_polish, cancel_token=CancellationToken())
         result = report.value

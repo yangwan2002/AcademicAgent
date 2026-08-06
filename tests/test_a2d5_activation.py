@@ -555,5 +555,5 @@ def test_citation_context_is_frozen_value_object():
     import dataclasses
 
     assert dataclasses.is_dataclass(CitationContext)
-    params = getattr(CitationContext, "__dataclass_params__")
+    params = CitationContext.__dataclass_params__
     assert params.frozen is True

@@ -16,8 +16,10 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 from enum import Enum
 
+from paper_agent.observability.current import ambient_publish, ambient_span
 from paper_agent.providers.llm.base import LLMProvider, Message
 
 
@@ -186,7 +188,57 @@ def structured_call(
     未提供 `tool_schema` 时退化为「解析正文 JSON」（仅供无 schema 的调用方）。
 
     这是全项目结构化输出的唯一收敛点；换实现只改此函数。
+
+    **观测**：本函数是全项目结构化 LLM 调用的**唯一**收敛点，因此也是给
+    relevance / relevance_batch / query_planner / extractors 一次性埋 span 的
+    唯一位置。span 名取 `llm_call:<工具名>`（工具名来自 schema，非用户输入，
+    可安全入 trace）；耗时与四态结果记在 span 属性上。
+
+    此前 `literature/` 全目录零 bus 接线 ⇒ 一次 1057 秒的 run 里那个 945 秒的
+    `operation:*` span 是 `attributes={} children=[]`，说不出时间花在哪。
+    埋点走 ambient bus（`observability.current`），不改本函数签名，也不动上游
+    任何一层 —— 见该模块 docstring 对「为何不显式穿 bus」的论证。
     """
+    label = _forced_tool_name(tool_schema) if tool_schema is not None else "plain_json"
+    started = time.monotonic()
+    with ambient_span(f"llm_call:{label or 'unnamed'}"):
+        result = _structured_call(
+            llm, messages, tool_schema=tool_schema, call_options=call_options
+        )
+        _annotate(result, started, label or "unnamed")
+    return result
+
+
+def _annotate(result: StructuredCallResult, started: float, label: str = "") -> None:
+    """把调用结果挂到当前 span 上，发 `LLM_CALL_END`。
+
+    走事件而非改 span 属性：`SimpleTraceRecorder` 只在 `SPAN_START` 时读一次
+    `attrs`，之后改 `SpanScope._attrs` 不会进 trace；而 `LLM_CALL_END` 有既成的
+    `_attach` → `_merge_attrs` 路径，会并进所属 span 的 attributes。
+    """
+    data = {
+        "status": result.call_status.value,
+        "provider_attempts": result.provider_attempts,
+        "compatibility_retries": result.compatibility_retries,
+        "latency_ms": round((time.monotonic() - started) * 1000, 1),
+    }
+    # label 此前只存在于 span 名里。做时间归因时要按用途分桶
+    # （relevance / query_planner / extractor 各占多少秒），事件里必须自带。
+    if label:
+        data["label"] = label
+    if result.error_category is not None:   # 成功时不写 `error: null`（少一行噪声）
+        data["error"] = result.error_category
+    ambient_publish("LLM_CALL_END", **data)
+
+
+def _structured_call(
+    llm: LLMProvider,
+    messages: list[Message],
+    *,
+    tool_schema: dict | None = None,
+    call_options: dict | None = None,
+) -> StructuredCallResult:
+    """`structured_call` 的实现体（逐字保留原逻辑；外层只加 span，不改行为）。"""
     # 1) provider 调用
     use_tools = tool_schema is not None
     options = dict(call_options or {})
