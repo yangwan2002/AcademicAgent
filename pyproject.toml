@@ -39,7 +39,11 @@ all = [
 where = ["src"]
 
 [tool.pytest.ini_options]
-pythonpath = ["src"]
+# "." 是仓库根：test_trace_deep_instrumentation.py 用 `from tests.test_retrieval_loop
+# import ...` 复用 stub，test_format_lacks_sections.py 用 `import scripts.chat`。
+# 只写 ["src"] 时这两种 import 在 Linux 上 ModuleNotFoundError，本地 Windows 却能过
+# （sys.path 恰好包含了 cwd）—— 属于"在我机器上是好的"的典型，CI 首次运行抓到。
+pythonpath = ["src", "."]
 testpaths = ["tests"]
 
 [tool.ruff]
