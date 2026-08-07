@@ -17,10 +17,10 @@ from paper_agent.workspace.models import ReferenceEntry
 
 _WORKS = "https://api.openalex.org/works"
 
-#: 短语优先：引住前 N 个词，其余留作自由词。
+#: 部分引住时，引住前 N 个词，其余留作自由词。
 _PHRASE_WORDS = 3
 
-#: rung 0 至少要拿到这么多条才采纳（不足则丢弃、回退裸词）。
+#: 每级至少要拿到这么多条才采纳（不足则丢弃、退往下一级）。
 _PHRASE_MIN_RESULTS = 5
 
 
@@ -46,30 +46,52 @@ def _publish_search(strategy: str, query: str, phrase_query: str, results: int) 
     )
 
 
-def build_phrase_first_query(query: str) -> str:
-    """把裸词查询改写为「短语优先」形式，不适用时返回空串。
+def build_phrase_ladder(query: str) -> list[tuple[str, str]]:
+    """构造「由紧到松」的查询阶梯，返回 `[(strategy, query), ...]`。
 
     **为什么需要**：OpenAlex `search=` 是 OR-ish 词袋 + 相关性排序，词给得越多
     匹配面越大、越向该领域高被引大热门倾斜，词序相邻信息被丢掉。实测
-    `cross-view image matching UAV ground vehicle` 前 10 条只 2 条切题（招来
-    Ground-Water Hydraulics / 树皮甲虫 / 作物表型），而 `"cross-view image matching"`
-    10/10 切题。引号把相邻性要回来。
+    `Cross-view image matching` 裸词 43 万条、前 10 只 6 条切题，而
+    `"Cross-view image matching"` 只剩 220 条、10/10 切题。引号把相邻性要回来。
 
-    返回 "" 表示**不改写**（调用方直接用裸词），三种情形：
+    **阶梯而非单一策略**：收窄到什么程度合适，取决于这个词组学界是否真在用，
+    这件事静态判断不了，只能试了看命中数。实测（2026-08-06 直连）：
+
+    | 查询 | total | 前 10 切题 |
+    |---|---|---|
+    | `Cross-view image matching` 裸词 | 430528 | 6/10 |
+    | `"Cross-view image matching"` 整句 | 220 | **10/10** |
+    | `"Air-ground image matching"` 整句 | **4** | 1/10 |
+    | `cross-view image matching UAV ground vehicle` 裸词 | 9512 | 2/10 |
+    | 同上引前 3 词 | 84 | **7/10** |
+    | 同上整句引住 | **0** | — |
+
+    `cross-view image matching` 是成熟术语，整句引住最优；`air-ground image
+    matching` 是 planner 拼的组合，学界不这么写，整句引住只剩 4 条反而更差；
+    6 词整句引住直接归零。三者无法靠词数区分 —— 故逐级退、由命中数决定。
+
+    早期版本用 `len(tokens) > 3` 预判，结果 planner 的真实输出几乎全是 3 词
+    （`Cross-view image matching` / `UAV-to-satellite image matching`），
+    恰好卡在门槛下，真机 dogfood 实测 strategy 分布是 `{'bare': 2}` ——
+    功能上线了却从未执行。词数与归零无因果，归零由「说法是否存在」决定，
+    而那正是回退机制本就兜住的事。
+
+    不改写的两种情形（阶梯只含裸词一级）：
     - query 已含 `"`：用户/planner 显式给了短语，尊重原样，不二次加工；
-    - 词数 <= `_PHRASE_WORDS`：没有自由词余量。整句引住会打穿到 0 命中
-      （实测 `"cross-view image matching UAV ground vehicle"` → 0），故不做；
-    - 前 N 词含 CJK：见 `_has_cjk`。
+    - 含 CJK：中文 seed 加引号实测有害，见 `_has_cjk`。
     """
-    if '"' in query:
-        return ""
     tokens = query.split()
-    if len(tokens) <= _PHRASE_WORDS:
-        return ""
-    head, tail = tokens[:_PHRASE_WORDS], tokens[_PHRASE_WORDS:]
-    if _has_cjk(" ".join(head)):
-        return ""
-    return '"' + " ".join(head) + '" ' + " ".join(tail)
+    bare = [("bare", query)]
+    if '"' in query or _has_cjk(query) or len(tokens) < 2:
+        # 单词查询整句引住等价于裸词（`"transformer"` 与 transformer 同义），
+        # 白花一次 GET，故也直接走裸词。
+        return bare
+
+    ladder: list[tuple[str, str]] = [("phrase_exact", '"' + query + '"')]
+    if len(tokens) > _PHRASE_WORDS:
+        head, tail = tokens[:_PHRASE_WORDS], tokens[_PHRASE_WORDS:]
+        ladder.append(("phrase_head", '"' + " ".join(head) + '" ' + " ".join(tail)))
+    return ladder + bare
 
 
 def reconstruct_abstract(inverted_index: dict | None) -> str:
@@ -123,26 +145,32 @@ class OpenAlexRetrievalProvider(RetrievalProvider):
         return [self._to_entry(w) for w in resp.json().get("results", [])]
 
     def search(self, query: str, limit: int = 10) -> list[ReferenceEntry]:
-        """两级阶梯：短语优先，命中不足则回退裸词。
+        """沿 `build_phrase_ladder` 由紧到松逐级尝试，够数即采纳。
 
-        **召回下界与改造前完全相同** —— rung 0 只在拿到足够结果时被采纳，
-        否则整批丢弃、老老实实发裸词请求。最坏情况只是多一次 GET（实测 ≈1.6s，
-        相对单次 attempt 的 ~72s（relevance LLM 占大头）在噪声范围内）。
+        **召回下界与改造前完全相同** —— 阶梯最后一级恒为裸词，且只有拿到足够
+        结果的那一级会被采纳，不足则整批丢弃、继续往下退。最坏情况（两级都太窄）
+        多两次 GET（实测单次 ≈1.6s，相对单次 attempt 的 ~84s、其中 relevance LLM
+        36s + verify 44s，在噪声范围内）。
+
+        真实分布下大多数查询在第一级就够数（一次 GET，与改造前持平），只有
+        planner 拼出的生僻组合才付这个代价 —— 而那正是最该被拦下的那批。
         """
-        phrase_query = build_phrase_first_query(query) if self._phrase_first else ""
-        if phrase_query:
-            entries = self._search_raw(phrase_query, limit)
-            if len(entries) >= min(limit, _PHRASE_MIN_RESULTS):
-                _publish_search("phrase_first", query, phrase_query, len(entries))
-                return entries
-            # 命中太少 → 短语过窄（`"air-ground visual localization"` 实测 0 命中）。
-            # 丢弃本批、回退裸词，绝不把「召回不准」换成「召回归零」。
+        if not self._phrase_first:
             entries = self._search_raw(query, limit)
-            _publish_search("bare_fallback", query, phrase_query, len(entries))
+            _publish_search("bare", query, "", len(entries))
             return entries
-        entries = self._search_raw(query, limit)
-        _publish_search("bare", query, "", len(entries))
-        return entries
+
+        ladder = build_phrase_ladder(query)
+        for i, (strategy, q) in enumerate(ladder):
+            entries = self._search_raw(q, limit)
+            is_last = i == len(ladder) - 1
+            # 最后一级（恒为裸词）无条件采纳：它就是改造前的行为，也是召回下界。
+            if is_last or len(entries) >= min(limit, _PHRASE_MIN_RESULTS):
+                _publish_search(
+                    strategy, query, "" if strategy == "bare" else q, len(entries)
+                )
+                return entries
+        return []  # 不可达：ladder 恒非空且末级无条件返回
 
     def fetch_metadata(self, identifier: str) -> ReferenceEntry | None:
         # 支持 DOI 或 OpenAlex id。

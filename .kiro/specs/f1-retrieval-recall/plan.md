@@ -59,25 +59,52 @@ aerial terrestrial image matching scale difference
 改动只在 provider 内部，因为 `"..."` 是 **OpenAlex/Elasticsearch 的语法**，不是通用检索语义。
 让 loop / planner / seeds 保持 provider 无关（现在也是）。
 
-`search(query, limit)` 变成两级阶梯：
+`search(query, limit)` 变成**三级阶梯**（由紧到松，逐级退，够数即采纳）：
 
-- **rung 0（新）**：`"<前3词>" <其余词>`。仅当同时满足：
-  - query 不含 `"`（用户/planner 显式给了短语就尊重，不二次加工）
-  - `len(tokens) > 3`（保证有自由词余量 → 天然避开「整句引住」那个归零陷阱）
-  - 前 3 词不含 CJK（中文分词场景引号有害，实测）
-- **rung 1（现状）**：原样 `search=query`。
-- 采纳规则：rung 0 拿到 `>= min(limit, 5)` 条就用它，否则**丢弃并回退 rung 1**。
-  ⇒ 召回下界与今天完全相同，最坏情况只多一次 HTTP。
+- **rung 0 `phrase_exact`**：整句引住 `"<query>"`
+- **rung 1 `phrase_head`**：`"<前3词>" <其余词>`，仅当 `len(tokens) > 3` 时存在
+- **rung 2 `bare`**：原样 `search=query`，**末级无条件采纳** = 召回下界
+- 采纳规则：某级拿到 `>= min(limit, 5)` 条即用它，否则丢弃、继续退。
+- 完全不进阶梯（只有 rung 2）：query 已含 `"`、含 CJK、或只有 1 个词
+  （单词整句引住与裸词同义，白花 GET）。
 
-成本：一次额外 GET ≈ 1.6s（实测）。对照单次 attempt 的 72s（relevance LLM 占绝大头），
-在噪声范围内。`provider_time_budget_s=120` 不受实质影响。
+### 首版按词数预判是错的（2026-08-06 修正）
+
+首版的 rung 0 是 `phrase_head`，门槛 `len(tokens) > 3`，理由是「保证自由词余量、
+避开整句引住归零」。**真机 dogfood 否证了这个设计**：planner 的实际输出几乎全是 3 词
+（`Cross-view image matching` / `UAV-to-satellite image matching` / `Air-ground image
+matching`），恰好卡在门槛下，`PROVIDER_SEARCH` 的 strategy 分布实测是 `{'bare': 2}`
+—— 功能上线了却从未执行。上面那张证据表里的查询都是 5~6 词，不代表 planner 的输出分布。
+
+补测（直连，2026-08-06）说明该退级的依据是**命中数而非词数**：
+
+| 查询 | total | 前 10 切题 |
+|---|---|---|
+| `Cross-view image matching` 裸词 | 430528 | 6/10 |
+| `"Cross-view image matching"` 整句 | 220 | **10/10** |
+| `"UAV-to-satellite image matching"` 整句 | 7 | 4/10 |
+| `"Air-ground image matching"` 整句 | **4** | 1/10 |
+| `cross-view image matching UAV ground vehicle` 裸词 | 9512 | 2/10 |
+| 同上 `phrase_head` | 84 | **7/10** |
+| 同上整句引住 | **0** | — |
+
+`cross-view image matching` 是成熟术语，整句引住是全表最优（而首版恰好把它挡掉了）；
+`air-ground image matching` 是 planner 拼的组合，整句引住只剩 4 条、比裸词更差；
+6 词整句引住归零。三者无法靠词数区分。**归零由「说法是否存在」决定，与词数无因果**，
+而那正是回退机制本就兜住的事 —— 用词数预防归零是多余的，代价是挡掉主要收益。
+
+成本：每级一次 GET ≈ 1.6s（实测）。真实分布下多数查询在 rung 0 就够数（一次 GET，
+与改造前持平）；最坏情况多两次。对照单次 attempt 的 84s（relevance LLM 36s +
+verify 44s），在噪声范围内。`provider_time_budget_s=120` 不受实质影响。
 
 ### 2. 可观测：新 EventKind `PROVIDER_SEARCH`
 
-用刚接好的 `ambient_publish` 发一条：`strategy`（`phrase_first` / `bare` / `bare_fallback`）、
-`results`、`query_len`、`phrase_len`。这样「短语优先到底有没有被用上、回退了几次」
+用刚接好的 `ambient_publish` 发一条：`strategy`（`phrase_exact` / `phrase_head` / `bare`）、
+`results`、`query_len`、`phrase_len`。这样「短语优先到底有没有被用上、退了几级」
 在 `trace.json` 里直接可读 —— 不然又是一个「改了但看不见有没有生效」。
-这是上一轮埋点的第一笔实际回报。
+这是上一轮埋点的第一笔实际回报，**而且立刻兑现了**：正是 dogfood 输出里那行
+`provider 查询策略分布: {'bare': 2}` 暴露了首版的词数门槛让功能从未执行。
+没有这个埋点，会把当次 12 篇入库（实际来自 planner 换代 + B1 批量判定）误记为 F-1 的收益。
 
 ### 3. 开关：`literature_openalex_phrase_first: bool = True`
 
@@ -110,11 +137,22 @@ aerial terrestrial image matching scale difference
 
 ## 验收
 
-1. 单测全绿 + 全量套件不回归（当前基线 1525 passed）。
-2. **dogfood 真机复跑**同一主题同一配额，与 `baseline_2026-08-01_total5_en5.txt` /
-   `candidates.jsonl` 对比：候选池的 `unrelated` 比例应显著下降（基线：20 候选里 7 个 unrelated、
-   4 篇偏题）。这才是 F-1 是否真的松动的判据 —— 关键词代理只是先导指标。
-3. 复跑要花真钱和真时间（基线 123s / 34 verify calls），**跑之前我会先确认**。
+1. ✅ 单测全绿（18 条）+ 全量不回归（1552 passed，含本次净增 3 条）。
+2. ⏳ **dogfood 真机复跑**，判据是候选池 `unrelated` 比例下降。
+   先决条件：输出里的 strategy 分布必须出现 `phrase_exact` / `phrase_head`；
+   若仍是 `{'bare': N}` 则本次跑无效，说明阶梯又没触发。
+3. ⏳ 复跑花真钱真配额（OpenAlex 日配额约 100 次请求），**跑之前先确认**。
+
+### 对照臂用哪一次（不要用 08-01 基线）
+
+`baseline_2026-08-01_total5_en5.txt` **不能作为 A/B 的 OFF 臂**：它与今天之间
+变了不止一个变量 —— planner 换代（seeds 从 5~6 词变 3 词）、B1 批量判定上线
+（`llm_calls` 18 → 4）。用它对比会把别的收益记到 F-1 头上。08-06 那次
+12 篇 vs 基线 1 篇的差异就是这么来的，与短语优先无关。
+
+合格的 OFF 臂是 `f1_2026-08-06_phrase_first_ON.txt`（名字有误导，实际
+strategy 全 `bare`）：同一 planner、同一代码版本、同一份 seeds，唯一差别
+就是阶梯未触发 —— 功能上等价于 flag 关闭。ON 臂只需再跑一次，省一半配额。
 
 ## 风险
 

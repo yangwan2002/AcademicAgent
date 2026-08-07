@@ -5,8 +5,13 @@
 （前 10 条切题 2/10 → 1/10）；把同样的词**加引号**则 10/10。病因是 `search=` 的
 OR-ish 词袋语法丢掉了词序相邻性，不是词本身。
 
-本测试锁住改写规则与**召回下界**：短语过窄时必须回退裸词，绝不把「召回不准」
-换成「召回归零」（`"air-ground visual localization"` 实测 0 命中）。
+本测试锁住阶梯规则与**召回下界**：每级过窄时必须继续退，末级恒为裸词，
+绝不把「召回不准」换成「召回归零」（`"air-ground visual localization"` 实测 0 命中）。
+
+**为何是阶梯而非单一策略**：收窄到什么程度合适取决于词组学界是否真在用，静态
+判断不了。首版用 `len(tokens) > 3` 预判，而 planner 真实输出几乎全是 3 词，
+真机 dogfood 的 strategy 分布是 `{'bare': 2}` —— 功能上线却从未执行。这批测试
+因此覆盖 2 词与 3 词查询必须进入阶梯。
 
 全部走假 HTTP 层：不联网、不花钱、可进 CI。
 """
@@ -17,7 +22,7 @@ import pytest
 
 from paper_agent.providers.retrieval.openalex import (
     OpenAlexRetrievalProvider,
-    build_phrase_first_query,
+    build_phrase_ladder,
 )
 
 
@@ -66,58 +71,111 @@ def http(monkeypatch):
     return _install
 
 
-# --------------------------------------------------------------- 改写规则（纯函数）
+# --------------------------------------------------------------- 阶梯构造（纯函数）
 
-def test_quotes_first_three_words_leaves_rest_free():
-    assert (
-        build_phrase_first_query("cross-view image matching UAV ground vehicle")
-        == '"cross-view image matching" UAV ground vehicle'
-    )
+def test_ladder_is_exact_then_head_then_bare_for_long_query():
+    """长查询三级：整句引住 → 引前 3 词 → 裸词。
+
+    实测这条查询：裸词 9512 条 2/10 切题、引前 3 词 84 条 7/10、整句引住 0 条。
+    第一级归零正是 `phrase_head` 存在的理由。
+    """
+    q = "cross-view image matching UAV ground vehicle"
+    assert build_phrase_ladder(q) == [
+        ("phrase_exact", '"cross-view image matching UAV ground vehicle"'),
+        ("phrase_head", '"cross-view image matching" UAV ground vehicle'),
+        ("bare", q),
+    ]
+
+
+@pytest.mark.parametrize("q", ["image matching", "cross-view image matching"])
+def test_short_query_enters_ladder_with_exact_then_bare(q):
+    """2~3 词必须进阶梯 —— 首版按词数挡掉，导致真机上短语优先从未生效。
+
+    `"Cross-view image matching"` 实测 220 条 10/10 切题，是全表最好结果；
+    按词数挡掉它等于放弃主要收益。词数 <= 3 时没有自由词余量，故无 `phrase_head`。
+    """
+    assert build_phrase_ladder(q) == [("phrase_exact", f'"{q}"'), ("bare", q)]
+
+
+def test_single_word_query_skips_quoting():
+    """单词整句引住与裸词同义，只会白花一次 GET。"""
+    assert build_phrase_ladder("transformer") == [("bare", "transformer")]
 
 
 def test_no_rewrite_when_query_already_has_quotes():
     """用户/planner 显式给了短语 → 尊重原样，不二次加工。"""
-    assert build_phrase_first_query('"cross-view image matching" UAV') == ""
+    q = '"cross-view image matching" UAV'
+    assert build_phrase_ladder(q) == [("bare", q)]
 
 
-@pytest.mark.parametrize("q", ["transformer", "image matching", "cross-view image matching"])
-def test_no_rewrite_when_too_few_words(q):
-    """词数 <= 3 没有自由词余量；整句引住实测会打穿到 0 命中，故不做。"""
-    assert build_phrase_first_query(q) == ""
-
-
-def test_no_rewrite_for_cjk_head():
+def test_no_rewrite_for_cjk():
     """中文 seed 加引号实测有害：`"空地协同" 跨视角 图像匹配` 2 条 vs 裸词 202 条。"""
-    assert build_phrase_first_query("空地协同 跨视角 图像匹配 定位") == ""
+    q = "空地协同 跨视角 图像匹配 定位"
+    assert build_phrase_ladder(q) == [("bare", q)]
 
 
 # --------------------------------------------------------------- 阶梯行为
 
-def test_phrase_query_is_tried_first_and_adopted_when_enough(http):
+def test_exact_phrase_adopted_when_enough(http):
+    """第一级够数就停 —— 与改造前同样一次 GET，无额外成本。"""
     fake = http([8])
     provider = OpenAlexRetrievalProvider(mailto="t@e.com")
     entries = provider.search("cross-view image matching UAV ground vehicle", limit=10)
 
-    assert len(fake.queries) == 1, "命中足够时不该再发裸词请求"
-    assert fake.queries[0] == '"cross-view image matching" UAV ground vehicle'
+    assert len(fake.queries) == 1, "命中足够时不该继续退级"
+    assert fake.queries[0] == '"cross-view image matching UAV ground vehicle"'
     assert len(entries) == 8
 
 
-def test_falls_back_to_bare_query_when_phrase_too_narrow(http):
-    """短语过窄（0 命中）→ 必须回退裸词，且返回的是**裸词**结果。
+def test_short_query_adopts_exact_phrase(http):
+    """3 词查询必须真的发出引号请求 —— 首版在此处退化为裸词。"""
+    fake = http([9])
+    provider = OpenAlexRetrievalProvider(mailto="t@e.com")
+    entries = provider.search("Cross-view image matching", limit=10)
 
-    这是本次改造的召回下界保证：改造后最坏情况等于改造前 + 一次多余 HTTP。
+    assert fake.queries == ['"Cross-view image matching"']
+    assert len(entries) == 9
+
+
+def test_falls_through_exact_then_head_then_bare(http):
+    """整句归零 → 引前 3 词仍不足 → 落到裸词，返回的必须是**裸词**结果。
+
+    这是召回下界保证：最坏情况等于改造前 + 两次多余 HTTP。
     """
-    fake = http([0, 7])
+    fake = http([0, 2, 7])
     provider = OpenAlexRetrievalProvider(mailto="t@e.com")
     entries = provider.search("air-ground visual localization cross-view", limit=10)
 
-    assert len(fake.queries) == 2
-    assert fake.queries[0].startswith('"air-ground visual localization"')
-    assert fake.queries[1] == "air-ground visual localization cross-view", (
-        "第二次必须是原始裸词"
-    )
-    assert len(entries) == 7, "返回的必须是回退后的裸词结果，不是被丢弃的短语结果"
+    assert fake.queries == [
+        '"air-ground visual localization cross-view"',
+        '"air-ground visual localization" cross-view',
+        "air-ground visual localization cross-view",
+    ]
+    assert len(entries) == 7, "返回的必须是末级裸词结果，不是被丢弃的窄结果"
+
+
+def test_head_phrase_adopted_when_exact_too_narrow(http):
+    """整句归零但引前 3 词够数 → 停在中间级，不必退到裸词。
+
+    对应实测那条：整句 0 命中、引前 3 词 84 条 7/10 切题、裸词只 2/10。
+    """
+    fake = http([0, 8])
+    provider = OpenAlexRetrievalProvider(mailto="t@e.com")
+    entries = provider.search("cross-view image matching UAV ground vehicle", limit=10)
+
+    assert len(fake.queries) == 2, "中间级够数就不该再发裸词"
+    assert fake.queries[1] == '"cross-view image matching" UAV ground vehicle'
+    assert len(entries) == 8
+
+
+def test_bare_last_rung_adopted_even_when_empty(http):
+    """末级无条件采纳：裸词 0 命中就是 0 命中，与改造前一致，不额外重试。"""
+    fake = http([0, 0, 0])
+    provider = OpenAlexRetrievalProvider(mailto="t@e.com")
+    entries = provider.search("cross-view image matching UAV ground vehicle", limit=10)
+
+    assert len(fake.queries) == 3, "末级返回后不该再发请求"
+    assert entries == []
 
 
 def test_threshold_respects_small_limit(http):
@@ -126,7 +184,7 @@ def test_threshold_respects_small_limit(http):
     provider = OpenAlexRetrievalProvider(mailto="t@e.com")
     entries = provider.search("cross-view image matching UAV ground", limit=2)
 
-    assert len(fake.queries) == 1, "limit=2 且拿到 2 条 → 已满，不该回退"
+    assert len(fake.queries) == 1, "limit=2 且拿到 2 条 → 已满，不该退级"
     assert len(entries) == 2
 
 
@@ -167,7 +225,7 @@ def test_publishes_strategy_without_leaking_query_text(http, monkeypatch):
 
     bus = EventBus(_Sink(), RunContext("run_test"), ObservabilityHealth())
 
-    # 三次 search 共发 4 次 HTTP：短语命中 → 短语落空+回退 → 不可改写单发。
+    # 三次 search 共发 5 次 HTTP：整句命中 → 整句落空+引前3词命中 → 单词直接裸词。
     fake = http([9, 0, 6, 1])
     provider = OpenAlexRetrievalProvider(mailto="t@e.com")
     with use_bus(bus):
@@ -176,7 +234,7 @@ def test_publishes_strategy_without_leaking_query_text(http, monkeypatch):
         provider.search("transformer", limit=10)
 
     events = [e for e in seen if e.kind is EventKind.PROVIDER_SEARCH]
-    assert _strategies(events) == ["phrase_first", "bare_fallback", "bare"]
+    assert _strategies(events) == ["phrase_exact", "phrase_head", "bare"]
     assert [e.data["results"] for e in events] == [9, 6, 1]
 
     for e in events:
@@ -225,7 +283,7 @@ def test_provider_search_reaches_trace_json(http, tmp_path):
 
     blob = json.dumps(recorder.trace.root.to_dict(), ensure_ascii=False)
     assert "provider_search" in blob, "事件被 recorder 白名单挡掉了（首次接线就漏在这）"
-    assert "phrase_first" in blob, "strategy 落盘丢失 → 无法归因短语优先是否生效"
+    assert "phrase_exact" in blob, "strategy 落盘丢失 → 无法归因短语优先是否生效"
 
 
 # --------------------------------------------------------------- 核验路径不受影响
