@@ -41,6 +41,11 @@ class FormatOp:
     scope: str = "all"
     label: str = ""              # 展示用中文说明
     changed_fields: str = ""     # 审计：本操作改动的字段类别
+    #: 这一条操作对应的**用户原话**片段。仅 intent-planning 抽取路径会填
+    #: （规则解析路径 `parse_format_ops` 留空）。用途是 requirement 归属的兜底
+    #: 锚点 —— `set_columns(value=2)` 与原话「双栏格式」没有任何字面交集，
+    #: 没有这个字段时兜底匹配对本槽恒定失效。
+    verbatim: str = ""
 
 
 # ---- scope 解析 ----

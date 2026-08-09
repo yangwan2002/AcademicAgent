@@ -1,13 +1,1609 @@
 {
   "schema_version": 4,
-  "references": [],
+  "references": [
+    {
+      "reference_id": "r6ac577f9e9e5",
+      "work_identifiers": [
+        [
+          "doi",
+          "10.3390/rs13010047"
+        ],
+        [
+          "openalex_work",
+          "W3115854999"
+        ]
+      ],
+      "container_identifiers": [
+        [
+          "issn",
+          "20724292"
+        ]
+      ],
+      "unclassified_identifiers": [],
+      "title": "A Practical Cross-View Image Matching Method between UAV and Satellite for UAV-Based Geo-Localization",
+      "year": 2020,
+      "publication_date": "",
+      "abstract": "Cross-view image matching has attracted extensive attention due to its huge potential applications, such as localization and navigation. Unmanned aerial vehicle (UAV) technology has been developed rapidly in recent years, and people have more opportunities to obtain and use UAV-view images than ever before. However, the algorithms of cross-view image matching between the UAV view (oblique view) and the satellite view (vertical view) are still in their beginning stage, and the matching accuracy is expected to be further improved when applied in real situations. Within this context, in this study, we proposed a cross-view matching method based on location classification (hereinafter referred to LCM), in which the similarity between UAV and satellite views is considered, and we implemented the method with the newest UAV-based geo-localization dataset (University-1652). LCM is able to solve the imbalance of the input sample number between the satellite images and the UAV images. In the training stage, LCM can simplify the retrieval problem into a classification problem and consider the influence of the feature vector size on the matching accuracy. Compared with one study, LCM shows higher accuracies, and Recall@K (K ∈ {1, 5, 10}) and the average precision (AP) were improved by 5–10%. The expansion of satellite-view images and multiple queries proposed by the LCM are capable of improving the matching accuracy during the experiment. In addition, the influences of different feature sizes on the LCM’s accuracy are determined, and we found that 512 is the optimal feature size. Finally, the LCM model trained based on synthetic UAV-view images was evaluated in real-world situations, and the evaluation result shows that it still has satisfactory matching accuracy. The LCM can realize the bidirectional matching between the UAV-view image and the satellite-view image and can contribute to two applications: (i) UAV-view image localization (i.e., predicting the geographic location of UAV-view images based on satellite-view images with geo-tags) and (ii) UAV navigation (i.e., driving the UAV to the region of interest in the satellite-view image based on the flight record).",
+      "language_hint": "en",
+      "reference_type": "article",
+      "container_title": "Remote Sensing",
+      "volume": "13",
+      "issue": "1",
+      "pages": "47-47",
+      "article_number": "",
+      "publisher": "Multidisciplinary Digital Publishing Institute",
+      "publisher_place": "",
+      "edition": "",
+      "url": "https://doi.org/10.3390/rs13010047",
+      "accessed_at": "",
+      "conference_name": "",
+      "conference_place": "",
+      "bibkey": "ding2020practical",
+      "legacy_verified": false,
+      "verification_method": "",
+      "quarantined": false,
+      "created_at": "",
+      "authors": [
+        "Lirong Ding",
+        "Ji Zhou",
+        "Lingxuan Meng",
+        "Zhiyong Long"
+      ],
+      "bibkey_aliases": [],
+      "numeric_aliases": [
+        "1"
+      ],
+      "merged_from": [],
+      "discovery_sources": [
+        "openalex"
+      ],
+      "field_provenance": [
+        [
+          "title",
+          "openalex"
+        ]
+      ],
+      "verification_events": [
+        {
+          "event_id": "76929441d78f",
+          "kind": "verified",
+          "source": "crossref",
+          "provenance": "registry",
+          "authority": "final",
+          "identifier_type": "doi",
+          "identifier": "10.3390/rs13010047",
+          "checked_at": "2026-08-07T06:34:32.637225+00:00",
+          "target_event_id": "",
+          "details": ""
+        },
+        {
+          "event_id": "7dc31636a009",
+          "kind": "verified",
+          "source": "openalex",
+          "provenance": "aggregator",
+          "authority": "final",
+          "identifier_type": "openalex_work",
+          "identifier": "W3115854999",
+          "checked_at": "2026-08-07T06:34:33.430418+00:00",
+          "target_event_id": "",
+          "details": ""
+        }
+      ],
+      "field_conflicts": []
+    },
+    {
+      "reference_id": "rb0cfbac63272",
+      "work_identifiers": [
+        [
+          "doi",
+          "10.1109/tcsvt.2021.3121987"
+        ],
+        [
+          "openalex_work",
+          "W3214744507"
+        ]
+      ],
+      "container_identifiers": [
+        [
+          "issn",
+          "10518215"
+        ]
+      ],
+      "unclassified_identifiers": [],
+      "title": "UAV-Satellite View Synthesis for Cross-View Geo-Localization",
+      "year": 2021,
+      "publication_date": "",
+      "abstract": "The goal of cross-view image matching based on geo-localization is to determine the location of a given ground-view image (front view) by matching it with a group of satellite-view images (vertical view) with geographic tags. Due to the rapid development of unmanned aerial vehicle (UAV) technology in recent years, it has provided a real viewpoint close to 45 degrees (oblique view) to bridge the visual gap between views. However, existing methods ignore the direct geometric space correspondence of UAV-satellite views, and only use brute force for feature matching, leading to inferior performance. In this context, we propose an end-to-end cross-view matching method that integrates cross-view synthesis module and geo-localization module, which fully considers the spatial correspondence of UAV-satellite views and the surrounding area information. To be specific, the cross-view synthesis module includes two parts: the oblique view of UAV is first converted to the vertical view by perspective projection transformation (PPT), which makes the UAV image closer to the satellite image; then we use conditional generative adversarial nets (CGAN) to synthesize the UAV image with vertical view style, which is close to the real satellite image by learning the converted UAV as the input image and the real satellite image as the label. Geo-localization module refers to existing local pattern network (LPN), which explicitly considers the surrounding environment of the target building. These modules are integrated in a single architecture called PCL, which mutually reinforce each other. Our method is superior to the existing UAV-satellite cross-view methods, which improves by about 5%.",
+      "language_hint": "en",
+      "reference_type": "article",
+      "container_title": "IEEE Transactions on Circuits and Systems for Video Technology",
+      "volume": "32",
+      "issue": "7",
+      "pages": "4804-4815",
+      "article_number": "",
+      "publisher": "Institute of Electrical and Electronics Engineers",
+      "publisher_place": "",
+      "edition": "",
+      "url": "https://doi.org/10.1109/tcsvt.2021.3121987",
+      "accessed_at": "",
+      "conference_name": "",
+      "conference_place": "",
+      "bibkey": "tian2021satellite",
+      "legacy_verified": false,
+      "verification_method": "",
+      "quarantined": false,
+      "created_at": "",
+      "authors": [
+        "Xiaoyang Tian",
+        "Jie Shao",
+        "Deqiang Ouyang",
+        "Heng Tao Shen"
+      ],
+      "bibkey_aliases": [],
+      "numeric_aliases": [
+        "2"
+      ],
+      "merged_from": [],
+      "discovery_sources": [
+        "openalex"
+      ],
+      "field_provenance": [
+        [
+          "title",
+          "openalex"
+        ]
+      ],
+      "verification_events": [
+        {
+          "event_id": "bec6345bdc8e",
+          "kind": "verified",
+          "source": "crossref",
+          "provenance": "registry",
+          "authority": "final",
+          "identifier_type": "doi",
+          "identifier": "10.1109/tcsvt.2021.3121987",
+          "checked_at": "2026-08-07T06:34:34.368691+00:00",
+          "target_event_id": "",
+          "details": ""
+        },
+        {
+          "event_id": "50ac0ea61455",
+          "kind": "verified",
+          "source": "openalex",
+          "provenance": "aggregator",
+          "authority": "final",
+          "identifier_type": "openalex_work",
+          "identifier": "W3214744507",
+          "checked_at": "2026-08-07T06:34:35.255462+00:00",
+          "target_event_id": "",
+          "details": ""
+        }
+      ],
+      "field_conflicts": []
+    },
+    {
+      "reference_id": "r11c15f857e10",
+      "work_identifiers": [
+        [
+          "doi",
+          "10.3390/rs13193979"
+        ],
+        [
+          "openalex_work",
+          "W3207216715"
+        ]
+      ],
+      "container_identifiers": [
+        [
+          "issn",
+          "20724292"
+        ]
+      ],
+      "unclassified_identifiers": [],
+      "title": "A Faster and More Effective Cross-View Matching Method of UAV and Satellite Images for UAV Geolocalization",
+      "year": 2021,
+      "publication_date": "",
+      "abstract": "Cross-view geolocalization matches the same target in different images from various views, such as views of unmanned aerial vehicles (UAVs) and satellites, which is a key technology for UAVs to autonomously locate and navigate without a positioning system (e.g., GPS and GNSS). The most challenging aspect in this area is the shifting of targets and nonuniform scales among different views. Published methods focus on extracting coarse features from parts of images, but neglect the relationship between different views, and the influence of scale and shifting. To bridge this gap, an effective network is proposed with well-designed structures, referred to as multiscale block attention (MSBA), based on a local pattern network. MSBA cuts images into several parts with different scales, among which self-attention is applied to make feature extraction more efficient. The features of different views are extracted by a multibranch structure, which was designed to make different branches learn from each other, leading to a more subtle relationship between views. The method was implemented with the newest UAV-based geolocalization dataset. Compared with the existing state-of-the-art (SOTA) method, MSBA accuracy improved by almost 10% when the inference time was equal to that of the SOTA method; when the accuracy of MSBA was the same as that of the SOTA method, inference time was shortened by 30%.",
+      "language_hint": "en",
+      "reference_type": "article",
+      "container_title": "Remote Sensing",
+      "volume": "13",
+      "issue": "19",
+      "pages": "3979-3979",
+      "article_number": "",
+      "publisher": "Multidisciplinary Digital Publishing Institute",
+      "publisher_place": "",
+      "edition": "",
+      "url": "https://doi.org/10.3390/rs13193979",
+      "accessed_at": "",
+      "conference_name": "",
+      "conference_place": "",
+      "bibkey": "zhuang2021faster",
+      "legacy_verified": false,
+      "verification_method": "",
+      "quarantined": false,
+      "created_at": "",
+      "authors": [
+        "Jiedong Zhuang",
+        "Ming Dai",
+        "Xuruoyan Chen",
+        "Enhui Zheng"
+      ],
+      "bibkey_aliases": [],
+      "numeric_aliases": [
+        "3"
+      ],
+      "merged_from": [],
+      "discovery_sources": [
+        "openalex"
+      ],
+      "field_provenance": [
+        [
+          "title",
+          "openalex"
+        ]
+      ],
+      "verification_events": [
+        {
+          "event_id": "1cbc26697295",
+          "kind": "verified",
+          "source": "crossref",
+          "provenance": "registry",
+          "authority": "final",
+          "identifier_type": "doi",
+          "identifier": "10.3390/rs13193979",
+          "checked_at": "2026-08-07T06:34:37.107909+00:00",
+          "target_event_id": "",
+          "details": ""
+        },
+        {
+          "event_id": "c89123a13c09",
+          "kind": "verified",
+          "source": "openalex",
+          "provenance": "aggregator",
+          "authority": "final",
+          "identifier_type": "openalex_work",
+          "identifier": "W3207216715",
+          "checked_at": "2026-08-07T06:34:38.640315+00:00",
+          "target_event_id": "",
+          "details": ""
+        }
+      ],
+      "field_conflicts": []
+    },
+    {
+      "reference_id": "r1e418a62059e",
+      "work_identifiers": [
+        [
+          "doi",
+          "10.1109/tgrs.2024.3352418"
+        ],
+        [
+          "openalex_work",
+          "W4390691253"
+        ]
+      ],
+      "container_identifiers": [
+        [
+          "issn",
+          "01962892"
+        ]
+      ],
+      "unclassified_identifiers": [],
+      "title": "TransFG: A Cross-View Geo-Localization of Satellite and UAVs Imagery Pipeline Using Transformer-Based Feature Aggregation and Gradient Guidance",
+      "year": 2024,
+      "publication_date": "",
+      "abstract": "Cross-view geo-localization of satellite and unmanned aerial vehicles (UAVs) imagery has attracted extensive attention due to its tremendous potential for global navigation satellite system (GNSS) denied navigation. However, inadequate feature representation across different views coupled with positional shifts and distance-scale uncertainty are key challenges. Most of the existing research mainly focused on extracting comprehensive and fine-grained information, yet effective feature representation and alignment should be imposed equal importance. In this article, we propose an innovative transformer-based pipeline TransFG for robust cross-view image matching, which incorporates feature aggregation (FA) and gradient guidance (GG) module. TransFG synergically takes advantage of FA and GG, achieving an effective balance in feature representation and alignment. Specifically, the proposed FA module implicitly learns salient features and dynamically aggregates contextual features from the vision transformer (ViT). The proposed GG module uses the gradient information of local features to further enhance the cross-view feature representation and aligns specific instances across different views. Extensive experiments demonstrate that our pipeline outperforms existing methods in cross-view geo-localization. It achieves an impressive improvement in R@1 and AP than the state-of-the-art (SOTA) methods. The code has been released athttps://github.com/happyboy1234/TransFG.",
+      "language_hint": "en",
+      "reference_type": "article",
+      "container_title": "IEEE Transactions on Geoscience and Remote Sensing",
+      "volume": "62",
+      "issue": "",
+      "pages": "1-12",
+      "article_number": "",
+      "publisher": "Institute of Electrical and Electronics Engineers",
+      "publisher_place": "",
+      "edition": "",
+      "url": "https://doi.org/10.1109/tgrs.2024.3352418",
+      "accessed_at": "",
+      "conference_name": "",
+      "conference_place": "",
+      "bibkey": "hu2024transfg",
+      "legacy_verified": false,
+      "verification_method": "",
+      "quarantined": false,
+      "created_at": "",
+      "authors": [
+        "Zhao Hu",
+        "Keyan Ren",
+        "Tianyi Yue",
+        "Chun Zhang",
+        "Shuai Yuan"
+      ],
+      "bibkey_aliases": [],
+      "numeric_aliases": [
+        "4"
+      ],
+      "merged_from": [],
+      "discovery_sources": [
+        "openalex"
+      ],
+      "field_provenance": [
+        [
+          "title",
+          "openalex"
+        ]
+      ],
+      "verification_events": [
+        {
+          "event_id": "7a6bd3d1a831",
+          "kind": "verified",
+          "source": "crossref",
+          "provenance": "registry",
+          "authority": "final",
+          "identifier_type": "doi",
+          "identifier": "10.1109/tgrs.2024.3352418",
+          "checked_at": "2026-08-07T06:34:40.421020+00:00",
+          "target_event_id": "",
+          "details": ""
+        },
+        {
+          "event_id": "47670c95a88a",
+          "kind": "verified",
+          "source": "openalex",
+          "provenance": "aggregator",
+          "authority": "final",
+          "identifier_type": "openalex_work",
+          "identifier": "W4390691253",
+          "checked_at": "2026-08-07T06:34:41.219165+00:00",
+          "target_event_id": "",
+          "details": ""
+        }
+      ],
+      "field_conflicts": []
+    },
+    {
+      "reference_id": "rd3cf4b55ef41",
+      "work_identifiers": [
+        [
+          "doi",
+          "10.14358/pers.23-00073r2"
+        ],
+        [
+          "openalex_work",
+          "W4399265176"
+        ]
+      ],
+      "container_identifiers": [
+        [
+          "issn",
+          "00991112"
+        ]
+      ],
+      "unclassified_identifiers": [],
+      "title": "Real-Time Cross-View Image Matching and Camera Pose Determination for Unmanned Aerial Vehicles",
+      "year": 2024,
+      "publication_date": "",
+      "abstract": "In global navigation satellite systems (GNSS)-denied environments, vision-based methods are commonly used for the positioning and navigation of aerial robots. However, traditional methods often suffer from accumulative estimation errors over time, leading to trajectory drift and lack real-time performance, particularly in large-scale scenarios. This article presents novel approaches, including feature-based cross-view image matching and the integration of visual odometry and photogrammetric space resection for camera pose determination in real-time. Experimental evaluation with real UAV datasets demonstrated that the proposed method reliably matches features in cross-view images with large differences in spatial resolution, coverage, and perspective views, achieving a root-mean-square error of 4.7 m for absolute position error and 0.33° for rotation error, and delivering real-time performance of 12 frames per second (FPS) when implemented in a lightweight edge device onboard UAV. This approach offters potential for diverse intelligent UAV applications in GNSS-denied environments based on real-time feedback control.",
+      "language_hint": "en",
+      "reference_type": "article",
+      "container_title": "Photogrammetric Engineering & Remote Sensing",
+      "volume": "90",
+      "issue": "6",
+      "pages": "371-381",
+      "article_number": "",
+      "publisher": "American Society for Photogrammetry and Remote Sensing",
+      "publisher_place": "",
+      "edition": "",
+      "url": "https://doi.org/10.14358/pers.23-00073r2",
+      "accessed_at": "",
+      "conference_name": "",
+      "conference_place": "",
+      "bibkey": "chen2024real",
+      "legacy_verified": false,
+      "verification_method": "",
+      "quarantined": false,
+      "created_at": "",
+      "authors": [
+        "Long Chen",
+        "Bo Wu",
+        "Ran Duan",
+        "Zeyu Chen"
+      ],
+      "bibkey_aliases": [],
+      "numeric_aliases": [
+        "5"
+      ],
+      "merged_from": [],
+      "discovery_sources": [
+        "openalex"
+      ],
+      "field_provenance": [
+        [
+          "title",
+          "openalex"
+        ]
+      ],
+      "verification_events": [
+        {
+          "event_id": "d15aae122ee8",
+          "kind": "verified",
+          "source": "crossref",
+          "provenance": "registry",
+          "authority": "final",
+          "identifier_type": "doi",
+          "identifier": "10.14358/pers.23-00073r2",
+          "checked_at": "2026-08-07T06:34:42.176603+00:00",
+          "target_event_id": "",
+          "details": ""
+        },
+        {
+          "event_id": "2672d3b9c6c2",
+          "kind": "verified",
+          "source": "openalex",
+          "provenance": "aggregator",
+          "authority": "final",
+          "identifier_type": "openalex_work",
+          "identifier": "W4399265176",
+          "checked_at": "2026-08-07T06:34:42.952931+00:00",
+          "target_event_id": "",
+          "details": ""
+        }
+      ],
+      "field_conflicts": []
+    },
+    {
+      "reference_id": "rdbc939f3aa0b",
+      "work_identifiers": [
+        [
+          "doi",
+          "10.1109/access.2022.3162693"
+        ],
+        [
+          "openalex_work",
+          "W4226255358"
+        ]
+      ],
+      "container_identifiers": [
+        [
+          "issn",
+          "21693536"
+        ]
+      ],
+      "unclassified_identifiers": [],
+      "title": "A Semantic Guidance and Transformer-Based Matching Method for UAVs and Satellite Images for UAV Geo-Localization",
+      "year": 2022,
+      "publication_date": "",
+      "abstract": "It is a challenging task for unmanned aerial vehicles (UAVs) without a positioning system to locate targets by using images. Matching drone and satellite images is one of the key steps in this task. Due to the large angle and scale gap between drone and satellite views, it is very important to extract fine-grained features with strong characterization ability. Most of the published methods are based on the CNN structure, but a lot of information will be lost when using such methods. This is caused by the limitations of the convolution operation (e.g. limited receptive field and downsampling operation). To make up for this shortcoming, a transformer-based network is proposed to extract more contextual information. The network promotes feature alignment through semantic guidance module (SGM). SGM aligns the same semantic parts in the two images by classifying each pixel in the images based on the attention of pixels. In addition, this method can be easily combined with existing methods. The proposed method has been implemented with the newest UAV-based geo-localization dataset. Compared with the existing state-of-the-art (SOTA) method, the proposed method achieves almost 8% improvement in accuracy.",
+      "language_hint": "en",
+      "reference_type": "article",
+      "container_title": "IEEE Access",
+      "volume": "10",
+      "issue": "",
+      "pages": "34277-34287",
+      "article_number": "",
+      "publisher": "Institute of Electrical and Electronics Engineers",
+      "publisher_place": "",
+      "edition": "",
+      "url": "https://doi.org/10.1109/access.2022.3162693",
+      "accessed_at": "",
+      "conference_name": "",
+      "conference_place": "",
+      "bibkey": "zhuang2022semantic",
+      "legacy_verified": false,
+      "verification_method": "",
+      "quarantined": false,
+      "created_at": "",
+      "authors": [
+        "Jiedong Zhuang",
+        "Xuruoyan Chen",
+        "Ming Dai",
+        "Wenbo Lan",
+        "Yongheng Cai",
+        "Enhui Zheng"
+      ],
+      "bibkey_aliases": [],
+      "numeric_aliases": [
+        "6"
+      ],
+      "merged_from": [],
+      "discovery_sources": [
+        "openalex"
+      ],
+      "field_provenance": [
+        [
+          "title",
+          "openalex"
+        ]
+      ],
+      "verification_events": [
+        {
+          "event_id": "d134595fcfae",
+          "kind": "verified",
+          "source": "crossref",
+          "provenance": "registry",
+          "authority": "final",
+          "identifier_type": "doi",
+          "identifier": "10.1109/access.2022.3162693",
+          "checked_at": "2026-08-07T06:34:53.993488+00:00",
+          "target_event_id": "",
+          "details": ""
+        },
+        {
+          "event_id": "d931573828de",
+          "kind": "verified",
+          "source": "openalex",
+          "provenance": "aggregator",
+          "authority": "final",
+          "identifier_type": "openalex_work",
+          "identifier": "W4226255358",
+          "checked_at": "2026-08-07T06:34:54.778718+00:00",
+          "target_event_id": "",
+          "details": ""
+        }
+      ],
+      "field_conflicts": []
+    },
+    {
+      "reference_id": "re27615f4af36",
+      "work_identifiers": [
+        [
+          "doi",
+          "10.3390/rs17142448"
+        ],
+        [
+          "openalex_work",
+          "W4412451371"
+        ]
+      ],
+      "container_identifiers": [
+        [
+          "issn",
+          "20724292"
+        ]
+      ],
+      "unclassified_identifiers": [],
+      "title": "UAV-Satellite Cross-View Image Matching Based on Adaptive Threshold-Guided Ring Partitioning Framework",
+      "year": 2025,
+      "publication_date": "",
+      "abstract": "Cross-view image matching between UAV and satellite platforms is critical for geographic localization but remains challenging due to domain gaps caused by disparities in imaging sensors, viewpoints, and illumination conditions. To address these challenges, this paper proposes an Adaptive Threshold-guided Ring Partitioning Framework (ATRPF) for UAV–satellite cross-view image matching. Unlike conventional ring-based methods with fixed partitioning rules, ATRPF innovatively incorporates heatmap-guided adaptive thresholds and learnable hyperparameters to dynamically adjust ring-wise feature extraction regions, significantly enhancing cross-domain representation learning through context-aware adaptability. The framework synergizes three core components: brightness-aligned preprocessing to reduce illumination-induced domain shifts, hybrid loss functions to improve feature discriminability across domains, and keypoint-aware re-ranking to refine retrieval results by compensating for neural networks’ localization uncertainty. Comprehensive evaluations on the University-1652 benchmark demonstrate the framework’s superiority; it achieves 82.50% Recall@1 and 84.28% AP for UAV→Satellite geo-localization, along with 90.87% Recall@1 and 80.25% AP for Satellite→UAV navigation. These results validate the framework’s capability to bridge UAV–satellite domain gaps while maintaining robust matching precision under heterogeneous imaging conditions, providing a viable solution for practical applications such as UAV navigation in GNSS-denied environments.",
+      "language_hint": "en",
+      "reference_type": "article",
+      "container_title": "Remote Sensing",
+      "volume": "17",
+      "issue": "14",
+      "pages": "2448-2448",
+      "article_number": "",
+      "publisher": "Multidisciplinary Digital Publishing Institute",
+      "publisher_place": "",
+      "edition": "",
+      "url": "https://doi.org/10.3390/rs17142448",
+      "accessed_at": "",
+      "conference_name": "",
+      "conference_place": "",
+      "bibkey": "liao2025satellite",
+      "legacy_verified": false,
+      "verification_method": "",
+      "quarantined": false,
+      "created_at": "",
+      "authors": [
+        "Yushi Liao",
+        "Juan Su",
+        "Decao Ma",
+        "Chao Niu"
+      ],
+      "bibkey_aliases": [],
+      "numeric_aliases": [
+        "7"
+      ],
+      "merged_from": [],
+      "discovery_sources": [
+        "openalex"
+      ],
+      "field_provenance": [
+        [
+          "title",
+          "openalex"
+        ]
+      ],
+      "verification_events": [
+        {
+          "event_id": "d31e346c2fab",
+          "kind": "verified",
+          "source": "crossref",
+          "provenance": "registry",
+          "authority": "final",
+          "identifier_type": "doi",
+          "identifier": "10.3390/rs17142448",
+          "checked_at": "2026-08-07T06:34:55.704163+00:00",
+          "target_event_id": "",
+          "details": ""
+        },
+        {
+          "event_id": "cae40a95065a",
+          "kind": "verified",
+          "source": "openalex",
+          "provenance": "aggregator",
+          "authority": "final",
+          "identifier_type": "openalex_work",
+          "identifier": "W4412451371",
+          "checked_at": "2026-08-07T06:34:56.257539+00:00",
+          "target_event_id": "",
+          "details": ""
+        }
+      ],
+      "field_conflicts": []
+    },
+    {
+      "reference_id": "r6c53f0e5230c",
+      "work_identifiers": [
+        [
+          "doi",
+          "10.3390/rs15194667"
+        ],
+        [
+          "openalex_work",
+          "W4386996906"
+        ]
+      ],
+      "container_identifiers": [
+        [
+          "issn",
+          "20724292"
+        ]
+      ],
+      "unclassified_identifiers": [],
+      "title": "A Novel Geo-Localization Method for UAV and Satellite Images Using Cross-View Consistent Attention",
+      "year": 2023,
+      "publication_date": "",
+      "abstract": "Geo-localization has been widely applied as an important technique to get the longitude and latitude for unmanned aerial vehicle (UAV) navigation in outdoor flight. Due to the possible interference and blocking of GPS signals, the method based on image retrieval, which is less likely to be interfered with, has received extensive attention in recent years. The geo-localization of UAVs and satellites can be achieved by querying pre-obtained satellite images with GPS-tagged and drone images from different perspectives. In this paper, an image transformation technique is used to extract cross-view geo-localization information from UAVs and satellites. A single-stage training method in UAV and satellite geo-localization is first proposed, which simultaneously realizes cross-view feature extraction and image retrieval, and achieves higher accuracy than existing multi-stage training techniques. A novel piecewise soft-margin triplet loss function is designed to avoid model parameters being trapped in suboptimal sets caused by the lack of constraint on positive and negative samples. The results illustrate that the proposed loss function enhances image retrieval accuracy and realizes a better convergence. Moreover, a data augmentation method for satellite images is proposed to overcome the disproportionate numbers of image samples. On the benchmark University-1652, the proposed method achieves the state-of-the-art result with a 6.67% improvement in recall rate (R@1) and 6.13% in average precision (AP). All codes will be publicized to promote reproducibility.",
+      "language_hint": "en",
+      "reference_type": "article",
+      "container_title": "Remote Sensing",
+      "volume": "15",
+      "issue": "19",
+      "pages": "4667-4667",
+      "article_number": "",
+      "publisher": "Multidisciplinary Digital Publishing Institute",
+      "publisher_place": "",
+      "edition": "",
+      "url": "https://doi.org/10.3390/rs15194667",
+      "accessed_at": "",
+      "conference_name": "",
+      "conference_place": "",
+      "bibkey": "cui2023novel",
+      "legacy_verified": false,
+      "verification_method": "",
+      "quarantined": false,
+      "created_at": "",
+      "authors": [
+        "Zhuofan Cui",
+        "Pengwei Zhou",
+        "Xiaolong Wang",
+        "Zilun Zhang",
+        "Yingxuan Li",
+        "Hongbo Li",
+        "Yu Zhang"
+      ],
+      "bibkey_aliases": [],
+      "numeric_aliases": [
+        "8"
+      ],
+      "merged_from": [],
+      "discovery_sources": [
+        "openalex"
+      ],
+      "field_provenance": [
+        [
+          "title",
+          "openalex"
+        ]
+      ],
+      "verification_events": [
+        {
+          "event_id": "7585e926558c",
+          "kind": "verified",
+          "source": "crossref",
+          "provenance": "registry",
+          "authority": "final",
+          "identifier_type": "doi",
+          "identifier": "10.3390/rs15194667",
+          "checked_at": "2026-08-07T06:34:59.573298+00:00",
+          "target_event_id": "",
+          "details": ""
+        },
+        {
+          "event_id": "dd4468936118",
+          "kind": "verified",
+          "source": "openalex",
+          "provenance": "aggregator",
+          "authority": "final",
+          "identifier_type": "openalex_work",
+          "identifier": "W4386996906",
+          "checked_at": "2026-08-07T06:35:00.398996+00:00",
+          "target_event_id": "",
+          "details": ""
+        }
+      ],
+      "field_conflicts": []
+    },
+    {
+      "reference_id": "r82faea3765c6",
+      "work_identifiers": [
+        [
+          "doi",
+          "10.5194/isprs-annals-x-1-w1-2023-1065-2023"
+        ],
+        [
+          "openalex_work",
+          "W4389396350"
+        ]
+      ],
+      "container_identifiers": [
+        [
+          "issn",
+          "21949042"
+        ]
+      ],
+      "unclassified_identifiers": [],
+      "title": "UAV LARGE OBLIQUE IMAGE GEO-LOCALIZATION USING SATELLITE IMAGES IN THE DENSE BUILDINGS AREA",
+      "year": 2023,
+      "publication_date": "",
+      "abstract": "Abstract. For UAV large oblique image geo-localization in the dense buildings area, there are still two main challenges. One is the presence of obvious occlusion and large viewpoint differences in UAV images, and the other arises from the fact that reference images, particularly orthographic satellite images, lack façade information of man-made structures (such as buildings and roads), which is crucial for UAV large oblique images. Most of existing image-based geo-localization methods only address the first challenge, neglecting the interference brought by the second challenge, especially for UAV large oblique image geo-localization in the dense buildings area. Motivated by both these two challenges, we have proposed a novel method for UAV large oblique image geo-localization in the dense buildings areas, with the segments direction statistics (SDS) features and their histogram descriptors designed. By considering both the local and global features of man-made structures, the proposed method effectively addresses the significant information difference encountered in cross-view image matching. We conducted experiments on both the public UAV images dataset University-1652 and our own collected dataset of UAV large oblique long focal whiskbroom (LO-LF-W) images. Comparative analysis with state-of-the-art (SOTA) methods demonstrated that the proposed method improves the geo-localization accuracy by approximately 10%. Furthermore, the proposed method exhibits greater robustness to noise and changing orientation of reference images, making it particularly well-suited for dense buildings areas that pose challenges for existing methods.",
+      "language_hint": "en",
+      "reference_type": "article",
+      "container_title": "ISPRS annals of the photogrammetry, remote sensing and spatial information sciences",
+      "volume": "X-1/W1-2023",
+      "issue": "",
+      "pages": "1065-1072",
+      "article_number": "",
+      "publisher": "Copernicus Publications",
+      "publisher_place": "",
+      "edition": "",
+      "url": "https://doi.org/10.5194/isprs-annals-x-1-w1-2023-1065-2023",
+      "accessed_at": "",
+      "conference_name": "",
+      "conference_place": "",
+      "bibkey": "luo2023large",
+      "legacy_verified": false,
+      "verification_method": "",
+      "quarantined": false,
+      "created_at": "",
+      "authors": [
+        "Junqi Luo",
+        "Q. Ye"
+      ],
+      "bibkey_aliases": [],
+      "numeric_aliases": [
+        "9"
+      ],
+      "merged_from": [],
+      "discovery_sources": [
+        "openalex"
+      ],
+      "field_provenance": [
+        [
+          "title",
+          "openalex"
+        ]
+      ],
+      "verification_events": [
+        {
+          "event_id": "eb251bbbd01d",
+          "kind": "verified",
+          "source": "crossref",
+          "provenance": "registry",
+          "authority": "final",
+          "identifier_type": "doi",
+          "identifier": "10.5194/isprs-annals-x-1-w1-2023-1065-2023",
+          "checked_at": "2026-08-07T06:35:01.365923+00:00",
+          "target_event_id": "",
+          "details": ""
+        },
+        {
+          "event_id": "96825d52d2b0",
+          "kind": "verified",
+          "source": "openalex",
+          "provenance": "aggregator",
+          "authority": "final",
+          "identifier_type": "openalex_work",
+          "identifier": "W4389396350",
+          "checked_at": "2026-08-07T06:35:02.171270+00:00",
+          "target_event_id": "",
+          "details": ""
+        }
+      ],
+      "field_conflicts": []
+    },
+    {
+      "reference_id": "rdc90e6efcd69",
+      "work_identifiers": [
+        [
+          "doi",
+          "10.1109/tmm.2026.3654442"
+        ],
+        [
+          "openalex_work",
+          "W7124435544"
+        ]
+      ],
+      "container_identifiers": [
+        [
+          "issn",
+          "15209210"
+        ]
+      ],
+      "unclassified_identifiers": [],
+      "title": "Image Super-Resolution Using Hierarchical Cross-Scale Self-Similarity",
+      "year": 2026,
+      "publication_date": "",
+      "abstract": "Previous studies have revealed that extending the spatial range of informative pixels offers positive performance gains for image Super-Resolution (SR). To activate more informative pixels, considerable efforts have been devoted to exploring various variants of non-local attention mechanisms for capturing image self-similarity. However, even the state-of-the-art non-local attention mechanisms ignore an inherent property of images, namely hierarchical cross-scale self-similarity. In this paper, we propose the first Hierarchical Cross-Scale Attention (HCSA). Specifically, we first extend the search space to multiple feature maps from a single feature map, and then model cross-scale feature correspondences among different layers. This allows HCSA to activate more informative pixels for image SR by adaptively rescaling and aggregating input pixels and large-scale patches within different feature maps. To ensure accurate cross scale feature matching, we propose to replace plain down sampling operations (e.g., interpolation, pooling) with Haar Wavelet Transform (HWT) encoding, which transfers spatial information of feature maps into the channel dimension, effectively avoiding important information loss. Considering that softmax normal ization in the standard non-local attention often leads to homogeneous feature aggregation due to the amplification of small similarity weights, we propose a simple yet effective Adaptive Selection (AS) operator. This operator generates a learnable sparse mask to remove redundant features, enabling HCSA to perform discriminative feature aggregation. As a generic building block, the proposed HCSA can be flexibly integrated into existing CNN- or Transformer-based SR models, significantly strengthening cross-layer information interaction and cross-scale feature representation. Quantitative and qualitative results demonstrate that our HCSA facilitates existing SR models to achieve superior accuracy and visual quality.",
+      "language_hint": "",
+      "reference_type": "article",
+      "container_title": "IEEE Transactions on Multimedia",
+      "volume": "28",
+      "issue": "",
+      "pages": "4129-4145",
+      "article_number": "",
+      "publisher": "Institute of Electrical and Electronics Engineers",
+      "publisher_place": "",
+      "edition": "",
+      "url": "https://doi.org/10.1109/tmm.2026.3654442",
+      "accessed_at": "",
+      "conference_name": "",
+      "conference_place": "",
+      "bibkey": "zhu2026image",
+      "legacy_verified": false,
+      "verification_method": "",
+      "quarantined": false,
+      "created_at": "",
+      "authors": [
+        "Xiancheng Zhu",
+        "Detian Huang",
+        "Taiheng Zeng",
+        "Xiaoqian Huang",
+        "Zhenzhen Hu",
+        "Huanqiang Zeng"
+      ],
+      "bibkey_aliases": [],
+      "numeric_aliases": [
+        "10"
+      ],
+      "merged_from": [],
+      "discovery_sources": [
+        "openalex"
+      ],
+      "field_provenance": [
+        [
+          "title",
+          "openalex"
+        ]
+      ],
+      "verification_events": [
+        {
+          "event_id": "6d4cded318da",
+          "kind": "verified",
+          "source": "crossref",
+          "provenance": "registry",
+          "authority": "final",
+          "identifier_type": "doi",
+          "identifier": "10.1109/tmm.2026.3654442",
+          "checked_at": "2026-08-07T06:35:22.982107+00:00",
+          "target_event_id": "",
+          "details": ""
+        },
+        {
+          "event_id": "2de6fb5636ea",
+          "kind": "verified",
+          "source": "openalex",
+          "provenance": "aggregator",
+          "authority": "final",
+          "identifier_type": "openalex_work",
+          "identifier": "W7124435544",
+          "checked_at": "2026-08-07T06:35:23.774741+00:00",
+          "target_event_id": "",
+          "details": ""
+        }
+      ],
+      "field_conflicts": []
+    },
+    {
+      "reference_id": "r118fb14127aa",
+      "work_identifiers": [
+        [
+          "doi",
+          "10.1038/s41598-025-08695-8"
+        ],
+        [
+          "openalex_work",
+          "W4411863500"
+        ]
+      ],
+      "container_identifiers": [
+        [
+          "issn",
+          "20452322"
+        ]
+      ],
+      "unclassified_identifiers": [],
+      "title": "Hierarchical cross attention achieves pixel precise landslide segmentation in submeter optical imagery",
+      "year": 2025,
+      "publication_date": "",
+      "abstract": "Accurate landslide segmentation using remote sensing imagery is a critical component of geohazards response systems, particularly in time-sensitive tasks such as post-earthquake landslide damage assessment and emergency resource allocation. However, current methodologies struggle with two persistent challenges in sub-meter true-color imagery: fine-grained inter-class confusion between landslides and spectrally analogous terrain features, and within-landslide heterogeneity where localized damage signatures coexist with macro-scale deformation patterns within individual landslide bodies. To overcome these, we propose the Cross-Attention Landslide Detector (CALandDet), which improves the model's ability to distinguish between landslide and background features by sharply capturing global landslide feature information and integrating global landslide feature information with local information via a cross-attention feature enhancement mechanism. Ablation experiments show that CALandDet outperforms baselines, as evidenced by a 4.89% enhanced F1 score and an 8.73% greater Intersection over Union (IoU). In comparative experiments, it outperforms the other models by 8.05-10.78% in IoU and 1.05-8.9% in F1 score, achieving an IoU of 82.65% and an F1 score of 81.64%. Furthermore, the Gradient-weighted Class Activation Mapping (Grad-CAM) visualizations confirm that the decision regions generated by the CALandDet model exhibit a higher spatial consistency with the actual landslide areas, effectively capturing indicative features including surface textures, sliding debris, accumulation bodies, and vegetation destruction. The proposed method may serve as a reference for future advancements in landslide segmentation and other remote sensing segmentation tasks.",
+      "language_hint": "en",
+      "reference_type": "article",
+      "container_title": "Scientific Reports",
+      "volume": "15",
+      "issue": "1",
+      "pages": "21933-21933",
+      "article_number": "",
+      "publisher": "Nature Portfolio",
+      "publisher_place": "",
+      "edition": "",
+      "url": "https://doi.org/10.1038/s41598-025-08695-8",
+      "accessed_at": "",
+      "conference_name": "",
+      "conference_place": "",
+      "bibkey": "hu2025hierarchical",
+      "legacy_verified": false,
+      "verification_method": "",
+      "quarantined": false,
+      "created_at": "",
+      "authors": [
+        "Wenjie Hu",
+        "Guangtong Sun",
+        "Xiangqiang Zeng",
+        "Bo Tong",
+        "Zihao Wang",
+        "Xinyue Wu",
+        "Ping Song"
+      ],
+      "bibkey_aliases": [],
+      "numeric_aliases": [
+        "11"
+      ],
+      "merged_from": [],
+      "discovery_sources": [
+        "openalex"
+      ],
+      "field_provenance": [
+        [
+          "title",
+          "openalex"
+        ]
+      ],
+      "verification_events": [
+        {
+          "event_id": "2245c8cec80a",
+          "kind": "verified",
+          "source": "crossref",
+          "provenance": "registry",
+          "authority": "final",
+          "identifier_type": "doi",
+          "identifier": "10.1038/s41598-025-08695-8",
+          "checked_at": "2026-08-07T06:35:24.670150+00:00",
+          "target_event_id": "",
+          "details": ""
+        },
+        {
+          "event_id": "bca3b675b134",
+          "kind": "verified",
+          "source": "openalex",
+          "provenance": "aggregator",
+          "authority": "final",
+          "identifier_type": "openalex_work",
+          "identifier": "W4411863500",
+          "checked_at": "2026-08-07T06:35:25.487199+00:00",
+          "target_event_id": "",
+          "details": ""
+        }
+      ],
+      "field_conflicts": []
+    },
+    {
+      "reference_id": "r9d306243cbae",
+      "work_identifiers": [
+        [
+          "doi",
+          "10.4018/ijgcms.376935"
+        ],
+        [
+          "openalex_work",
+          "W4410780299"
+        ]
+      ],
+      "container_identifiers": [
+        [
+          "issn",
+          "19423888"
+        ]
+      ],
+      "unclassified_identifiers": [],
+      "title": "Multi-Scale Feature Aligned for Object Detection",
+      "year": 2025,
+      "publication_date": "",
+      "abstract": "Existing object detection methods face challenges in multi-scale detection, especially in simulation environments with large object size variability. First, feature differences across scales hinder matching and affect accuracy. Second, inconsistent features prevent full use of multi-scale information, reducing performance. To address this, the authors propose the multi-scale feature aligned detection model. To enhance matching, the authors introduce a multi-scale query matching mechanism, using learnable queries and cross-attention to dynamically select optimal scales, improving robustness. To tackle regression-classification inconsistency, the authors propose a feature-category alignment strategy, leveraging the contrastive language-image pre-training model to align object and category features and reduce classification mismatches. Experiments show multi-scale feature aligned detection model outperforms mainstream methods with notable gains in multi-scale and complex simulation scenarios. This approach offers a robust, efficient solution for simulation-driven detection tasks needing high precision across varied object scales.",
+      "language_hint": "en",
+      "reference_type": "article",
+      "container_title": "International Journal of Gaming and Computer-Mediated Simulations",
+      "volume": "17",
+      "issue": "1",
+      "pages": "1-20",
+      "article_number": "",
+      "publisher": "IGI Global",
+      "publisher_place": "",
+      "edition": "",
+      "url": "https://doi.org/10.4018/ijgcms.376935",
+      "accessed_at": "",
+      "conference_name": "",
+      "conference_place": "",
+      "bibkey": "qiu2025multi",
+      "legacy_verified": false,
+      "verification_method": "",
+      "quarantined": false,
+      "created_at": "",
+      "authors": [
+        "Honghua Qiu",
+        "Qunhui Luo"
+      ],
+      "bibkey_aliases": [],
+      "numeric_aliases": [
+        "12"
+      ],
+      "merged_from": [],
+      "discovery_sources": [
+        "openalex"
+      ],
+      "field_provenance": [
+        [
+          "title",
+          "openalex"
+        ]
+      ],
+      "verification_events": [
+        {
+          "event_id": "fd4548ca139e",
+          "kind": "verified",
+          "source": "crossref",
+          "provenance": "registry",
+          "authority": "final",
+          "identifier_type": "doi",
+          "identifier": "10.4018/ijgcms.376935",
+          "checked_at": "2026-08-07T06:35:29.886050+00:00",
+          "target_event_id": "",
+          "details": ""
+        },
+        {
+          "event_id": "92a80226fee6",
+          "kind": "verified",
+          "source": "openalex",
+          "provenance": "aggregator",
+          "authority": "final",
+          "identifier_type": "openalex_work",
+          "identifier": "W4410780299",
+          "checked_at": "2026-08-07T06:35:30.689027+00:00",
+          "target_event_id": "",
+          "details": ""
+        }
+      ],
+      "field_conflicts": []
+    },
+    {
+      "reference_id": "r32a74ec7bba1",
+      "work_identifiers": [
+        [
+          "doi",
+          "10.1111/tgis.70052"
+        ],
+        [
+          "openalex_work",
+          "W4409819769"
+        ]
+      ],
+      "container_identifiers": [
+        [
+          "issn",
+          "13611682"
+        ]
+      ],
+      "unclassified_identifiers": [],
+      "title": "A Novel Template Matching Method Incorporating a Multi‐Candidate Region Optimization Strategy for the Initial Localization of Mars Helicopter",
+      "year": 2025,
+      "publication_date": "",
+      "abstract": "ABSTRACT The application of Unmanned Aerial Vehicles (UAVs) on Mars marks a significant advancement in planetary exploration missions. In the Mars 2020 mission, NASA successfully operated a helicopter on the Martian surface and performed multiple flight experiments. A critical challenge in maximizing the scientific yield of the Mars Helicopter is achieving high‐precision localization. To address this localization issue in weakly textured Martian environments, this paper proposes a novel template matching method that incorporates a multi‐candidate region optimization strategy to improve the accuracy of the initial localization of the Mars Helicopter. Given the UAV images and the reference orbital DOM images, a multi‐candidate region extraction method is first designed to identify the potential candidate regions in the DOM corresponding to the UAV image. Subsequently, a candidate region ranking operation is performed to rearrange the generated multi‐candidate regions to determine the optimal match. We validated our method with real flight data of the Ingenuity helicopter from the NASA Mars 2020 project and conducted a comparative analysis against the state‐of‐the‐art techniques. Experimental results show that our method achieves better results compared with existing methods, which demonstrates the potential for application in engineering tasks.",
+      "language_hint": "en",
+      "reference_type": "article",
+      "container_title": "Transactions in GIS",
+      "volume": "29",
+      "issue": "2",
+      "pages": "",
+      "article_number": "",
+      "publisher": "Wiley",
+      "publisher_place": "",
+      "edition": "",
+      "url": "https://doi.org/10.1111/tgis.70052",
+      "accessed_at": "",
+      "conference_name": "",
+      "conference_place": "",
+      "bibkey": "cao2025novel",
+      "legacy_verified": false,
+      "verification_method": "",
+      "quarantined": false,
+      "created_at": "",
+      "authors": [
+        "Zhong Cao",
+        "Fu Hui",
+        "Xiong Xu",
+        "Huan Xie",
+        "Yongjiu Feng",
+        "Chao Wang",
+        "Changjiang Xiao",
+        "Xiaohua Tong"
+      ],
+      "bibkey_aliases": [],
+      "numeric_aliases": [
+        "13"
+      ],
+      "merged_from": [],
+      "discovery_sources": [
+        "openalex"
+      ],
+      "field_provenance": [
+        [
+          "title",
+          "openalex"
+        ]
+      ],
+      "verification_events": [
+        {
+          "event_id": "b91e2b0f0adb",
+          "kind": "verified",
+          "source": "crossref",
+          "provenance": "registry",
+          "authority": "final",
+          "identifier_type": "doi",
+          "identifier": "10.1111/tgis.70052",
+          "checked_at": "2026-08-07T06:35:43.860810+00:00",
+          "target_event_id": "",
+          "details": ""
+        },
+        {
+          "event_id": "51c8b9e14106",
+          "kind": "verified",
+          "source": "openalex",
+          "provenance": "aggregator",
+          "authority": "final",
+          "identifier_type": "openalex_work",
+          "identifier": "W4409819769",
+          "checked_at": "2026-08-07T06:35:44.733501+00:00",
+          "target_event_id": "",
+          "details": ""
+        }
+      ],
+      "field_conflicts": []
+    }
+  ],
   "dedup_suggestions": [],
   "known_numbers": [],
   "claims": {},
-  "relevance_store": [],
+  "relevance_store": [
+    {
+      "reference_id": "r6ac577f9e9e5",
+      "task_fingerprint": "0bbe0da7268d19e6",
+      "reference_content_hash": "d93899714c388144",
+      "judge_key": "openai|gpt-5.6-sol-2026-07-09|relevance-batch-v1|relevance-batch-schema-v1+01cdd877bd33255b",
+      "status": "SUCCESS",
+      "verdict": "relevant",
+      "confidence": "high",
+      "basis": "title_and_abstract",
+      "matched_aspects": [
+        "空地协同对象：UAV斜视图与卫星垂直视图",
+        "直接研究跨视角图像匹配",
+        "面向无人机地理定位与导航"
+      ],
+      "mismatch_aspects": [
+        "摘要未明确强调极端尺度差的专门建模"
+      ],
+      "reason_code": "DIRECT_UAV_SATELLITE_CROSS_VIEW_MATCHING",
+      "rationale": "研究对象和任务均直接对应空地协同下的UAV—卫星跨视角图像匹配；虽主要以位置分类和检索实现匹配，对大尺度差异的专项处理不突出，但仍直接服务目标研究。",
+      "error_kind": null,
+      "assessed_at": "2026-08-07T06:34:53.081942+00:00"
+    },
+    {
+      "reference_id": "rb0cfbac63272",
+      "task_fingerprint": "0bbe0da7268d19e6",
+      "reference_content_hash": "04a3de9f10f7befe",
+      "judge_key": "openai|gpt-5.6-sol-2026-07-09|relevance-batch-v1|relevance-batch-schema-v1+01cdd877bd33255b",
+      "status": "SUCCESS",
+      "verdict": "relevant",
+      "confidence": "high",
+      "basis": "title_and_abstract",
+      "matched_aspects": [
+        "UAV斜视图与卫星垂直视图匹配",
+        "通过透视投影处理显著视角差",
+        "跨视图合成与地理定位一体化"
+      ],
+      "mismatch_aspects": [
+        "尺度差异并非摘要中的核心显式问题"
+      ],
+      "reason_code": "DIRECT_VIEW_GAP_TRANSFORMATION_MATCHING",
+      "rationale": "该方法直接针对UAV与卫星之间的大视角视觉差异，通过透视投影和生成式视图合成促进匹配，与章节研究问题高度一致。",
+      "error_kind": null,
+      "assessed_at": "2026-08-07T06:34:53.081942+00:00"
+    },
+    {
+      "reference_id": "r11c15f857e10",
+      "task_fingerprint": "0bbe0da7268d19e6",
+      "reference_content_hash": "bb12ee5df6519f4b",
+      "judge_key": "openai|gpt-5.6-sol-2026-07-09|relevance-batch-v1|relevance-batch-schema-v1+01cdd877bd33255b",
+      "status": "SUCCESS",
+      "verdict": "relevant",
+      "confidence": "high",
+      "basis": "title_and_abstract",
+      "matched_aspects": [
+        "UAV—卫星跨视角匹配",
+        "明确处理非均匀尺度与目标偏移",
+        "多尺度注意力和多分支跨视图特征学习",
+        "服务无人机定位导航"
+      ],
+      "mismatch_aspects": [],
+      "reason_code": "DIRECT_SCALE_AWARE_CROSS_VIEW_MATCHING",
+      "rationale": "候选明确以UAV和卫星图像匹配为对象，并将非均匀尺度、视图差异和目标偏移作为主要挑战，以多尺度结构直接解决，完全契合主题。",
+      "error_kind": null,
+      "assessed_at": "2026-08-07T06:34:53.081942+00:00"
+    },
+    {
+      "reference_id": "r1e418a62059e",
+      "task_fingerprint": "0bbe0da7268d19e6",
+      "reference_content_hash": "c69157d009489e07",
+      "judge_key": "openai|gpt-5.6-sol-2026-07-09|relevance-batch-v1|relevance-batch-schema-v1+01cdd877bd33255b",
+      "status": "SUCCESS",
+      "verdict": "relevant",
+      "confidence": "high",
+      "basis": "title_and_abstract",
+      "matched_aspects": [
+        "卫星与UAV跨视角图像匹配",
+        "明确涉及位置偏移和距离尺度不确定性",
+        "Transformer特征聚合与跨视图对齐",
+        "面向拒止卫星导航环境"
+      ],
+      "mismatch_aspects": [],
+      "reason_code": "DIRECT_ALIGNMENT_SCALE_UNCERTAINTY_MATCHING",
+      "rationale": "研究直接面向卫星—UAV跨视角地理定位，重点解决跨视图表征、对齐、位置偏移及尺度不确定性，与大视角大尺度差图像匹配研究直接对应。",
+      "error_kind": null,
+      "assessed_at": "2026-08-07T06:34:53.081942+00:00"
+    },
+    {
+      "reference_id": "rd3cf4b55ef41",
+      "task_fingerprint": "0bbe0da7268d19e6",
+      "reference_content_hash": "5de26586393c97b4",
+      "judge_key": "openai|gpt-5.6-sol-2026-07-09|relevance-batch-v1|relevance-batch-schema-v1+01cdd877bd33255b",
+      "status": "SUCCESS",
+      "verdict": "relevant",
+      "confidence": "high",
+      "basis": "title_and_abstract",
+      "matched_aspects": [
+        "无人机跨视角图像匹配",
+        "明确处理空间分辨率、覆盖范围和透视视角的大差异",
+        "特征匹配并进一步估计相机位姿",
+        "大尺度场景与实时应用"
+      ],
+      "mismatch_aspects": [
+        "摘要未明确说明另一视图平台是否为地面或卫星"
+      ],
+      "reason_code": "DIRECT_LARGE_DIFFERENCE_CROSS_VIEW_MATCHING",
+      "rationale": "该研究直接提出跨视角图像匹配方法，并明确验证了大空间分辨率差、大覆盖差和大透视差，核心技术与章节用途高度吻合；另一视图来源表述略不具体，但不影响其直接相关性。",
+      "error_kind": null,
+      "assessed_at": "2026-08-07T06:34:53.081942+00:00"
+    },
+    {
+      "reference_id": "rdbc939f3aa0b",
+      "task_fingerprint": "0bbe0da7268d19e6",
+      "reference_content_hash": "94b35aceb68e2956",
+      "judge_key": "openai|gpt-5.6-sol-2026-07-09|relevance-batch-v1|relevance-batch-schema-v1+01cdd877bd33255b",
+      "status": "SUCCESS",
+      "verdict": "relevant",
+      "confidence": "high",
+      "basis": "title_and_abstract",
+      "matched_aspects": [
+        "空地协同中的无人机—卫星跨视角图像匹配",
+        "明确针对大视角与大尺度差异",
+        "提出语义引导与Transformer特征对齐方法",
+        "服务于无人机地理定位"
+      ],
+      "mismatch_aspects": [],
+      "reason_code": "DIRECT_MATCH_VIEW_SCALE_METHOD",
+      "rationale": "研究对象、核心挑战和方法均直接对应空地协同场景下的大视角、大尺度差图像匹配。",
+      "error_kind": null,
+      "assessed_at": "2026-08-07T06:35:14.987039+00:00"
+    },
+    {
+      "reference_id": "re27615f4af36",
+      "task_fingerprint": "0bbe0da7268d19e6",
+      "reference_content_hash": "002c38443fe84a3d",
+      "judge_key": "openai|gpt-5.6-sol-2026-07-09|relevance-batch-v1|relevance-batch-schema-v1+01cdd877bd33255b",
+      "status": "SUCCESS",
+      "verdict": "relevant",
+      "confidence": "high",
+      "basis": "title_and_abstract",
+      "matched_aspects": [
+        "无人机—卫星跨视角图像匹配",
+        "面向跨平台视点与传感器域差异",
+        "提出自适应环形分区、混合损失与重排序方法",
+        "用于GNSS拒止环境下无人机定位导航"
+      ],
+      "mismatch_aspects": [
+        "摘要未明确把尺度差异列为主要挑战"
+      ],
+      "reason_code": "DIRECT_CROSS_VIEW_MATCHING",
+      "rationale": "直接研究空地平台之间的跨视角图像匹配并提出专门框架；虽未明确强调大尺度差，仍与章节研究问题和方法高度一致。",
+      "error_kind": null,
+      "assessed_at": "2026-08-07T06:35:14.987039+00:00"
+    },
+    {
+      "reference_id": "r572e13597af8",
+      "task_fingerprint": "0bbe0da7268d19e6",
+      "reference_content_hash": "112536c5ca4ad54b",
+      "judge_key": "openai|gpt-5.6-sol-2026-07-09|relevance-batch-v1|relevance-batch-schema-v1+01cdd877bd33255b",
+      "status": "SUCCESS",
+      "verdict": "weakly_relevant",
+      "confidence": "medium",
+      "basis": "title_only",
+      "matched_aspects": [
+        "标题直接涉及无人机—卫星跨视角图像匹配",
+        "采用孪生网络方法"
+      ],
+      "mismatch_aspects": [
+        "无摘要，无法确认是否专门处理大视角与大尺度差异",
+        "缺乏任务设定、方法细节和实验信息"
+      ],
+      "reason_code": "TITLE_ONLY_CAPPED",
+      "rationale": "标题与主题高度相邻且可能直接相关，但按无摘要条件，结论最高只能为weakly_relevant。",
+      "error_kind": null,
+      "assessed_at": "2026-08-07T06:35:14.987039+00:00"
+    },
+    {
+      "reference_id": "r6c53f0e5230c",
+      "task_fingerprint": "0bbe0da7268d19e6",
+      "reference_content_hash": "6e09237f29beb8c3",
+      "judge_key": "openai|gpt-5.6-sol-2026-07-09|relevance-batch-v1|relevance-batch-schema-v1+01cdd877bd33255b",
+      "status": "SUCCESS",
+      "verdict": "relevant",
+      "confidence": "high",
+      "basis": "title_and_abstract",
+      "matched_aspects": [
+        "无人机—卫星跨视角地理定位与图像检索",
+        "通过图像变换和跨视角一致注意进行特征提取",
+        "针对不同视角的空地图像匹配",
+        "在University-1652上验证"
+      ],
+      "mismatch_aspects": [
+        "摘要未明确说明专门处理大尺度差异"
+      ],
+      "reason_code": "DIRECT_CROSS_VIEW_GEOLOCALIZATION",
+      "rationale": "直接服务于无人机与卫星图像的跨视角匹配和定位，方法与章节目的吻合；尺度差异并非摘要中明确聚焦点。",
+      "error_kind": null,
+      "assessed_at": "2026-08-07T06:35:14.987039+00:00"
+    },
+    {
+      "reference_id": "r82faea3765c6",
+      "task_fingerprint": "0bbe0da7268d19e6",
+      "reference_content_hash": "45ce42f3ea6b7c24",
+      "judge_key": "openai|gpt-5.6-sol-2026-07-09|relevance-batch-v1|relevance-batch-schema-v1+01cdd877bd33255b",
+      "status": "SUCCESS",
+      "verdict": "relevant",
+      "confidence": "high",
+      "basis": "title_and_abstract",
+      "matched_aspects": [
+        "无人机大倾斜影像与正射卫星影像匹配",
+        "明确处理巨大视点差异、遮挡及跨视图信息差异",
+        "提出局部与全局结构特征及描述子",
+        "面向密集建筑区地理定位"
+      ],
+      "mismatch_aspects": [
+        "未明确将尺度差异单列为核心挑战"
+      ],
+      "reason_code": "DIRECT_LARGE_VIEWPOINT_MATCHING",
+      "rationale": "直接研究大倾斜无人机影像与卫星影像的跨视图匹配，突出巨大视角和信息差异，并提出针对性特征方法，适合该章节。",
+      "error_kind": null,
+      "assessed_at": "2026-08-07T06:35:14.987039+00:00"
+    },
+    {
+      "reference_id": "red1bb98e8714",
+      "task_fingerprint": "0bbe0da7268d19e6",
+      "reference_content_hash": "bbfaf6072cd05400",
+      "judge_key": "openai|gpt-5.6-sol-2026-07-09|relevance-batch-v1|relevance-batch-schema-v1+01cdd877bd33255b",
+      "status": "SUCCESS",
+      "verdict": "weakly_relevant",
+      "confidence": "high",
+      "basis": "title_only",
+      "matched_aspects": [
+        "跨尺度特征匹配",
+        "图像配准"
+      ],
+      "mismatch_aspects": [
+        "对象为乳腺癌免疫组化显微切片",
+        "非空地协同场景",
+        "标题未体现大视角差异"
+      ],
+      "reason_code": "ADJACENT_METHOD_DIFFERENT_DOMAIN_NO_ABSTRACT",
+      "rationale": "方法上涉及跨尺度图像匹配/配准，可作为尺度差异匹配的相邻方法参考；但应用对象和场景与空地协同明显不符，且无摘要，不能确认其是否处理大视角差异。",
+      "error_kind": null,
+      "assessed_at": "2026-08-07T06:35:42.932603+00:00"
+    },
+    {
+      "reference_id": "r24d607301768",
+      "task_fingerprint": "0bbe0da7268d19e6",
+      "reference_content_hash": "fde0e3ec228279cb",
+      "judge_key": "openai|gpt-5.6-sol-2026-07-09|relevance-batch-v1|relevance-batch-schema-v1+01cdd877bd33255b",
+      "status": "SUCCESS",
+      "verdict": "unrelated",
+      "confidence": "high",
+      "basis": "title_and_abstract",
+      "matched_aspects": [],
+      "mismatch_aspects": [
+        "任务为人体姿态估计",
+        "对象为人体关键点与骨架",
+        "未研究跨图像匹配",
+        "未面向大视角或大尺度差异",
+        "非空地协同场景"
+      ],
+      "reason_code": "DIFFERENT_TASK_OBJECT_METHOD",
+      "rationale": "论文研究人体姿态估计及关键点热图编码，与空地协同图像匹配的研究问题、对象和方法均不匹配。",
+      "error_kind": null,
+      "assessed_at": "2026-08-07T06:35:42.932603+00:00"
+    },
+    {
+      "reference_id": "rdc90e6efcd69",
+      "task_fingerprint": "0bbe0da7268d19e6",
+      "reference_content_hash": "ce00aee0a03c996e",
+      "judge_key": "openai|gpt-5.6-sol-2026-07-09|relevance-batch-v1|relevance-batch-schema-v1+01cdd877bd33255b",
+      "status": "SUCCESS",
+      "verdict": "weakly_relevant",
+      "confidence": "high",
+      "basis": "title_and_abstract",
+      "matched_aspects": [
+        "跨尺度特征对应",
+        "跨尺度特征匹配机制",
+        "多层特征表示"
+      ],
+      "mismatch_aspects": [
+        "核心任务为单图像超分辨率",
+        "匹配发生于图像内部自相似关系",
+        "非空地协同跨图像匹配",
+        "未处理大视角差异"
+      ],
+      "reason_code": "GENERIC_CROSS_SCALE_BACKGROUND",
+      "rationale": "提出的跨尺度特征对应与匹配模块可提供通用方法背景，但服务于单图像超分辨率中的内部自相似建模，并不直接解决空地影像的大视角、大尺度差匹配。",
+      "error_kind": null,
+      "assessed_at": "2026-08-07T06:35:42.933129+00:00"
+    },
+    {
+      "reference_id": "r118fb14127aa",
+      "task_fingerprint": "0bbe0da7268d19e6",
+      "reference_content_hash": "8da81a13159c92cc",
+      "judge_key": "openai|gpt-5.6-sol-2026-07-09|relevance-batch-v1|relevance-batch-schema-v1+01cdd877bd33255b",
+      "status": "SUCCESS",
+      "verdict": "weakly_relevant",
+      "confidence": "high",
+      "basis": "title_and_abstract",
+      "matched_aspects": [
+        "遥感光学影像",
+        "全局与局部多尺度特征融合"
+      ],
+      "mismatch_aspects": [
+        "任务为滑坡语义分割",
+        "不涉及两幅图像间的对应匹配",
+        "未研究空地协同",
+        "未处理视角差异"
+      ],
+      "reason_code": "REMOTE_SENSING_BUT_DIFFERENT_TASK",
+      "rationale": "虽然使用遥感影像并讨论宏观与局部特征，但核心是单幅影像滑坡分割，不是大视角、大尺度差异下的跨图像匹配，仅可作为邻近遥感视觉背景。",
+      "error_kind": null,
+      "assessed_at": "2026-08-07T06:35:42.933129+00:00"
+    },
+    {
+      "reference_id": "r782d754a5bee",
+      "task_fingerprint": "0bbe0da7268d19e6",
+      "reference_content_hash": "45aa954fac49553f",
+      "judge_key": "openai|gpt-5.6-sol-2026-07-09|relevance-batch-v1|relevance-batch-schema-v1+01cdd877bd33255b",
+      "status": "SUCCESS",
+      "verdict": "unrelated",
+      "confidence": "high",
+      "basis": "title_only",
+      "matched_aspects": [
+        "跨模态特征处理"
+      ],
+      "mismatch_aspects": [
+        "对象为3D脑MRI",
+        "任务为图像超分辨率",
+        "非图像匹配研究",
+        "非空地协同",
+        "标题未体现大视角或大尺度差匹配"
+      ],
+      "reason_code": "DIFFERENT_DOMAIN_AND_TASK_NO_ABSTRACT",
+      "rationale": "研究跨模态参考驱动的脑MRI超分辨率，研究对象、任务和场景均与空地协同图像匹配不符；无摘要也没有足够证据支持方法层面的直接用途。",
+      "error_kind": null,
+      "assessed_at": "2026-08-07T06:35:42.933129+00:00"
+    },
+    {
+      "reference_id": "rc55f451d632b",
+      "task_fingerprint": "0bbe0da7268d19e6",
+      "reference_content_hash": "48b4916eecc8a300",
+      "judge_key": "openai|gpt-5.6-sol-2026-07-09|relevance-batch-v1|relevance-batch-schema-v1+01cdd877bd33255b",
+      "status": "SUCCESS",
+      "verdict": "unrelated",
+      "confidence": "high",
+      "basis": "title_and_abstract",
+      "matched_aspects": [
+        "多尺度特征融合"
+      ],
+      "mismatch_aspects": [
+        "任务为细胞图像分割与计数",
+        "对象为胶质瘤干细胞",
+        "不涉及跨图像匹配",
+        "非空地协同",
+        "未处理视角差异"
+      ],
+      "reason_code": "KEYWORD_OVERLAP_ONLY",
+      "rationale": "多尺度特征融合只是通用视觉技术，论文直接服务于细胞分割而非跨视角、跨尺度图像匹配，不能仅凭多尺度关键词判为相关。",
+      "error_kind": null,
+      "assessed_at": "2026-08-07T06:35:42.933129+00:00"
+    },
+    {
+      "reference_id": "r9d306243cbae",
+      "task_fingerprint": "0bbe0da7268d19e6",
+      "reference_content_hash": "d8be84c18950a85c",
+      "judge_key": "openai|gpt-5.6-sol-2026-07-09|relevance-batch-v1|relevance-batch-schema-v1+01cdd877bd33255b",
+      "status": "SUCCESS",
+      "verdict": "weakly_relevant",
+      "confidence": "medium",
+      "basis": "title_and_abstract",
+      "matched_aspects": [
+        "大尺度变化",
+        "多尺度特征对齐",
+        "查询匹配与跨注意力"
+      ],
+      "mismatch_aspects": [
+        "核心任务为目标检测",
+        "匹配是检测模型中的查询与尺度选择",
+        "非两幅空地图像之间的对应匹配",
+        "仿真环境而非明确空地协同",
+        "未处理大视角差异"
+      ],
+      "reason_code": "ADJACENT_MULTISCALE_METHOD_DIFFERENT_TASK",
+      "rationale": "多尺度特征对齐和查询匹配机制对尺度鲁棒表示具有邻近方法价值，但其目标是仿真场景目标检测，不直接解决空地影像之间的大视角、大尺度差匹配。",
+      "error_kind": null,
+      "assessed_at": "2026-08-07T06:35:42.933129+00:00"
+    },
+    {
+      "reference_id": "r32a74ec7bba1",
+      "task_fingerprint": "0bbe0da7268d19e6",
+      "reference_content_hash": "38e9550a91ccc059",
+      "judge_key": "openai|gpt-5.6-sol-2026-07-09|relevance-batch-v1|relevance-batch-schema-v1+01cdd877bd33255b",
+      "status": "SUCCESS",
+      "verdict": "relevant",
+      "confidence": "high",
+      "basis": "title_and_abstract",
+      "matched_aspects": [
+        "无人机影像与轨道DOM参考影像之间的跨平台图像匹配",
+        "服务于飞行器高精度初始定位，符合空地/空天协同定位用途",
+        "无人机近景与轨道遥感影像天然涉及显著尺度差异及潜在视角差异",
+        "提出多候选区域提取、排序与模板匹配方法，直接针对跨尺度对应区域搜索"
+      ],
+      "mismatch_aspects": [
+        "应用环境为火星直升机与轨道影像，而非常规地球空地协同场景",
+        "摘要未明确将“大视角差异”作为单独技术变量或给出专门视角不变性设计"
+      ],
+      "reason_code": "DIRECT_CROSS_PLATFORM_IMAGE_MATCHING",
+      "rationale": "该研究直接处理无人机图像与轨道DOM影像的匹配，并以跨平台影像对应关系实现飞行器定位，研究对象、核心方法和章节用途均与大尺度差异条件下的空地协同图像匹配高度一致。尽管场景位于火星且摘要对大视角差异的强调有限，但并非仅有关键词重合，仍可直接服务目标研究。",
+      "error_kind": null,
+      "assessed_at": "2026-08-07T06:35:52.927583+00:00"
+    }
+  ],
   "pending_batches": [],
   "committed_batch_ids": [
-    "batch_6ba55fa8f167"
+    "batch_9767968eb412"
   ],
   "pending_literature_flows": [],
   "pending_search_intents": []

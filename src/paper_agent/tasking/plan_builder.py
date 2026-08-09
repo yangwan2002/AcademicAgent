@@ -188,10 +188,14 @@ def _build_operation(
     raw: RawOperation,
     extraction: ExtractionResult,
     canonical_ids: set[str],
+    source_text: str = "",
 ) -> tuple[Operation | None, list[str], list[str]]:
     """据 spec 定稿一个 Operation，返回 `(op, consumed_ids, missing_fields)`。
 
     无 spec（不支持的意图）→ op=None（调用方将其原话入 unmapped_text）。
+
+    `source_text` 为用户这一轮的整句原话，透传给生成端作背景（见
+    `Operation.source_text`）；为空时行为与此前逐字一致。
     """
     spec = spec_for(raw.intent)
     if spec is None:
@@ -222,6 +226,9 @@ def _build_operation(
         slots=final_slots,
         requirement_ids=tuple(dict.fromkeys(consumed)),
         status=OperationStatus.PENDING,
+        # 整句原话优先；调用方未给（既有测试、Fast_Path）时退回该操作的切片，
+        # 切片总比没有好，但它已被 analyzer 裁过（实测只覆盖原句 40-64%）。
+        source_text=source_text or raw.verbatim or "",
     )
     return op, consumed, missing
 
@@ -295,12 +302,16 @@ def build_plan(
     plan_id: str | None = None,
     plan_version: int = 1,
     project_fact_requirement_ids: Sequence[str] = (),
+    source_text: str = "",
 ) -> Task_Plan:
     """合并操作与抽取结果 → 有序 Task_Plan（保序、填默认、统计 unmapped）。
 
     `raw_operations` 与 `extractions` 一一对应、同序。`canonical_requirements` 为
     Analyzer 路径的 canonical 要求；Fast_Path 传 None，要求来自各抽取器的
     `newly_discovered_requirements`。
+
+    `source_text` 为用户这一轮的整句原话，落到每个 `Operation.source_text` 供生成端
+    作背景；不传时各操作退回自己的 analyzer 切片。
     """
     if len(raw_operations) != len(extractions):
         raise ValueError("raw_operations 与 extractions 必须一一对应")
@@ -322,7 +333,7 @@ def build_plan(
     # strict=True 与上面的显式长度检查冗余，但把契约就地写明：一一对应靠身份，
     # 不靠位置巧合。参见 tests/test_analyzer_extractor_registry_parity.py。
     for raw, ext in zip(raw_operations, extractions, strict=True):
-        op, consumed, missing = _build_operation(raw, ext, canonical_ids)
+        op, consumed, missing = _build_operation(raw, ext, canonical_ids, source_text)
         if op is None:
             leftover_text.append(raw.verbatim)
             continue
@@ -421,6 +432,7 @@ def build_revision(
     remaining_operation_ids: Sequence[str] | None = None,
     unmapped_text: Sequence[str] = (),
     project_fact_requirement_ids: Sequence[str] = (),
+    source_text: str = "",
 ) -> Task_Plan:
     """基于旧计划重建新版本（Task 17 有界规划循环调用）。
 
@@ -441,6 +453,7 @@ def build_revision(
         plan_id=previous_plan.plan_id,
         plan_version=previous_plan.plan_version + 1,
         project_fact_requirement_ids=project_fact_requirement_ids,
+        source_text=source_text,
     )
     if remaining_operation_ids:
         # 只保留与「未执行步骤数」相符的尾部操作：重规划的输入是原始请求，理解层可能

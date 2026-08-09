@@ -62,15 +62,31 @@ _BEARER = re.compile(r"(?i)bearer\s+[A-Za-z0-9._\-]{8,}")
 # 独立出现的长十六进制串（≥32），典型如 32 位十六进制 API key 尾段。
 _LONG_HEX = re.compile(r"\b[A-Fa-f0-9]{32,}\b")
 
+# 用户整句原话块：由 `generate.context_builder.SOURCE_TEXT_OPEN/CLOSE` 包裹。
+#
+# 为什么在这里剔除而不是不放进 prompt：那段原话对生成有用（承载「目前只是一个概述」
+# 这类只供 LLM 消费的背景），但**整句 turn 文本此前从不进任何 prompt**，trace 因此有
+# 「原始用户文本不落盘」不变量。两个目标不冲突 —— 发给 provider 照发，落 trace 前切掉。
+#
+# 注意这不同于正文/goal/constraints：那些早已进 500 字预览，是既定立场；整句原话是本次
+# 新引入的，不该顺带扩大记录范围。`.*?` 配 DOTALL：原话可能含换行。
+_SOURCE_TEXT_BLOCK = re.compile(
+    r"<<<user_source_text>>>.*?<<</user_source_text>>>", re.DOTALL
+)
+
 
 def redact(text: str) -> str:
-    """剔除文本中的 API 密钥 / 令牌等敏感串（Req 8.4）。防御式：任何异常都退回原串截断保护。"""
+    """剔除文本中的 API 密钥 / 令牌等敏感串（Req 8.4）与用户整句原话块。
+
+    防御式：任何异常都退回原串截断保护。
+    """
     if not text:
         return text
     s = _KV_SECRET.sub(lambda m: f"{m.group(1)}{m.group(2)}{_REDACTED}", text)
     s = _BEARER.sub(_REDACTED, s)
     s = _PREFIXED_KEY.sub(_REDACTED, s)
     s = _LONG_HEX.sub(_REDACTED, s)
+    s = _SOURCE_TEXT_BLOCK.sub(_REDACTED, s)
     return s
 
 

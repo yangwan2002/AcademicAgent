@@ -138,6 +138,17 @@ class Operation:
     slots: dict[str, SlotValue] = field(default_factory=dict)
     requirement_ids: tuple[str, ...] = ()
     status: OperationStatus = OperationStatus.PENDING
+    # 用户这一轮的**整句原话**。不是上面所说的反规范化副本 —— 那些是从 slots 算出来
+    # 的派生量（会因澄清回填而陈旧），这个是**上游输入**，一经记录就不再变。
+    #
+    # 为什么必需：槽位承载的是「程序要读的那部分」（选章节、跑 gate、算配额），
+    # 而原话里另有只供 LLM 消费的背景 —— 「我的引言目前是一个概述」（说明现状）、
+    # 「那部分我写得比较仓促」（解释动机）。实测这类内容不匹配任何槽位 description，
+    # 于是无处安放、永久丢失，生成端看不到。
+    #
+    # **控制权不在这里**：硬约束仍以 `slots["constraints"]` 为准（gate 校验那一份），
+    # 原话在 prompt 里只作背景。不要调高它的权重，否则 gate 守不住自己检查的东西。
+    source_text: str = ""
 
 
 # --- 分析/抽取结果（值对象，frozen）---

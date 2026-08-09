@@ -268,6 +268,14 @@ class FileBackedSession:
         return dest
 
     def read_source(self) -> str:
+        """返回**源文件**的文本。
+
+        docx 与 `read_working` 同口径走投影：docx 是 zip 二进制，按 UTF-8 文本
+        直读必然 `UnicodeDecodeError`（真实症状：带 .docx 参数启动 chat 直接崩在
+        启动期的事实提取）。
+        """
+        if self.docx_source:
+            return project_text(self.source_path)
         with open(self.source_path, "r", encoding="utf-8") as fh:
             return fh.read()
 

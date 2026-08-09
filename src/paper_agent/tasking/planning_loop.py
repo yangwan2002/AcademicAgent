@@ -75,6 +75,14 @@ _REPAIRABLE_ISSUES = frozenset({
 #: 自修复次数上限。给了明确指令还改不对，再试也不会对，只是多花钱。
 _MAX_VALIDATION_REPAIRS = 1
 
+#: 修订文本由**系统**撰写的原因码 —— 这些文本不是用户原话，抽出的 requirement
+#: 不得进未认领账本（否则系统自己的指令会被当成用户要求弹窗追问）。
+#: `SUPPLEMENT` / `USER_MODIFY` 不在此列：那两者确实是用户输入。
+_SYSTEM_AUTHORED_REASONS = frozenset({
+    RevisionReason.VALIDATION_REPAIR,
+    RevisionReason.NEEDS_REPLAN,
+})
+
 
 def _section_menu(current_sections: Sequence[str], limit: int = 30) -> str:
     """现有章节清单（保序去重）。用于 section_not_found 的修复提示。"""
@@ -280,6 +288,15 @@ def run_planning_loop(
             return PlanningExit(status=PlanStatus.NEEDS_INPUT,
                                 message=f"理解失败（{ar.call_status.value}）")
 
+        # 系统生成的修订文本（校验修复提示 / 执行期重规划原因）**不是用户原话**。
+        # LLM 会把它当用户需求抽成 requirement，这些 requirement 没有槽位认领，
+        # 于是被逐条弹窗问「这条要求我没能安排进任何操作」。真机实录：用户看到
+        # 「上一版计划未通过静态校验…」「文档当前没有任何章节。请从上述章节中选择，或」
+        # 「。」三次追问 —— 全是系统自己的话回旋镖打到用户脸上。
+        # 与 X-11（项目级事实误弹窗）同一类缺陷，此处是另一个入口。
+        if revision.revision_reason in _SYSTEM_AUTHORED_REASONS:
+            ar = replace(ar, requirements=(), unmapped_text=())
+
         # X-11：项目级事实的 requirement 无槽位可落，需显式告知 PlanBuilder，
         # 否则会被记 UNMAPPED 并弹窗（真机上「课题是…」就是这样被丢的）。
         pf_rids = tuple(
@@ -289,7 +306,8 @@ def run_planning_loop(
         if previous_plan is None:
             plan = build_plan(turn_id, ar.operations, extractions, ar.requirements,
                               unmapped_text=ar.unmapped_text,
-                              project_fact_requirement_ids=pf_rids)
+                              project_fact_requirement_ids=pf_rids,
+                              source_text=text)
         else:
             remaining_ids = (
                 tuple(op.operation_id for op in replan.remaining_operations)
@@ -298,7 +316,8 @@ def run_planning_loop(
             plan = build_revision(previous_plan, revision, ar.operations, extractions,
                                   ar.requirements, unmapped_text=ar.unmapped_text,
                                   remaining_operation_ids=remaining_ids,
-                                  project_fact_requirement_ids=pf_rids)
+                                  project_fact_requirement_ids=pf_rids,
+                                  source_text=text)
 
         # P0：没有任何可执行操作 → 如实退出，绝不进入执行（否则会被报成 done）。
         # 典型场景：请求整体落在五意图之外（查重/翻译），或全部要求被忽略。

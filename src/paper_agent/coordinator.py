@@ -57,11 +57,35 @@ class Coordinator:
         enable_stream: bool = False,
         renderer=None,
         runs_dir: str = "runs",
+        enable_langfuse: bool = False,
     ) -> None:
         self.enable_trace = enable_trace
         self.enable_stream = enable_stream
         self._renderer = renderer
         self._runs_dir = runs_dir
+        self.enable_langfuse = enable_langfuse
+
+    def _build_exporter(self):
+        """本地 JSON 恒在第一位；Langfuse 只作附加的第二路。
+
+        Langfuse 未开、未装包、或 key 不全 → 直接退化为单路本地导出，
+        不让可选依赖影响主路径。
+        """
+        local = LocalJsonExporter(self._runs_dir)
+        if not self.enable_langfuse:
+            return local
+        try:
+            from paper_agent.observability.langfuse_exporter import (
+                CompositeExporter,
+                LangfuseExporter,
+            )
+
+            remote = LangfuseExporter()
+            if not remote.configured:
+                return local
+            return CompositeExporter(local, remote)
+        except Exception:  # noqa: BLE001 - 可选依赖缺失绝不能拖垮 trace 落盘
+            return local
 
     @property
     def observing(self) -> bool:
@@ -83,9 +107,7 @@ class Coordinator:
             if self._renderer is not None:
                 fan.add_renderer(self._renderer)
             if self.enable_trace:
-                recorder = SimpleTraceRecorder(
-                    run_id, exporter=LocalJsonExporter(self._runs_dir)
-                )
+                recorder = SimpleTraceRecorder(run_id, exporter=self._build_exporter())
                 fan.add_recorder(recorder)
             bus = EventBus(fan, RunContext(run_id), health)
         else:

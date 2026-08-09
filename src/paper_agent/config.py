@@ -58,10 +58,17 @@ class Config:
     polish_max_retry: int = 2
     polish_max_char_change_ratio: float = 0.30  # 字数变化 ≤ 30%
 
-    # ---- streaming-and-trace 开关（默认全关 → 与既有行为逐字节一致）----
-    trace_enabled: bool = False       # 落 runs/<run_id>/trace.json
-    stream_enabled: bool = False      # 流式呈现候选
+    # ---- streaming-and-trace 开关 ----
+    #: 落 runs/<run_id>/trace.json。**默认开**：真机排障全靠它，而「改了但看不见
+    #: 有没有生效」已经反复付过代价（F-1 的词数门槛让功能从未执行，正是靠埋点才
+    #: 发现）。落盘走 `sanitize`（用户原话不入 trace），开着不额外泄露。
+    #: 关掉用 `PAPER_TRACE=0`。
+    trace_enabled: bool = True        # 落 runs/<run_id>/trace.json
+    stream_enabled: bool = False      # 流式呈现候选（默认关，只影响呈现）
     runs_dir: str = "runs"            # trace 落盘根目录
+    #: 额外把 trace 上传 Langfuse。本地 JSON 始终照落，此路只是附加。
+    #: 需同时配 LANGFUSE_PUBLIC_KEY + LANGFUSE_SECRET_KEY，缺任一则静默不启用。
+    langfuse_enabled: bool = False
 
     # ---- intent-planning 理解层（默认 off → 完全走现有 Router，行为不变）----
     intent_planning_mode: str = "off"          # off | shadow | active
@@ -180,8 +187,9 @@ def load_config() -> Config:
         vlm_api_key_env=os.environ.get("PAPER_VLM_KEY_ENV") or None,
         retrieval_provider=os.environ.get("PAPER_RETRIEVAL", "mock"),
         workspace_root=os.environ.get("PAPER_WORKSPACE_DIR", ".paper_workspace"),
-        trace_enabled=_env_flag("PAPER_TRACE", False),
+        trace_enabled=_env_flag("PAPER_TRACE", True),
         stream_enabled=_env_flag("PAPER_STREAM", False),
+        langfuse_enabled=_env_flag("PAPER_LANGFUSE", False),
         runs_dir=os.environ.get("PAPER_RUNS_DIR", "runs"),
         intent_planning_mode=_env_mode("PAPER_INTENT_PLANNING_MODE", "off"),
         planning_max_operations=_env_int("PAPER_PLANNING_MAX_OPERATIONS", 5, minimum=1),

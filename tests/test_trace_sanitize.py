@@ -160,3 +160,95 @@ def test_safeprompt_is_frozen():
     sp = sanitize_messages([Message(role="user", content="x")])
     with pytest.raises(dataclasses.FrozenInstanceError):
         sp.preview = "y"  # type: ignore[misc]
+
+
+# --- 用户整句原话：进 prompt、不进 trace ---
+
+def test_source_text_reaches_llm_but_not_trace():
+    """双重性质：原话必须发给 provider，又必须不落 trace。
+
+    背景：`Operation.source_text` 把用户整句原话接进 polish prompt（承载不匹配任何槽位的
+    背景，如「写得比较仓促」）。但整句 turn 文本此前从不进任何 prompt，trace 有「原始用户
+    文本不落盘」不变量。两者靠界定标记 + redact 同时成立，本测试钉死这一点 —— 若有人重排
+    prompt 或去掉标记，这里会红，而不是静默把用户原话写进 runs/*/trace.json。
+    """
+    from paper_agent.generate.context_builder import build_polish_messages
+
+    src = "我的第三章目前只是一个概述，写得比较仓促，帮我润色一下"
+    msgs = build_polish_messages("正文内容", "", None, ["别改数字"], source_text=src)
+
+    # 1) 发给 provider 的 messages 里，原话逐字在
+    assert src in msgs[1].content
+
+    # 2) 落 trace 的 SafePrompt 里，原话及其任何可识别片段都不在
+    sp = sanitize_messages(msgs)
+    assert src not in sp.preview
+    assert "写得比较仓促" not in sp.preview
+    assert "只是一个概述" not in sp.preview
+
+    # 3) 既定脱敏立场未被顺带放宽：硬约束/正文仍进预览（它们本就在）
+    assert "别改数字" in sp.preview
+
+
+def test_source_text_reaches_llm_but_not_trace_all_paths():
+    """三条生成路径（polish / rewrite / add_section）都满足同一双重性质。
+
+    剔除做在 `redact()` 层，所以新增路径自动被覆盖 —— 本测试钉死这一点，防止有人
+    日后给某条路径改用别的脱敏入口而绕过 redact。
+    """
+    from paper_agent.generate.context_builder import (
+        build_add_section_messages,
+        build_polish_messages,
+        build_rewrite_messages,
+    )
+
+    src = "第三章写得比较仓促，样本量偏小这点要坦白讲"
+    paths = {
+        "polish": build_polish_messages("正文", "g", None, ["c"], source_text=src),
+        "rewrite": build_rewrite_messages(
+            "正文", "方向", "细节", [], [], ".md", None, source_text=src),
+        "add_section": build_add_section_messages(
+            "标题", "目的", "结构", [], [], [], ".md", None, None, source_text=src),
+    }
+    for name, msgs in paths.items():
+        assert src in msgs[1].content, f"{name}: 原话没到达 LLM"
+        preview = sanitize_messages(msgs).preview
+        assert src not in preview, f"{name}: 原话落进了 trace"
+        assert "样本量偏小" not in preview, f"{name}: 原话片段落进了 trace"
+
+
+def test_source_text_absent_keeps_prompt_byte_identical():
+    """不传 source_text 时，三条路径的 messages 都与改造前逐字节一致。"""
+    from paper_agent.generate.context_builder import (
+        build_add_section_messages,
+        build_polish_messages,
+        build_rewrite_messages,
+    )
+
+    a = build_polish_messages("正文", "目标", None, ["c1"])
+    b = build_polish_messages("正文", "目标", None, ["c1"], source_text="")
+    assert [m.content for m in a] == [m.content for m in b]
+    assert "user_source_text" not in a[1].content
+
+    c = build_rewrite_messages("正文", "方向", "细节", [], [], ".md", None)
+    d = build_rewrite_messages("正文", "方向", "细节", [], [], ".md", None, source_text="")
+    assert [m.content for m in c] == [m.content for m in d]
+
+    e = build_add_section_messages("标题", "目的", "结构", [], [], [], ".md", None, None)
+    f = build_add_section_messages(
+        "标题", "目的", "结构", [], [], [], ".md", None, None, source_text="")
+    assert [m.content for m in e] == [m.content for m in f]
+
+
+def test_redact_strips_source_text_block_multiline():
+    """原话含换行也要整块剔除（DOTALL）。"""
+    from paper_agent.generate.context_builder import (
+        SOURCE_TEXT_CLOSE,
+        SOURCE_TEXT_OPEN,
+    )
+    from paper_agent.observability.sanitize import redact
+
+    text = f"前文{SOURCE_TEXT_OPEN}第一行\n第二行\n第三行{SOURCE_TEXT_CLOSE}后文"
+    out = redact(text)
+    assert "第二行" not in out
+    assert out.startswith("前文") and out.endswith("后文")

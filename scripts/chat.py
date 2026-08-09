@@ -9,6 +9,9 @@
     PAPER_LLM_MODEL=...
     PAPER_INTENT_PLANNING_MODE=active   # off | shadow | active（默认 off，走关键词路由）
     PAPER_TRACE=true                    # 落 runs/<run_id>/trace.json
+    PAPER_LANGFUSE=true                 # 额外上传 Langfuse（需 PAPER_TRACE 同开）
+                                        # 另需 LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY
+                                        # 自托管再加 LANGFUSE_HOST=http://localhost:3000
 
 命令：
     :sections   列出章节
@@ -307,6 +310,7 @@ def main(argv: list[str]) -> int:
         enable_stream=config.stream_enabled,
         renderer=ConsoleRenderer() if config.stream_enabled else None,
         runs_dir=config.runs_dir,
+        enable_langfuse=config.langfuse_enabled,
     )
     if config.trace_enabled or config.stream_enabled:
         flags = []
@@ -392,6 +396,8 @@ def main(argv: list[str]) -> int:
         turn_service = TurnService(
             config=config, llm=llm,
             coordinator=coordinator,
+            # 影子 run 刻意不接 Langfuse：它是对照用的第二次执行，上传会让
+            # UI 里每个操作出现两条 trace，聚合统计直接翻倍失真。
             shadow_coordinator=Coordinator(
                 enable_trace=config.trace_enabled, runs_dir=config.runs_dir
             ),

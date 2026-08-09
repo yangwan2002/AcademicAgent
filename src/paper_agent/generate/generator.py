@@ -108,6 +108,7 @@ def run_polish(
     cancel_token=None,
     stream: bool = False,
     constraints: list[str] | None = None,
+    source_text: str = "",
 ) -> PolishOutcome:
     """生成 → 校验 → 回灌重试。最多 ``1 + max_retry`` 次 LLM 调用。
 
@@ -129,7 +130,8 @@ def run_polish(
                         bus.publish(EventKind.GATE_RETRY, attempt=attempt)
 
                     messages = build_polish_messages(
-                        original, goal, violations or None, constraints or None
+                        original, goal, violations or None, constraints or None,
+                        source_text=source_text,
                     )
                     call_id = uuid4().hex
                     candidate_id = uuid4().hex

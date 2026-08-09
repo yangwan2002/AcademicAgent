@@ -19,7 +19,7 @@ from typing import Any
 
 from paper_agent.intents.router import Intent
 from paper_agent.tasking.contracts import FieldStatus, SlotSource, SlotValue
-from paper_agent.tasking.extractors.base import PreExtractor
+from paper_agent.tasking.extractors.base import PreExtractor, _merge_ids
 from paper_agent.tasking.intent_spec import FORMAT_DOCX_SPEC, IntentSpec, SlotSpec
 
 _LEGAL_SCOPES = ("all", "body", "headings", "heading1")
@@ -49,7 +49,11 @@ def _to_format_ops(raw_value: Any) -> list:
         scope = str(item.get("scope", "all"))
         if scope not in _LEGAL_SCOPES:
             scope = "all"
-        ops.append(FormatOp(name=name, value=item.get("value"), scope=scope))
+        vb = item.get("verbatim")
+        ops.append(FormatOp(
+            name=name, value=item.get("value"), scope=scope,
+            verbatim=str(vb).strip() if isinstance(vb, str) else "",
+        ))
     return ops
 
 
@@ -61,10 +65,19 @@ class FormatDocxExtractor(PreExtractor):
     def _spec(self) -> IntentSpec:
         return FORMAT_DOCX_SPEC
 
-    def _coerce_slot(self, name: str, slot_spec: SlotSpec, raw: Any) -> SlotValue:
+    def _coerce_slot(
+        self,
+        name: str,
+        slot_spec: SlotSpec,
+        raw: Any,
+        reported_verbatim: str | None = None,
+        declared_ids: tuple[str, ...] = (),
+    ) -> SlotValue:
         # 只有 operations 槽走受限 FormatOp 转换；其余槽走通用逻辑。
         if name != "operations":
-            return super()._coerce_slot(name, slot_spec, raw)
+            return super()._coerce_slot(
+                name, slot_spec, raw, reported_verbatim, declared_ids=declared_ids,
+            )
 
         if not isinstance(raw, dict):
             raw = {"value": raw}
@@ -80,9 +93,9 @@ class FormatDocxExtractor(PreExtractor):
         ):
             status = FieldStatus.AMBIGUOUS
 
-        req_ids = tuple(str(x) for x in (raw.get("requirement_ids") or ()))
+        req_ids = _merge_ids(raw.get("requirement_ids"), declared_ids)
         raw_value = raw.get("value")
-        verbatim = raw.get("verbatim")
+        verbatim = raw.get("verbatim") or reported_verbatim
 
         if status is not FieldStatus.PRESENT:
             keep = raw_value if status in (FieldStatus.AMBIGUOUS, FieldStatus.INVALID) else None

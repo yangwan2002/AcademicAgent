@@ -25,7 +25,7 @@ from typing import Any
 from uuid import uuid4
 
 from paper_agent.observability.events import EventKind
-from paper_agent.session.section_index import SectionIndex
+from paper_agent.session.section_index import SectionIndex, supports_sections
 from paper_agent.tasking.contracts import (
     CallStatus,
     PlanningSnapshot,
@@ -56,7 +56,15 @@ def _working_hash(session) -> str:
 
 
 def _snapshot_sections(session) -> tuple[SectionSummary, ...]:
-    if session.ext not in _TEXT_EXT:
+    """快照文档章节。
+
+    判定必须用 `supports_sections`（与 chat.py 列章节同源），**不能**用
+    `_TEXT_EXT` —— 后者只有 tex/md，漏了 docx。真实症状：docx 会话里 chat.py
+    列出 33 个章节，规划层却收到零章节，于是校验报「计划期找不到要修改的章节」，
+    修订提示又说「文档当前没有任何章节」，同一文档两个相反结论。
+    docx 的 `read_working()` 返回投影文本，SectionIndex 本就能解析。
+    """
+    if not supports_sections(session.ext):
         return ()
     try:
         idx = SectionIndex(session.read_working(), session.ext)
@@ -367,6 +375,7 @@ class TurnService:
             plan = build_plan(
                 turn_id, ar.operations, extractions, ar.requirements,
                 unmapped_text=ar.unmapped_text,
+                source_text=text,
             )
             current_sections = [s.section_id for s in snapshot.sections]
             current_sections += [s.title for s in snapshot.sections]

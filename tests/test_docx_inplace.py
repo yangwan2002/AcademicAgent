@@ -403,3 +403,41 @@ def test_text_correctness_under_random_edits(tmp_path):
             continue
         apply_text(path, new)
         assert docx.Document(path).paragraphs[0].text == new
+
+
+def test_read_source_projects_docx_instead_of_decoding_bytes(paper, tmp_path):
+    """`read_source` 对 docx 走投影，不按 UTF-8 直读。
+
+    真实症状：`python scripts/chat.py <某.docx>` 在启动期的事实提取处直接崩
+    （`UnicodeDecodeError: 0xb7 in position 10` —— docx 是 zip 二进制）。
+    `read_working` 早有 docx 分支，`read_source` 漏了。
+    """
+    session = _session(paper, tmp_path)
+
+    text = session.read_source()
+
+    assert isinstance(text, str) and text
+    assert "\x00" not in text, "不该是二进制原样"
+    # 与 working 同口径：一段一行、标题带 # 前缀
+    assert any(line.startswith("#") for line in text.splitlines())
+
+
+def test_read_source_matches_read_working_before_edits(paper, tmp_path):
+    """未编辑时源与 working 的投影应当一致 —— 两者口径必须相同。"""
+    session = _session(paper, tmp_path)
+
+    assert session.read_source() == session.read_working()
+
+
+def test_startup_fact_extraction_survives_docx(paper, tmp_path):
+    """锁住崩溃点本身：chat.py 启动期这两个调用不能抛。
+
+    docx 在 extractor 里没有分支（返回空是既有行为），此处只锁「不崩」。
+    """
+    from paper_agent.session.extractor import extract_numbers, extract_refs
+
+    session = _session(paper, tmp_path)
+    text = session.read_source()
+
+    assert extract_refs(text, session.ext) == []
+    assert extract_numbers(text, session.ext) == []

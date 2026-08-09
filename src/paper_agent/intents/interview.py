@@ -26,6 +26,13 @@ class PolishPlan:
     # polish.constraints 槽填入，经 execute_polish → ContextBuilder 真正影响生成。
     # 旧访谈路径不填 → 空 list → prompt 与改造前逐字节一致。
     constraints: list[str] = field(default_factory=list)
+    # 用户这一轮的整句原话，只作生成时的理解背景（见 build_polish_messages）。
+    #
+    # 与 constraints 的关系：两者都只被拼进 prompt。PolishGate 校验的是**硬编码**的
+    # 四项（标题层级 / 数字 / 引用 / 字数比，见 gates/diff_gate.py），它的 check()
+    # 只接 (original, candidate)，不读 constraints。所以别以为「写进 constraints
+    # 就会被机械校验」—— 那是错的。原话排在 constraints 之后只为让抽取结论更醒目。
+    source_text: str = ""
 
 
 @dataclass
@@ -45,6 +52,9 @@ class RewritePlan:
     # A2d：正文引用配额（executable Citation QuotaSpec）。默认 None → 行为与现状一致。
     # 类型标注为 object 避免 interview 顶层依赖 literature.quota（惰性/结构解耦）。
     citation_quota: object | None = None
+    # 用户整句原话，只作理解背景。direction/details 是抽取产物，会把
+    # 「现在读起来太像综述了」这类语气概括掉；原话补回那一层。空则 prompt 逐字节不变。
+    source_text: str = ""
 
 
 _DIRECTION_MAP = {
@@ -71,6 +81,9 @@ class AddSectionPlan:
     search_limit: int = 5
     # A2d：正文引用配额（executable Citation QuotaSpec）。默认 None → 行为与现状一致。
     citation_quota: object | None = None
+    # 用户整句原话，只作理解背景。purpose/structure_desc 会把「样本量偏小，这点要坦白讲」
+    # 的态度概括成中性描述；原话补回那一层。空则 prompt 逐字节不变。
+    source_text: str = ""
 
 
 class InterviewError(Exception):

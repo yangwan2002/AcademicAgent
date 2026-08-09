@@ -362,6 +362,8 @@ class PolishHandler:
             goal=str(_val(op, "goal", "") or ""),
             # 真执行绑定：constraints → ContextBuilder 硬约束块
             constraints=[str(c) for c in _list(op, "constraints")],
+            # 原话作背景透传（只进 prompt，不被 gate 读；见 PolishPlan.source_text）
+            source_text=getattr(op, "source_text", "") or "",
         )
         res = execute_polish(
             ctx.session, plan, ctx.llm,
@@ -384,6 +386,7 @@ class RewriteHandler:
             want_search=bool(_val(op, "want_search", False)),
             search_query=str(_val(op, "search_query", "") or ""),
             search_limit=int(_val(op, "search_limit", 5) or 5),
+            source_text=getattr(op, "source_text", "") or "",
         )
         prep = _prepare_citation_quota(
             op, ctx, criteria_topic=plan.section_id, initial_query=plan.search_query
@@ -416,6 +419,7 @@ class AddSectionHandler:
             want_search=bool(_val(op, "want_search", False)),
             search_query=str(_val(op, "search_query", "") or ""),
             search_limit=int(_val(op, "search_limit", 5) or 5),
+            source_text=getattr(op, "source_text", "") or "",
         )
         prep = _prepare_citation_quota(
             op, ctx, criteria_topic=plan.title, initial_query=plan.search_query

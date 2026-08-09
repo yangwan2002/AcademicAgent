@@ -1,0 +1,68 @@
+
+=== dogfood: topic='面向空地协同的大视角大尺度差图像匹配研究' 配额 total≥5 zh≥0 en≥5 ===
+    接受策略: mode=by_purpose section_kind='引言' → 接受判定=['relevant', 'weakly_relevant']
+检索源=openalex 语言策略=high_only reviewer=独立
+[0] 合成检索意图(hybrid planner): status=ready
+    主题='空地协同场景下跨视角与跨尺度图像匹配技术' seeds=[('Cross-view image matching', 'any'), ('UAV-to-satellite image matching', 'any'), ('Cross-scale image matching', 'any'), ('Air-ground image matching', 'any'), ('Large viewpoint difference image registration', 'any'), ('空地协同 图像匹配', 'language.zh')]
+
+[1] 初始缺口: [('total', 5), ('language.en', 5)]
+[2] 检索中（打真实源 + reviewer 判相关性）…
+    · attempt: cand=10 accept=5 reject=5 verify_calls=20 loop_elapsed=44.359s wall=44.4s
+    · attempt: cand=10 accept=8 reject=2 verify_calls=38 loop_elapsed=83.969s wall=84.0s
+    provider 查询策略分布: {'bare': 2}（命中数: [10, 10]）
+
+[2.5] 时间归因（决定 B1 vs B2 优先级）:
+    LLM report_relevance_batch       calls=  4 累计=   36.3s 均值= 9.07s
+    verify 网络往返            calls= 38 累计=   43.7s 均值= 1.15s（另有 2 次缓存命中，~0s）
+    ⇒ LLM 合计 36.3s vs verify 合计 43.7s
+    停止原因=quota_satisfied 诊断={'stop_reason': 'quota_satisfied', 'iterations': 1, 'search_calls': 2, 'verify_calls': 38, 'llm_calls': 4, 'candidates': 20, 'elapsed_s': 83.969, 'exhausted_dimensions': [], 'tried_queries': 2}
+[3] 候选处置分布: {'accept_new': 13, 'reject': 7}
+    被排除原因分布: {'relevance:unrelated': 6, 'verify:verified': 1}
+
+[detail] 逐候选（判定质量核对用；同时写 candidates.jsonl）:
+  #01 [accept_new] rel=relevant/high/title_and_abstract lang=en/high verify=doi=verified@crossref/final;openalex_work=verified@openalex/final reasons=[]
+        Cross-View Image Matching for Geo-Localization in Urban Environments
+  #02 [accept_new] rel=relevant/high/title_and_abstract lang=en/high verify=doi=verified@crossref/final;openalex_work=verified@openalex/final reasons=[]
+        A Practical Cross-View Image Matching Method between UAV and Satellite for UAV-Based Geo-L
+  #03 [accept_new] rel=relevant/high/title_and_abstract lang=en/high verify=doi=verified@crossref/final;openalex_work=verified@openalex/final reasons=[]
+        CVM-Net: Cross-View Matching Network for Image-Based Ground-to-Aerial Geo-Localization
+  #04 [reject] rel=unrelated/high/title_only lang=en/high verify=- reasons=['relevance:unrelated']
+        A survey on deep learning in medical image analysis
+  #05 [reject] rel=unrelated/high/title_only lang=en/high verify=- reasons=['relevance:unrelated']
+        Recommendations for Cardiac Chamber Quantification by Echocardiography in Adults: An Updat
+  #06 [accept_new] rel=weakly_relevant/high/title_and_abstract lang=en/high verify=doi=verified@crossref/final;openalex_work=verified@openalex/final reasons=[]
+        Metric localization for lunar rovers via cross-view image matching
+  #07 [reject] rel=- lang=en/high verify=- reasons=['verify:verified']
+        Cross-View Image Matching for Geo-localization in Urban Environments
+  #08 [accept_new] rel=relevant/high/title_and_abstract lang=en/high verify=doi=verified@crossref/final;openalex_work=verified@openalex/final reasons=[]
+        Real-Time Cross-View Image Matching and Camera Pose Determination for Unmanned Aerial Vehi
+  #09 [reject] rel=unrelated/high/title_and_abstract lang=en/high verify=- reasons=['relevance:unrelated']
+        The Multimodal Brain Tumor Image Segmentation Benchmark (BRATS)
+  #10 [reject] rel=unrelated/high/title_and_abstract lang=en/high verify=- reasons=['relevance:unrelated']
+        ImageJ2: ImageJ for the next generation of scientific image data
+  #11 [accept_new] rel=relevant/high/title_and_abstract lang=en/high verify=doi=verified@crossref/final;openalex_work=verified@openalex/final reasons=[]
+        A Practical Cross-View Image Matching Method between UAV and Satellite for UAV-Based Geo-L
+  #12 [accept_new] rel=relevant/high/title_and_abstract lang=en/high verify=doi=verified@crossref/final;openalex_work=verified@openalex/final reasons=[]
+        A Faster and More Effective Cross-View Matching Method of UAV and Satellite Images for UAV
+  #13 [reject] rel=unrelated/high/title_and_abstract lang=en/high verify=- reasons=['relevance:unrelated']
+        Hyperspectral Imaging: A Review on UAV-Based Sensors, Data Processing and Applications for
+  #14 [accept_new] rel=weakly_relevant/high/title_and_abstract lang=en/high verify=doi=verified@crossref/final;openalex_work=verified@openalex/final reasons=[]
+        Unmanned Aerial Vehicles (UAVs): A Survey on Civil Applications and Key Research Challenge
+  #15 [accept_new] rel=relevant/high/title_and_abstract lang=en/high verify=doi=verified@crossref/final;openalex_work=verified@openalex/final reasons=[]
+        A Semantic Guidance and Transformer-Based Matching Method for UAVs and Satellite Images fo
+  #16 [reject] rel=unrelated/high/title_and_abstract lang=en/high verify=- reasons=['relevance:unrelated']
+        A Review on UAV-Based Applications for Precision Agriculture
+  #17 [accept_new] rel=relevant/high/title_and_abstract lang=en/high verify=doi=verified@crossref/final;openalex_work=verified@openalex/final reasons=[]
+        Sequence Matching for Image-Based UAV-to-Satellite Geolocalization
+  #18 [accept_new] rel=relevant/high/title_and_abstract lang=en/high verify=doi=verified@crossref/final;openalex_work=verified@openalex/final reasons=[]
+        UAV-Satellite View Synthesis for Cross-View Geo-Localization
+  #19 [accept_new] rel=relevant/medium/title_and_abstract lang=en/high verify=doi=verified@crossref/final;openalex_work=verified@openalex/final reasons=[]
+        An Integrated UAV Navigation System Based on Aerial Image Matching
+  #20 [accept_new] rel=weakly_relevant/high/title_and_abstract lang=en/high verify=doi=verified@crossref/final;openalex_work=verified@openalex/final reasons=[]
+        UAV PHOTOGRAMMETRY FOR MAPPING AND 3D MODELING – CURRENT STATUS AND FUTURE PERSPECTIVES
+
+[4] 入库 12 条;语言桶/置信分布: {'en/high': 12}
+    high_only 下实际可计数: zh=0 en=12
+    可用统计(过滤+相关+核验后): total=12
+
+[OK] 配额可满足:检索阶段已凑够,链路可进入写作。

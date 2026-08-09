@@ -62,6 +62,7 @@ def execute_polish(
         original_body, plan.goal, llm, gate,
         max_retry=max_retry, bus=bus, cancel_token=cancel_token, stream=stream,
         constraints=list(getattr(plan, "constraints", ()) or ()) or None,
+        source_text=getattr(plan, "source_text", "") or "",
     )
 
     if not outcome.ok:

@@ -106,6 +106,7 @@ def execute_add_section(
             plan.title, plan.purpose, plan.structure_desc, plan.subsections,
             facts.known_refs, sorted(facts.number_values()),
             session.ext, facts.claims, violations or None, bundle=bundle,
+            source_text=getattr(plan, "source_text", "") or "",
         )
         resp = llm.complete(messages)
         attempts += 1

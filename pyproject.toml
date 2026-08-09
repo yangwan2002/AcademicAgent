@@ -22,6 +22,10 @@ retrieval = ["httpx>=0.27,<1"]
 # tools/doc_stats.py、gates/format_gate.py 都直接 import docx。此前**完全未声明**，
 # 只靠开发机上恰好装过；干净环境里 18 个测试文件在收集期就 ImportError。
 docx = ["python-docx>=1.1,<2"]
+# trace 导出到 Langfuse（观测的可选第二路；本地 trace.json 不依赖它）。
+# 下界 3.0：v3 起改成 OTel 风格 API（start_span/start_generation），
+# v2 的 client.trace() 已不存在 —— exporter 按 v3 写，装 v2 会 AttributeError。
+langfuse = ["langfuse>=3.0,<4"]
 dev = [
     "pytest>=8,<10",
     "pytest-cov>=5",

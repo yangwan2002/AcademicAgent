@@ -27,7 +27,8 @@ from __future__ import annotations
 
 import re
 from abc import ABC, abstractmethod
-from dataclasses import replace
+from dataclasses import fields as dc_fields
+from dataclasses import is_dataclass, replace
 from typing import Any
 
 from paper_agent.intents.router import Intent
@@ -119,6 +120,34 @@ def _is_empty_object(slot_spec: SlotSpec, value) -> bool:
     return getattr(slot_spec, "value_type", "string") == "object" and _is_empty_shell(value)
 
 
+#: 扁平 payload 里**不是槽位**的顶层键（元信息信封）。
+#:
+#: 今天漏登记不会出错 —— 建槽的循环是 spec 驱动的（遍历 `spec.slots` 后
+#: `raw_slots.get(name)`），多余的键根本不会被读到。集中登记是为可读性与将来：
+#: 一旦有人改成遍历 payload 键（比如加「未知槽位」告警），漏登记就会立刻变成 bug。
+_ENVELOPE_KEYS = frozenset({
+    "newly_discovered_requirements",
+    "slot_verbatims",
+    "slot_consumed_requirements",
+})
+
+
+def _merge_ids(envelope: Any, declared: tuple[str, ...]) -> tuple[str, ...]:
+    """合并信封内 `requirement_ids` 与旁路 `slot_consumed_requirements` 的声明。
+
+    两者都是模型的显式声明，取并集（保序去重）。前者是嵌套形态下模型可直接挂在
+    槽位上的字段，后者是扁平 schema 的旁路通道 —— 同一意图的两种表达，不该二选一。
+    """
+    out: dict[str, None] = {}
+    for x in envelope or ():
+        rid = str(x).strip()
+        if rid:
+            out.setdefault(rid, None)
+    for rid in declared:
+        out.setdefault(rid, None)
+    return tuple(out)
+
+
 class PreExtractor(ABC):
     """按 IntentSpec 抽槽的抽取器基类。
 
@@ -147,6 +176,23 @@ class PreExtractor(ABC):
     def _tool_schema(self) -> dict | None:
         """function schema：由 IntentSpec 自动生成（字段级 description = 槽位规矩）。"""
         return build_tool_schema(self._spec(), self.intent.value)
+
+    def _declared_ids(self, raw: Any) -> tuple[str, ...]:
+        """校验模型自报的 requirement id：只保留**本次 canonical 集合里存在**的。
+
+        模型自造/记错的 id 一律丢弃而非报错 —— 消费关系是记账信息，一个坏 id 不该
+        让整次抽取失败（槽值本身可能完全正确）。Fast_Path 下 `_canonical` 为空，
+        此时无从校验，返回空元组（该路径的 requirement 由抽取器自己发现）。
+        """
+        if not isinstance(raw, (list, tuple)) or not self._canonical:
+            return ()
+        known = {r.requirement_id for r in self._canonical}
+        seen: dict[str, None] = {}
+        for x in raw:
+            rid = str(x).strip()
+            if rid in known:
+                seen.setdefault(rid, None)
+        return tuple(seen)
 
     # -- 框架主流程 --
 
@@ -234,6 +280,17 @@ class PreExtractor(ABC):
         operation: RawOperation,
         fast_path: bool,
     ) -> tuple[dict[str, SlotValue], list[str], list[AtomicRequirement]]:
+        # 每槽原话的旁路映射（见 `build_tool_schema` 的 `slot_verbatims`）：它是
+        # **元信息**而非槽位，必须在建槽前摘掉，否则会被当成一个未知槽。
+        raw_verbatims = payload.get("slot_verbatims")
+        if not isinstance(raw_verbatims, dict):
+            raw_verbatims = {}
+        # 模型自报的消费关系（见 `build_tool_schema` 的 `slot_consumed_requirements`）。
+        # 同 `slot_verbatims`，是**元信息**而非槽位，必须在建槽前摘掉。
+        raw_consumed = payload.get("slot_consumed_requirements")
+        if not isinstance(raw_consumed, dict):
+            raw_consumed = {}
+
         if "slots" in payload:
             raw_slots = payload.get("slots", {})
         else:
@@ -241,7 +298,7 @@ class PreExtractor(ABC):
             # `_coerce_slot` 已能把裸值包成 {"value": ...}，故两种形态统一处理。
             raw_slots = {
                 k: v for k, v in payload.items()
-                if k != "newly_discovered_requirements"
+                if k not in _ENVELOPE_KEYS
             }
         if not isinstance(raw_slots, dict):
             raise TypeError("slots must be a dict")
@@ -254,13 +311,20 @@ class PreExtractor(ABC):
             if raw is None:
                 slots[name] = SlotValue(field_status=FieldStatus.USER_ABSENT)
                 continue
-            sv = self._coerce_slot(name, slot_spec, raw)
+            sv = self._coerce_slot(
+                name, slot_spec, raw, raw_verbatims.get(name),
+                declared_ids=self._declared_ids(raw_consumed.get(name)),
+            )
             slots[name] = sv
             consumed.extend(sv.requirement_ids)
 
-        # requirement↔slot 消费关系：**由程序推断**（同「offset 不让 LLM 算」的哲学）。
-        # function calling 的扁平 schema 不带 per-slot requirement_ids，若靠模型自报既
-        # 增负担又易漏；这里用确定性文本匹配补全，模型已显式给出的引用优先保留。
+        # requirement↔slot 消费关系：**模型声明优先，文本匹配兜底**。
+        #
+        # 权威来源是模型自报的 `slot_consumed_requirements`（理由见
+        # `build_tool_schema`：消费关系是语义事实，不在原文里，程序无从反推）。
+        # `_infer_consumption` 退为兜底，只处理**没有任何声明**的槽位 —— 模型漏报
+        # 一两个槽时不至于直接倒退，且 `constraints` 这类 `list[str]` 槽的槽值本身
+        # 就是原话（实测 `['不要改数字', '保留引用']`），字面匹配在它们身上仍有效。
         if self._canonical:
             slots, inferred = _infer_consumption(slots, self._canonical)
             consumed.extend(inferred)
@@ -277,11 +341,26 @@ class PreExtractor(ABC):
 
         return slots, consumed, discovered
 
-    def _coerce_slot(self, name: str, slot_spec: SlotSpec, raw: Any) -> SlotValue:
+    def _coerce_slot(
+        self,
+        name: str,
+        slot_spec: SlotSpec,
+        raw: Any,
+        reported_verbatim: str | None = None,
+        declared_ids: tuple[str, ...] = (),
+    ) -> SlotValue:
         """把一条 payload slot 组装为 SlotValue：定状态、跑 validator/normalizer。
 
         抽取器**不填默认值**（D10），故只会产出 present/user_absent/ambiguous/
         invalid，绝不 defaulted。
+
+        `reported_verbatim`：模型在 `slot_verbatims` 里自报的该槽用户原话（可空）。
+        优先于「规范化前原值」这个兜底 —— 它能覆盖模型**重述**的情形，而兜底只能
+        覆盖 normalizer 改写的情形。
+
+        `declared_ids`：模型在 `slot_consumed_requirements` 里自报的该槽消费的
+        requirement id（已由 `_declared_ids` 校验过存在性）。与信封内的
+        `requirement_ids` 合并 —— 两者都是模型的显式声明，取并集不丢信息。
         """
         raw = _unwrap_slot_payload(raw)
 
@@ -315,6 +394,12 @@ class PreExtractor(ABC):
             )
 
         source: SlotSource | None = None
+        # 规范化会**销毁原像**：`"Word"→"docx"` 之后，用户原话在这个槽里就不存在了。
+        # 而 `_infer_consumption` 要靠原话做字面匹配来认领 requirement ⇒ 归一化过的槽
+        # 恒定漏报（`转成word` 匹配不上 `docx`），requirement 落 UNMAPPED，弹窗说
+        # 「这条要求没能安排进任何操作」——而那个操作就在计划里。
+        # 故覆盖前把原值留作 verbatim 兜底（模型自报的 verbatim 优先，不覆盖它）。
+        pre_normalized: str | None = None
         if status is FieldStatus.PRESENT:
             # 1) 先规范化（如 "word"→"docx"）：成功且有变化标 normalized，异常降 invalid
             if slot_spec.normalizer is not None:
@@ -323,6 +408,8 @@ class PreExtractor(ABC):
                     status = FieldStatus.INVALID
                 else:
                     if normalized != value:
+                        if isinstance(value, str) and value.strip():
+                            pre_normalized = value
                         value = normalized
                         source = SlotSource.NORMALIZED
                     else:
@@ -337,14 +424,18 @@ class PreExtractor(ABC):
         if status is not FieldStatus.PRESENT:
             source = None  # 非 present 的槽位不带来源
 
-        req_ids = tuple(str(x) for x in (raw.get("requirement_ids") or ()))
+        req_ids = _merge_ids(raw.get("requirement_ids"), declared_ids)
         keep_value = value if status in _VALUED_STATUSES else None
+        # 优先级：信封自带 > 模型旁路自报 > 规范化前原值（兜底）
+        verbatim = raw.get("verbatim") or reported_verbatim or pre_normalized
+        if isinstance(verbatim, str) and not verbatim.strip():
+            verbatim = None
         return SlotValue(
             value=keep_value,
             field_status=status,
             source=source,
             requirement_ids=req_ids,
-            verbatim=raw.get("verbatim"),
+            verbatim=verbatim,
         )
 
     def _failure_result(
@@ -453,6 +544,11 @@ _FORMAT_OP_SCHEMA = {
         "name": {"type": "string", "description": "操作类型（见字段说明的白名单）"},
         "value": {"description": "该操作的取值（字号用数字、字体用字符串等）"},
         "scope": {"type": "string", "description": "作用范围：all/body/headings/heading1"},
+        # per-op 原话：与 `_RAW_COUNT_CLAUSE_SCHEMA.verbatim` 同一做法。`operations`
+        # 在结构上逐元素对应用户的每条排版要求（「双栏」「正文小四」「标题四号」），
+        # 却此前没有逐元素锚点 ⇒ 兜底匹配对它恒定失效。
+        "verbatim": {"type": "string",
+                     "description": "这一条操作对应的用户原话片段（照抄，不要改写）。"},
     },
     "required": ["name"],
 }
@@ -501,6 +597,49 @@ def build_tool_schema(spec: IntentSpec, label: str) -> dict:
         "items": {"type": "string"},
         "description": "（仅在未提供已识别要求时使用）这段话里各条可执行要求的原话。",
     }
+    # 每槽的**用户原话**。schema 是扁平的（槽名直接是参数、模型发裸值），没法给
+    # 每个槽挂同级 `verbatim`，故收在一个映射里。
+    #
+    # 为什么需要它：槽值经规范化（`"Word"→"docx"`）或模型重述（「读起来有点别扭」
+    # → `消除别扭感，使语句通顺自然`）之后，字面锚点就断了，而
+    # `_infer_consumption` 靠字面匹配认领 requirement ⇒ 恒定漏报、误弹 unmapped。
+    # 嵌套 clause 的 schema 早已要求 `verbatim`（`_RAW_COUNT_CLAUSE_SCHEMA`）且模型
+    # 填得准，配额槽的归属因此从不丢；这里只是把同一做法补给顶层槽。
+    props["slot_verbatims"] = {
+        "type": "object",
+        "description": (
+            "每个已填槽位对应的**用户原话片段**，键为槽位名。"
+            "照抄用户的说法，不要改写、不要规范化（用户说「转成 Word」就写"
+            "「转成 Word」，即使 target_ext 填的是 docx）。没填的槽位不必出现。"
+        ),
+        "additionalProperties": {"type": "string"},
+    }
+    # 消费关系的**权威来源**：哪个槽位吃掉了哪几条要求。
+    #
+    # 为什么由模型报而不是程序推：这是**语义事实**，只在模型做转换的那一刻产生，
+    # 原文里并不存在答案。「双栏格式」→ `FormatOp(set_columns, 2)` 之后，原话与
+    # 槽值再无字面交集（实测 `_slot_texts` 对 dataclass 列表返回 `[]`），靠字面
+    # 反推等于拿有损变换的输出去反推输入。此前三层锚点补丁（`pre_normalized` /
+    # `slot_verbatims` / per-clause `verbatim`）都只是提高猜中概率，没有一层触及
+    # 「反推」本身 —— `format_docx.operations` 上误报率恒定 100%。
+    #
+    # 与「offset 不让 LLM 算」的区别（那条哲学在这里**不适用**）：offset 的答案
+    # 客观存在于原文，程序能精确定位、可验证；消费关系不在原文里。两件事性质不同。
+    #
+    # 成本近零：requirement id 已在 system 消息里逐条列给模型（见
+    # `_build_tool_messages` 的「该操作已识别出以下要求」），这里只是开一条回信通道。
+    # 报 id 也比 `slot_verbatims` 报字符串更可靠 —— id 是闭集（选错概率低），
+    # 字符串是自由文本（抄错一字即失配）。
+    props["slot_consumed_requirements"] = {
+        "type": "object",
+        "description": (
+            "每个已填槽位**消费了哪些要求**，键为槽位名、值为要求编号数组"
+            "（如 {\"operations\": [\"r1\", \"r2\"]}）。编号只能取上面「已识别出"
+            "以下要求」里给出的那些，不要自造。一个槽位可消费多条要求；"
+            "一条要求也可被多个槽位消费。没填的槽位不必出现。"
+        ),
+        "additionalProperties": {"type": "array", "items": {"type": "string"}},
+    }
     return {
         "type": "function",
         "function": {
@@ -531,6 +670,13 @@ def _collect_verbatims(v: object, out: list[str]) -> None:
 
     嵌套槽位（如 `citation_quota`）的 schema 已要求每个 clause 自带 `verbatim`
     （见 `intent_spec._RAW_COUNT_CLAUSE_SCHEMA`），模型也确实在填——**此前无人读**。
+
+    **dataclass 分支是 2026-08-06 补的**：此前只处理 dict 与 list/tuple，遇到
+    dataclass（`format_docx.operations` 的 `list[FormatOp]`）两个 isinstance 都不
+    匹配，函数体走完直接返回 —— 没有 else、没有告警、没有异常。静默产出空列表，
+    下游 `_infer_consumption` 的 `if not texts: return` 同样静默 ⇒ 该意图上
+    unmapped 误报率恒定 100%，而 1604 个测试全绿。**失败得完全无声是这个 bug 能
+    活下来的唯一原因。**
     """
     if isinstance(v, dict):
         for key, val in v.items():
@@ -541,6 +687,13 @@ def _collect_verbatims(v: object, out: list[str]) -> None:
     elif isinstance(v, (list, tuple)):
         for item in v:
             _collect_verbatims(item, out)
+    elif is_dataclass(v) and not isinstance(v, type):
+        for f in dc_fields(v):
+            val = getattr(v, f.name, None)
+            if f.name == "verbatim" and isinstance(val, str) and val.strip():
+                out.append(val)
+            else:
+                _collect_verbatims(val, out)
 
 
 def _slot_texts(sv: SlotValue) -> list[str]:
@@ -579,13 +732,21 @@ def _infer_consumption(
     slots: dict[str, SlotValue],
     canonical: tuple[AtomicRequirement, ...],
 ) -> tuple[dict[str, SlotValue], list[str]]:
-    """据文本匹配推断哪些 requirement 被哪个槽位消费了。
+    """**兜底**：对模型未声明消费方的 requirement，据文本匹配推断归属。
 
-    只对**已有取值**的槽位推断；模型已显式给出 `requirement_ids` 的槽位保持原样
-    （显式优先）。匹配用归一化双向子串包含，与 golden 打分器同一口径。
+    权威来源是模型自报的 `slot_consumed_requirements`（见 `build_tool_schema`）。
+    本函数只处理**漏网的那些** —— 跳过粒度是 **per-requirement 而非 per-slot**：
+    某条 requirement 只要被任一槽位声明过就跳过，但一个已有声明的槽位仍可通过
+    匹配再认领别的 requirement。模型漏报一两条时不至于整体倒退。
 
-    每个槽位贡献**多个**候选文本（`_slot_texts`）：结构化槽位按 clause 的 verbatim
-    分片。任一片匹配即算该槽消费，修 X-11「嵌套槽位恒漏报」。
+    为什么保留而不删：`constraints`/`subsections`/`presets` 这类 `list[str]` 槽的
+    槽值本身就是原话（实测 `['不要改数字', '保留引用']`），字面匹配对它们有效。
+    但对转换彻底的槽（`operations` 的 `list[FormatOp]`，实测 `_slot_texts` 返回
+    `[]`）本函数**无能为力**，那正是它必须退居兜底的原因。
+
+    匹配用归一化双向子串包含，与 golden 打分器同一口径。每个槽位贡献**多个**候选
+    文本（`_slot_texts`）：结构化槽位按 clause 的 verbatim 分片，任一片匹配即算该
+    槽消费（修 X-11「嵌套槽位恒漏报」）。
 
     返回 `(新的 slots, 被消费的 requirement id 列表)`。
     """

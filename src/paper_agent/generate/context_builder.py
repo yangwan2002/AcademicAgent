@@ -8,6 +8,32 @@ from __future__ import annotations
 from paper_agent.literature.dialect import is_tex
 from paper_agent.providers.llm.base import Message
 
+# 用户整句原话在 prompt 里的界定标记。作用不在提示模型（那行中文标签已经说清了），
+# 而在**让脱敏层能把这段定位并剔除**：整句 turn 文本此前从不进任何 prompt，
+# trace 因此有「原始用户文本不落盘」不变量（tests/test_planning_active_e2e.py）。
+# 把原话放进 prompt 就扩大了记录范围，故发给 LLM 照发、落 trace 前按标记切掉。
+# 改动这两个常量要同步 `sanitize._SOURCE_TEXT_BLOCK`。
+SOURCE_TEXT_OPEN = "<<<user_source_text>>>"
+SOURCE_TEXT_CLOSE = "<<</user_source_text>>>"
+
+
+def _source_text_part(source_text: str, body_label: str) -> str | None:
+    """把用户整句原话包成 prompt 段落；``source_text`` 为空时返回 None（调用方跳过）。
+
+    三处生成路径（polish / rewrite / add_section）共用同一措辞，避免各写一份后
+    措辞漂移 —— 其中「这不是待处理的正文」这半句是必要的：原话与待改写正文同在一个
+    user message 里，不点明就有被当成正文一起改写的风险。
+
+    ``body_label`` 是各路径对正文的称呼（"待润色的正文" / "待改写的正文"），
+    add_section 无原始正文，传"正文"即可。
+    """
+    if not source_text:
+        return None
+    return (
+        f"用户的原始表述（仅作理解背景，其中的诉求已归纳在上方；这不是{body_label}）：\n"
+        f"{SOURCE_TEXT_OPEN}{source_text}{SOURCE_TEXT_CLOSE}"
+    )
+
 _POLISH_SYSTEM = """你是学术论文的语言润色助手。你的唯一任务是改善给定章节的**语言表达**：
 让句子更通顺、简洁、符合学术书面语。
 
@@ -28,6 +54,7 @@ def build_polish_messages(
     goal: str,
     violations: list[str] | None = None,
     constraints: list[str] | None = None,
+    source_text: str = "",
 ) -> list[Message]:
     """构造 polish 的 messages。
 
@@ -37,6 +64,18 @@ def build_polish_messages(
     - ``constraints``：用户显式提出的额外硬约束（如「不改数字」「保留引用」）。
       intent-planning 的 `polish.constraints` 槽由此**真正影响生成**（Task 19 绑定
       `ContextBuilder.constraints`），而非只存在计划里。为空/None 时消息逐字节不变。
+    - ``source_text``：用户这一轮的**整句原话**，只作背景。
+
+    为什么要 ``source_text``：`goal`/`constraints` 是结构化抽取的产物，只承载"程序要
+    读的那部分"。原话里另有仅供本模型消费的背景 —— 「那部分我写得比较仓促」（动机）、
+    「目前是一个概述」（现状）—— 它们不匹配任何槽位 description，此前无处安放，生成端
+    从来看不到。
+
+    **它不是指令来源**：硬约束以 `constraints` 为准（gate 校验的正是那一份），故原话
+    在 prompt 里明确标注为背景、且排在约束之后。不要调高它的权重 —— 若模型转而按原话
+    里的宽松表述行事，gate 检查的东西与模型遵循的东西就会脱钩。
+
+    原话被 `SOURCE_TEXT_OPEN/CLOSE` 包裹，供脱敏层落 trace 前剔除（见那两个常量）。
     """
     user_parts: list[str] = []
     if goal:
@@ -46,6 +85,9 @@ def build_polish_messages(
             "用户额外要求的硬约束（必须全部遵守）：\n"
             + "\n".join(f"- {c}" for c in constraints)
         )
+    src_part = _source_text_part(source_text, "待润色的正文")
+    if src_part:
+        user_parts.append(src_part)
     user_parts.append("以下是需要润色的章节正文：\n\n" + original)
 
     if violations:
@@ -108,15 +150,23 @@ def build_rewrite_messages(
     ext: str,
     violations: list[str] | None = None,
     bundle=None,
+    source_text: str = "",
 ) -> list[Message]:
     """构造 rewrite 的 messages。``refs`` 为可用 KnownRef 列表。
 
     ``bundle``（A2d-5）：非 None 时用摘要级证据数据块**替代**「可用文献列表」段；
     为 None 时消息**逐字节不变**（无配额路径零影响）。
+
+    ``source_text``：用户这一轮的整句原话，只作背景（同 `build_polish_messages`）。
+    `direction`/`details` 是抽取产物，会把「现在读起来太像综述了」这类语气与分寸概括掉；
+    原话补回那一层。为空时消息逐字节不变。
     """
     parts = [f"改写方向：{direction}"]
     if details:
         parts.append(f"补充说明：{details}")
+    src_part = _source_text_part(source_text, "待改写的正文")
+    if src_part:
+        parts.append(src_part)
     if bundle is not None:
         parts.append(build_evidence_block(bundle, ext))
     else:
@@ -170,17 +220,25 @@ def build_add_section_messages(
     claims: dict | None = None,
     violations: list[str] | None = None,
     bundle=None,
+    source_text: str = "",
 ) -> list[Message]:
     """构造 add_section 的 messages。
 
     ``bundle``（A2d-5）：非 None 时用摘要级证据数据块替代「可用文献列表」段；
     为 None 时消息**逐字节不变**。
+
+    ``source_text``：用户这一轮的整句原话，只作背景（同 `build_polish_messages`）。
+    这条路径没有"原始正文"，但仍需要原话：`purpose`/`structure_desc` 会把
+    「样本量偏小，这点要坦白讲」的态度概括成中性描述。为空时消息逐字节不变。
     """
     parts = [f"新章节标题：{title}", f"这一章的目的：{purpose}"]
     if subsections:
         parts.append("内部小节骨架（请逐个生成）：\n" + "\n".join(f"- {s}" for s in subsections))
     elif structure_desc:
         parts.append(f"内部结构说明：{structure_desc}")
+    src_part = _source_text_part(source_text, "待生成的正文")
+    if src_part:
+        parts.append(src_part)
     if claims and _fmt_claims(claims):
         parts.append("论文已确认的关键信息（用于 grounding）：\n" + _fmt_claims(claims))
     if bundle is not None:
