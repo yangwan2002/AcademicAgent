@@ -1,0 +1,12 @@
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.39-trip",
+  "base_commit_sha": "f68cec5397606d3f5af141cae8d6cf07f54c935a",
+  "prompts": {},
+  "humans": {
+    "h_687d5ed0308163": {
+      "author": "yangwan <yangwan@trip.com>"
+    }
+  }
+}
