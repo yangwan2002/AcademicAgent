@@ -16,12 +16,17 @@
 显式跑 WritingLiteratureOrchestrator 的核心步骤（ASSESSING→RETRIEVING→commit→REASSESS→
 BUILD_BUNDLE）并插桩。**只跑一次检索**（省 API）。不接交互确认——本脚本自动接受批次,
 仅用于诊断,不写论文。
+
+BUILD_BUNDLE 那步报告「写作 prompt 实际收到哪些证据」,并把「满足下限必需的」与
+「第5步用剩余预算补满的」分开计数——后者是 P-3a 质疑的对象（context rot:输入越长
+模型召回越差,则填满预算可能是负收益）。`--bundle-budget` 调小即可关掉补满做 A/B。
 """
 
 from __future__ import annotations
 
 import argparse
 import collections
+import json
 import sys
 from pathlib import Path
 
@@ -73,11 +78,21 @@ _log_fh = None
 
 
 def _emit(msg: str = "") -> None:
-    """打印到 stdout 并同时写 UTF-8 日志（规避 Windows 控制台 GBK 乱码）。"""
-    print(msg, flush=True)
+    """打印到 stdout 并同时写 UTF-8 日志（规避 Windows 控制台 GBK 乱码）。
+
+    stdout 侧必须容错：Windows 默认 GBK，遇 `⇒`/`→` 等字符会抛 UnicodeEncodeError，
+    实测在检索**已花完 API 成本之后**才崩（真机跑到 [2.5] 挂掉，白花一次检索）。
+    日志文件是 UTF-8、内容完整，所以这里只降级 stdout 的呈现，绝不让它中断流程。
+    """
     if _log_fh is not None:
         _log_fh.write(msg + "\n")
         _log_fh.flush()
+    try:
+        print(msg, flush=True)
+    except UnicodeEncodeError:
+        enc = getattr(sys.stdout, "encoding", None) or "ascii"
+        print(msg.encode(enc, errors="replace").decode(enc, errors="replace"),
+              flush=True)
 
 
 _CAND_PATH = _HERE / "candidates.jsonl"
@@ -92,6 +107,96 @@ def _verify_summary(events) -> str:
         parts.append(f"{getattr(e,'identifier_type','?')}={getattr(e,'kind',None).value if getattr(e,'kind',None) else '?'}"
                      f"@{getattr(e,'source','?')}/{getattr(e,'authority','?')}")
     return ";".join(parts) or "-"
+
+
+_BUNDLE_PATH = _HERE / "bundle.jsonl"
+
+
+def _run_build_bundle(*, facts, criteria, quota, eff, classifier, policy,
+                      judge_key, acceptance, budget_chars: int) -> None:
+    """跑 `build_bundle` 并报告**写作 prompt 实际收到的证据集**。
+
+    重点是第 5 步（「剩余预算补高相关」）的真实行为：它在尽量填满预算，而 context rot
+    说输入越长召回越差（P-3a 的质疑）。所以这里把「下限选了几篇 / 第 5 步多塞几篇 /
+    各占多少字符」分开报，否则看不出那一步到底有没有触发、代价多大。
+    """
+    from paper_agent.literature.evidence import (
+        BundleStatus,
+        _lower_bound,
+        build_bundle,
+    )
+    from paper_agent.literature.quota import CountDimension
+
+    records = list(facts.ledger.all_records())
+    res = build_bundle(
+        records, criteria=criteria, quota=quota,
+        relevance_store=facts.relevance_store,
+        effective_constraints=eff, budget_chars=budget_chars,
+        classifier=classifier, policy=policy, judge_key=judge_key,
+        acceptance=acceptance,
+    )
+    _emit(f"\n[5] BUILD_BUNDLE(预算={budget_chars} 字符): status={res.status.value}")
+    if res.status is not BundleStatus.OK or res.bundle is None:
+        _emit(f"    未产出可用 Bundle;缺口={res.bundle_gaps} 排除={res.excluded_count}")
+        # 走到这里说明连最短摘要档都装不下（`build_bundle` 已自动试过截断阶梯）。
+        # 报量化缺口:不量出来就无法判断是预算设小了还是摘要偏长。
+        if res.required_chars:
+            _emit(f"    最短摘要档({res.min_abstract_limit} 字符)下仍需 "
+                  f"{res.required_chars} 字符, 预算 {budget_chars}, "
+                  f"差 {res.shortfall_chars()}")
+            _emit(f"    → 需把预算提到约 "
+                  f"{(res.required_chars // 1000 + 1) * 1000} 或降低引用数量要求")
+        costs = sorted(
+            (len(r.abstract or "") + len(r.title or "") + 40) for r in records)
+        if costs:
+            _emit(f"    全摘要单条成本: 中位={costs[len(costs) // 2]} "
+                  f"min={costs[0]} max={costs[-1]}")
+        return
+
+    b = res.bundle
+    used = sum(e.char_cost() for e in b.entries)
+    # 下限需求 = 语言下限与 total 下限里的实际约束，用来分离「必需」与「补满」两部分
+    need_total = _lower_bound(eff, CountDimension.TOTAL)
+    need_zh = _lower_bound(eff, CountDimension.LANGUAGE_ZH)
+    need_en = _lower_bound(eff, CountDimension.LANGUAGE_EN)
+    floor_n = max(need_total, need_zh + need_en)
+    extra_n = max(0, len(b.entries) - floor_n)
+    floor_cost = sum(e.char_cost() for e in b.entries[:floor_n])
+
+    _emit(f"    选入 {len(b.entries)} 篇, 占用 {used}/{budget_chars} 字符 "
+          f"({used * 100 // max(1, budget_chars)}%), 未选 {b.truncated_count} 篇")
+    if b.degradation == "full":
+        _emit("    降级档: full(全摘要,未截断)")
+    else:
+        _emit(f"    降级档: {b.degradation} 摘要上限={b.abstract_limit} 字符, "
+              f"实际截断 {b.truncated_entry_count()}/{len(b.entries)} 条")
+        _emit("    → 全摘要装不下配额下限,已自动截短保住篇数(旧实现此处直接失败)")
+    _emit(f"    其中 满足下限需 {floor_n} 篇({floor_cost} 字符), "
+          f"**第5步补满多塞 {extra_n} 篇({used - floor_cost} 字符)**")
+    if extra_n == 0:
+        _emit("    → 第5步未触发(候选不足或预算已满),本次无法据此验 context rot。")
+    else:
+        pct = (used - floor_cost) * 100 // max(1, used)
+        _emit(f"    → 第5步贡献了 {pct}% 的证据字符。若这些文献最终没被正文引用,"
+              f"即为纯浪费(P-3a)。")
+
+    _emit(f"    bundle_id={b.bundle_id[:12]} task_fp={b.task_fingerprint[:12]}")
+    with open(_BUNDLE_PATH, "w", encoding="utf-8") as fh:
+        for i, e in enumerate(b.entries):
+            tag = "floor" if i < floor_n else "topup"
+            rec = {
+                "rank": i, "role": tag, "rid": e.reference_id,
+                "chars": e.char_cost(), "spans": len(e.spans),
+                "title": e.title, "year": e.year,
+                "bucket": e.language_bucket,
+                "verdict": e.relevance_verdict,
+                "confidence": e.relevance_confidence,
+                "evidence_available": e.evidence_available,
+                # >0 = 摘要被截断,值为截断前长度。用于判断降级损失了多少信息。
+                "abstract_truncated_from": e.abstract_truncated_from,
+            }
+            fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    _emit(f"    逐条明细 → {_BUNDLE_PATH.name}(role=floor 为下限必需, topup 为第5步补满)")
 
 
 def _dump_candidates(items, classifier) -> None:
@@ -136,7 +241,8 @@ def _dump_candidates(items, classifier) -> None:
         "\n".join(json.dumps(r, ensure_ascii=False) for r in rows), encoding="utf-8")
 
 
-def run(topic: str, total: int, zh: int, en: int, query: str) -> int:
+def run(topic: str, total: int, zh: int, en: int, query: str,
+        bundle_budget: int = -1) -> int:
     global _log_fh
     _log_fh = open(_LOG_PATH, "w", encoding="utf-8")
     from paper_agent.application.literature_composition import (
@@ -185,6 +291,9 @@ def run(topic: str, total: int, zh: int, en: int, query: str) -> int:
 
     quota = _build_quota(total, zh, en)
     classifier, policy, judge_key = orch._classifier, orch._policy, orch._judge_key
+    # -1 = 未指定 → 取 config 默认（24000）。显式传值用于 A/B 关掉「第5步补满」。
+    if bundle_budget < 0:
+        bundle_budget = config.literature_bundle_budget_chars
 
     # F-3：接受策略**一次解析、三处共用**（Attempt / assess_availability / build_bundle）。
     # `section_kind` 是显式的章节身份信号（本脚本模拟「写引言」）——不能依赖
@@ -359,6 +468,14 @@ def run(topic: str, total: int, zh: int, en: int, query: str) -> int:
     else:
         _emit(f"\n[MISS] 仍缺: {[(g.dimension.value, g.amount) for g in remaining]}")
         _emit("    → 这就是当前真实瓶颈所在（按上面的排除原因/语言分布判因）。")
+
+    # 5) BUILD_BUNDLE —— 此前 runner 停在上一步，docstring 却声称跑到这里。
+    # 不跑这步就看不见「写作 prompt 实际收到什么证据」（P-3a 要验的正是这个）。
+    _run_build_bundle(
+        facts=facts, criteria=criteria, quota=quota, eff=eff,
+        classifier=classifier, policy=policy, judge_key=judge_key,
+        acceptance=acceptance, budget_chars=bundle_budget,
+    )
     return 0
 
 
@@ -369,8 +486,11 @@ def main() -> int:
     ap.add_argument("--total", type=int, default=20)
     ap.add_argument("--zh", type=int, default=5)
     ap.add_argument("--en", type=int, default=15)
+    ap.add_argument("--bundle-budget", type=int, default=-1,
+                    help="证据集字符预算;默认取 config。设小可关掉「第5步补满」做 A/B")
     args = ap.parse_args()
-    return run(args.topic, args.total, args.zh, args.en, args.query)
+    return run(args.topic, args.total, args.zh, args.en, args.query,
+               bundle_budget=args.bundle_budget)
 
 
 if __name__ == "__main__":
