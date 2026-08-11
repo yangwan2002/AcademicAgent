@@ -35,6 +35,9 @@ class SessionBaseline:
     baseline_id: str
     git_commit: str | None = None
     fallback_snapshot_path: str | None = None
+    # 正文之外、须与正文一起回滚的状态（当前用于账本数字别名快照）。
+    # 计划级回滚同样不能只回正文：顺序编码把「正文 `[n]` 指哪条」记在别名里。
+    extra_state: object = None
 
 
 def _git_available() -> bool:
@@ -65,6 +68,10 @@ class FileBackedSession:
     #   被静默丢弃 —— 纯排版请求会「报告成功但结果错误」。已弃用该路径。）
     docx_source: str = field(default="", init=False)
     _snapshots: list[str] = field(default_factory=list, init=False)
+    # 与每次 write_working 一一对应的「正文之外的待回退状态」（见 write_working）。
+    # git 可用时 _snapshots 为空，这个栈仍照常压 —— 两条 undo 路径都要回放它。
+    _undo_hooks: list[object] = field(default_factory=list, init=False)
+    _pending_undo_state: object = field(default=None, init=False)
     _git_ok: bool = field(default=False, init=False)
 
     def __post_init__(self) -> None:
@@ -98,12 +105,20 @@ class FileBackedSession:
         with open(self.working_path, "r", encoding="utf-8") as fh:
             return fh.read()
 
-    def write_working(self, text: str, message: str = "edit", *, bus=None) -> None:
+    def write_working(self, text: str, message: str = "edit", *, bus=None,
+                      undo_hook=None) -> None:
         """写入 working（原子）；git 可用则 commit，否则压入快照栈。
 
         可选 `bus`（按方法传、不长存）：写 working 后发 `WORKING_COPY_UPDATE`，
         git 快照后发 `WORKSPACE_COMMIT`。不传时行为与既有一致。
+
+        可选 `undo_hook`：无参可调用，返回值在本次写入的**同一时刻**入栈，`undo()`
+        成功后回放。给顺序编码用 —— 它把「正文 `[n]` 指哪条」记在账本别名里，正文
+        回退而别名不回退，旧号就解析到别的文献。挂在写入这一步而不是由调用方另存一
+        个栈：另存的栈会在「有轮次不写正文」时与正文快照错位，回放就串档了。
         """
+        # 与正文快照**同一时刻**取，保证 undo 时两者成对回放。
+        self._undo_hooks.append(undo_hook() if undo_hook is not None else None)
         if self.docx_source:
             # docx：无 git 时的快照必须存**二进制**副本，不能存投影文本 ——
             # 存文本的话 undo 会把排版一并丢掉（投影里没有排版信息）。
@@ -142,7 +157,22 @@ class FileBackedSession:
         return path
 
     def undo(self) -> bool:
-        """回退到上一个版本。无历史返回 False。"""
+        """回退到上一个版本。无历史返回 False。
+
+        成功时同步弹出配对的 `undo_hook` 载荷，供 `take_undo_state()` 取用；
+        失败不弹 —— 正文没退，配对状态也不能退，否则两边永久错位。
+        """
+        ok = self._undo_working()
+        if ok and self._undo_hooks:
+            self._pending_undo_state = self._undo_hooks.pop()
+        return ok
+
+    def take_undo_state(self):
+        """取走上一次成功 `undo()` 配对的 hook 载荷（取后清空）。无则 None。"""
+        state, self._pending_undo_state = self._pending_undo_state, None
+        return state
+
+    def _undo_working(self) -> bool:
         if self._git_ok:
             return self._git_undo()
         if not self._snapshots:
@@ -169,6 +199,10 @@ class FileBackedSession:
         """把当前 working（含直接对文件的改动）提交为一个版本。"""
         if not self._git_ok:
             return False
+        # git 模式下 undo 按「提交数」回退，故每个提交都要占一个 hook 位，
+        # 否则这次提交会错配到上一次 write_working 的载荷上（排版提交撤销时
+        # 会连带把别名回退掉）。这条路径没有正文之外的状态，占位 None。
+        self._undo_hooks.append(None)
         self._git_commit(message)
         return True
 
@@ -182,18 +216,23 @@ class FileBackedSession:
             return False
 
     # ---- 计划级基线（intent-planning Task 7）：可回滚点 ----
-    def create_baseline(self, label: str = "plan") -> "SessionBaseline":
+    def create_baseline(self, label: str = "plan",
+                        *, extra_state=None) -> "SessionBaseline":
         """建立当前 working copy 的可回滚基线。
 
         git 可用 → 记录当前 HEAD commit（回滚走 reset --hard）；
         否则 → 把 working copy 快照到 `<workspace_root>/.baselines/<sid>/<bid>/`
         （在 session git 仓库**之外**，不会被 `git add -A` 误提交）。二进制安全。
+
+        `extra_state` 随基线一起保存，`restore_baseline` 成功后由调用方经
+        `take_undo_state()` 取回回放 —— 正文之外的状态（账本数字别名）也要跟着回滚。
         """
         baseline_id = f"{label}_{uuid.uuid4().hex[:8]}"
         if self._git_ok:
             head = self._git_head()
             if head:
-                return SessionBaseline(baseline_id=baseline_id, git_commit=head)
+                return SessionBaseline(baseline_id=baseline_id, git_commit=head,
+                                       extra_state=extra_state)
         # 降级：文件/二进制快照副本。
         snap_dir = os.path.join(
             self.workspace_root, ".baselines", self.session_id, baseline_id
@@ -202,11 +241,22 @@ class FileBackedSession:
         snap_path = os.path.join(snap_dir, os.path.basename(self.working_path))
         shutil.copyfile(self.working_path, snap_path)
         return SessionBaseline(
-            baseline_id=baseline_id, fallback_snapshot_path=snap_path
+            baseline_id=baseline_id, fallback_snapshot_path=snap_path,
+            extra_state=extra_state,
         )
 
     def restore_baseline(self, baseline: "SessionBaseline") -> bool:
-        """回滚 working copy 到基线；只影响 working copy，**不动源文件**。"""
+        """回滚 working copy 到基线；只影响 working copy，**不动源文件**。
+
+        成功时把 `baseline.extra_state` 交给 `take_undo_state()`（与 `undo()` 同口径）；
+        失败不交 —— 正文没回滚，配对状态也不能回滚。
+        """
+        ok = self._restore_working(baseline)
+        if ok and baseline.extra_state is not None:
+            self._pending_undo_state = baseline.extra_state
+        return ok
+
+    def _restore_working(self, baseline: "SessionBaseline") -> bool:
         if baseline.git_commit and self._git_ok:
             try:
                 return self._git(
@@ -252,7 +302,6 @@ class FileBackedSession:
 
         docx 与其他格式走**同一条路**：working 本身就是同格式副本，直接拷回即可，
         不再有格式转换、也就没有保真损失。
-
         """
         # 先拷到源文件同目录的 tmp 再 os.replace，保证原子且不破坏二进制。
         dest = self.source_path

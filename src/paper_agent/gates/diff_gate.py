@@ -39,6 +39,10 @@ _CITE = re.compile(r"\\cite[a-zA-Z]*\s*(?:\[[^\]]*\])?\{([^}]*)\}")
 _BRACKET_REF = re.compile(
     r"\\?\[([0-9A-Za-z][\w:,\-]*(?:[ \t]*,[ \t]*[\w:\-]+)*)\\?\](?!\()"
 )
+#: `[n]` 标记语法的**单一来源**。`bibliography_sync` 顺序重编号要就地改写正文标记，
+#: 必须和 `extract_citation_tokens` 认的是同一套语法 —— 各自写一份正则必然漂移
+#: （抽取认得 `[12, 21]` / `\[7\]`，改写认不得，就会漏改成悬空引用）。
+CITATION_BRACKET_RE = _BRACKET_REF
 # markdown 任务框 `- [x]` / `* [ ]`：`[x]` 会被 _BRACKET_REF 当成 token `x`
 # ⇒ 草稿里的待办清单变成「新增引用无法解析：x」。只在**列表项开头**这个位置剔除，
 # 不影响正文里合法的单字母 bibkey。（`[ ]` 因首字符须字母/数字本就不匹配。）

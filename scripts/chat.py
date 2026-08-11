@@ -474,7 +474,15 @@ def main(argv: list[str]) -> int:
             print(f"已保存到：{saved[0] if saved else session.source_path}")
             continue
         if msg == ":undo":
-            print("已撤销。" if session.undo() else "没有可撤销的修改。")
+            if session.undo():
+                # 正文与账本别名同回退：只回正文会让旧号解析到别的文献。
+                aliases = session.take_undo_state()
+                if aliases:
+                    facts.ledger.restore_numeric_aliases(aliases)
+                    facts.save()
+                print("已撤销。")
+            else:
+                print("没有可撤销的修改。")
             continue
 
         # 自然语言意图

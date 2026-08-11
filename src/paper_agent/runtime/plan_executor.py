@@ -323,6 +323,7 @@ def dispose_baseline(
             session.restore_baseline(baseline)
         except Exception:  # noqa: BLE001
             return "pending"
+        _restore_aliases(session, ctx)
         _release(session, baseline)
         state.baseline = None
         return "rolled_back"
@@ -504,6 +505,51 @@ def _remaining(plan: Task_Plan, results: list[OperationResult]) -> tuple[Operati
     return tuple(op for op in plan.operations if op.operation_id not in done)
 
 
+def _restore_aliases(session, ctx: HandlerContext) -> None:
+    """回滚正文后回放随基线保存的别名快照，使「正文 `[n]` ⇔ 账本」重新自洽。
+
+    拿不到快照或账本就静默跳过：别名没回退是退化（旧号可能指错），
+    但不该让已成功的正文回滚反过来失败。
+    """
+    take = getattr(session, "take_undo_state", None)
+    if take is None:
+        return
+    try:
+        aliases = take()
+    except Exception:  # noqa: BLE001
+        return
+    if not aliases:
+        return
+    facts = getattr(ctx, "facts", None)
+    ledger = getattr(facts, "ledger", None)
+    restore = getattr(ledger, "restore_numeric_aliases", None)
+    if restore is None:
+        return
+    try:
+        restore(aliases)
+        save = getattr(facts, "save", None)
+        if save is not None:
+            save()
+    except Exception:  # noqa: BLE001
+        return
+
+
+def _alias_snapshot(ctx: HandlerContext):
+    """取账本数字别名快照，随基线保存。取不到返回 None（回滚仍只回正文）。
+
+    顺序编码把「正文 `[n]` 指哪条」记在别名里，计划级回滚也必须带上它，
+    否则回滚后旧号解析到别的文献。
+    """
+    ledger = getattr(getattr(ctx, "facts", None), "ledger", None)
+    snap = getattr(ledger, "numeric_alias_snapshot", None)
+    if snap is None:
+        return None
+    try:
+        return snap()
+    except Exception:  # noqa: BLE001 - 快照失败不阻断执行
+        return None
+
+
 def _create_baseline(ctx: HandlerContext):
     """建立计划级可回滚基线；session 不支持则返回 None（不阻塞执行）。"""
     session = getattr(ctx, "session", None)
@@ -511,7 +557,13 @@ def _create_baseline(ctx: HandlerContext):
     if create is None:
         return None
     try:
-        return create("plan")
+        return create("plan", extra_state=_alias_snapshot(ctx))
+    except TypeError:
+        # 老 session 替身没有 extra_state：退回旧签名，正文基线照常建。
+        try:
+            return create("plan")
+        except Exception:  # noqa: BLE001
+            return None
     except Exception:  # noqa: BLE001 - 基线失败不阻断执行，只是无法回滚
         return None
 

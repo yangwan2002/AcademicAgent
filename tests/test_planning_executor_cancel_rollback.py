@@ -253,6 +253,92 @@ def test_partial_with_rollback_restores_then_releases(monkeypatch):
     assert state.baseline is None
 
 
+class _AliasSession(_FakeSession):
+    """支持 `extra_state` 的 session：记录基线带的载荷并在回滚后交还。"""
+
+    def __init__(self):
+        super().__init__()
+        self._pending = None
+
+    def create_baseline(self, label="plan", *, extra_state=None):
+        b = SessionBaseline(baseline_id=f"{label}_1", extra_state=extra_state)
+        self.baselines.append(b)
+        return b
+
+    def restore_baseline(self, b):
+        self.restored.append(b)
+        self._pending = b.extra_state
+        return True
+
+    def take_undo_state(self):
+        state, self._pending = self._pending, None
+        return state
+
+
+class _AliasLedger:
+    def __init__(self):
+        self.snapshots = 0
+        self.restored_with = None
+
+    def numeric_alias_snapshot(self):
+        self.snapshots += 1
+        return {"r1": ("4",)}
+
+    def restore_numeric_aliases(self, snapshot):
+        self.restored_with = snapshot
+
+
+class _AliasFacts:
+    def __init__(self):
+        self.ledger = _AliasLedger()
+        self.saved = 0
+
+    def save(self):
+        self.saved += 1
+
+
+def test_plan_rollback_also_restores_numeric_aliases(monkeypatch):
+    """计划级回滚必须连账本别名一起回退，否则回滚后旧号解析到别的文献。"""
+    class _FailSecond:
+        intent = Intent.POLISH
+
+        def execute(self, op, ctx, bus=None, cancel_token=None):
+            st = (OperationStatus.REJECTED if op.operation_id == "o2"
+                  else OperationStatus.SUCCEEDED)
+            return OperationResult(op.operation_id, st, changed_working_copy=True)
+
+    monkeypatch.setattr(PE, "handler_for", lambda i: _FailSecond())
+    session, facts = _AliasSession(), _AliasFacts()
+    state = Plan_Execution_State()
+    execute_plan(_plan(_op("o1"), _op("o2")), state,
+                 HandlerContext(session=session, facts=facts),
+                 ask_disposition=lambda ids: ROLLBACK)
+    assert session.restored and session.released
+    assert facts.ledger.snapshots == 1                  # 基线建立时取了一次
+    assert facts.ledger.restored_with == {"r1": ("4",)}  # 回滚时回放
+    assert facts.saved == 1
+
+
+def test_plan_rollback_survives_session_without_extra_state(monkeypatch):
+    """老 session 没有 `extra_state`：退回旧签名，正文回滚照常完成。"""
+    class _FailSecond:
+        intent = Intent.POLISH
+
+        def execute(self, op, ctx, bus=None, cancel_token=None):
+            st = (OperationStatus.REJECTED if op.operation_id == "o2"
+                  else OperationStatus.SUCCEEDED)
+            return OperationResult(op.operation_id, st, changed_working_copy=True)
+
+    monkeypatch.setattr(PE, "handler_for", lambda i: _FailSecond())
+    session = _FakeSession()          # create_baseline 不接受 extra_state
+    state = Plan_Execution_State()
+    execute_plan(_plan(_op("o1"), _op("o2")), state,
+                 HandlerContext(session=session, facts=_AliasFacts()),
+                 ask_disposition=lambda ids: ROLLBACK)
+    assert session.restored and session.released
+    assert state.baseline is None
+
+
 def test_no_answer_keeps_baseline_pending():
     session = _FakeSession()
     state = Plan_Execution_State(baseline=session.create_baseline())

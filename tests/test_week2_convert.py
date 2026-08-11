@@ -116,6 +116,27 @@ def test_git_undo_reverts_last_write(tmp_path):
     assert "% edit1" not in s.read_working()
 
 
+def test_undo_hook_pairs_with_writes_across_bare_commits(tmp_path):
+    """hook 载荷必须与「回退一步」严格配对，含 `commit()`（排版）这种裸提交。
+
+    裸提交不占位的话，撤销排版会错误回放上一次 write_working 的载荷。
+    """
+    src = tmp_path / "p.tex"
+    src.write_text(SAMPLE_TEX, encoding="utf-8")
+    s = FileBackedSession(str(src), workspace_root=str(tmp_path / "ws"))
+    s.write_working(SAMPLE_TEX + "\n% e1\n", message="e1",
+                    undo_hook=lambda: {"mark": "A"})
+    if not s.git_enabled:
+        pytest.skip("裸 commit 只在 git 模式下产生版本")
+    s.commit("format only")                     # 排版提交：无正文之外状态
+
+    assert s.undo() is True
+    assert s.take_undo_state() is None          # 撤排版 → 不回放别名
+    assert s.undo() is True
+    assert s.take_undo_state() == {"mark": "A"}  # 撤那次写入 → 回放它自己的
+    assert s.take_undo_state() is None          # 取后清空，不重复回放
+
+
 # ---- 端到端转换 ----
 
 @pandoc_required

@@ -201,6 +201,27 @@ class ReferenceLedger:
                 out.update(rec.numeric_aliases)
         return out
 
+    # ------------------------------------------------------------ 数字别名快照
+    def numeric_alias_snapshot(self) -> dict[str, tuple[str, ...]]:
+        """导出「reference_id → 数字别名」的快照，供 `:undo` 与正文一起回退。
+
+        顺序编码（`bibliography_sync.renumber_sequentially`）把「正文 `[n]` 指哪条」
+        这个身份记在了别名里。正文回退而别名不回退，旧号就会解析到**别的文献** ——
+        实测 `[4]` 原指 T4、undo 后指 T3。故正文快照必须配一份别名快照。
+
+        只带别名、不带整条记录：`:undo` 撤的是一次编辑，不该把这期间新入库的文献
+        元数据也抹掉。
+        """
+        return {rid: rec.numeric_aliases for rid, rec in self._records.items()}
+
+    def restore_numeric_aliases(self, snapshot: dict[str, tuple[str, ...]]) -> None:
+        """按快照还原数字别名；快照里没有的记录（此后新入库的）保持不动。"""
+        for rid, aliases in snapshot.items():
+            rec = self._records.get(rid)
+            if rec is not None and rec.numeric_aliases != aliases:
+                self._records[rid] = rec.with_changes(numeric_aliases=aliases)
+        self._rebuild_indexes()
+
     # ------------------------------------------------------------ 写
     def replace(self, record: ReferenceRecord) -> None:
         """整条替换（唯一的原地覆盖入口）；随后重建索引。"""
