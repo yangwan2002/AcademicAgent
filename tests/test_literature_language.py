@@ -65,15 +65,82 @@ def test_language_golden_set(title, abstract, hint, exp_code, exp_bucket):
     assert v.quota_bucket == exp_bucket, (title, v)
 
 
-def test_chinese_no_source_is_medium():
+def test_chinese_no_source_is_high_not_medium():
+    """源字段缺失**不再降置信**：汉字是硬证据，源字段实测只有约 19% 标对。
+
+    旧行为判 medium，在默认 high_only 下不计入 zh 配额，`zh>=5` 恒定失败。
+    reason 仍留 source_missing 供审计。
+    """
     v = classify_language("基于深度学习的图像分类研究", "", "")
-    assert v.language_code == "zh" and v.confidence == "medium"
+    assert v.language_code == "zh" and v.confidence == "high"
+    assert "source_missing" in v.reason_codes
 
 
-def test_chinese_source_conflict_trusts_script_but_low():
+def test_chinese_source_conflict_is_high_script_wins():
+    """源说 en 而标题是汉字 → 判 zh/high。实测 16/31 条中文文献被标成 en。
+
+    旧行为降 low，等于让一个 81% 出错的外部字段否决眼前的汉字。
+    """
     v = classify_language("基于深度学习的图像分类研究", "", "en")
-    assert v.language_code == "zh" and v.confidence == "low"
+    assert v.language_code == "zh" and v.confidence == "high"
     assert "script_source_conflict" in v.reason_codes
+
+
+def test_chinese_mislabeled_ja_still_counts_zh():
+    """真机样本：纯中文标题被 OpenAlex 标成 ja，必须仍计入 zh 配额。
+
+    汉字无假名 → script_signal 判 han_dominant（ja 分支要求假名占比达阈值），
+    故源字段的 ja 不会把它踢到 other。这条钉的是真实回归场景。
+    """
+    from paper_agent.literature.language import counts_toward
+
+    v = classify_language("结合图论的异源影像点云配准方法", "", "ja")
+    assert v.quota_bucket == "zh"
+    assert counts_toward(v, "zh", policy="high_only")
+
+
+def test_chinese_title_with_long_acronym_still_zh():
+    """中文标题嵌模型名缩写把拉丁占比顶过半时，仍须判 zh（真机样本）。
+
+    「基于BERT-BiLSTM-CRF模型的中文实体识别」han 占比仅 0.46，纯占比规则会判 latin
+    → 漏出 zh 配额。汉字绝对数通路（han_count_zh=6）接住它。
+    """
+    v = classify_language("基于BERT-BiLSTM-CRF模型的中文实体识别", "", "zh")
+    assert v.quota_bucket == "zh"
+    assert counts_toward(v, "zh", policy="high_only")
+
+
+def test_bilingual_title_counts_as_zh():
+    """中英双语标题（中文题 + 括号内英文译名）须判 zh，不得因英文段过长翻成 en。
+
+    真机样本 han 占比仅 0.24，且源字段标成 en —— 占比与源字段两路都失效，
+    靠汉字绝对数定案。
+    """
+    title = ("基于深度学习和同生矩阵的SAR图像纹理特征检索方法 "
+             "(SAR Image Feature Retrieval Method Based on Deep Learning "
+             "and Synchronic Matrix).")
+    v = classify_language(title, "", "en")
+    assert v.quota_bucket == "zh"
+    assert counts_toward(v, "zh", policy="high_only")
+
+
+def test_english_title_never_reaches_han_count_floor():
+    """绝对数通路不得误伤英文：英文标题偶带一两个汉字注释仍应判 en。
+
+    钉的是 han_count_zh=6 取 6 而非 4 的余量 —— 实测 27 条纯英文标题汉字数恒为 0，
+    这条断言防的是「英文标题夹少量汉字」这种边缘输入被翻成 zh。
+    """
+    v = classify_language("Cross-View Geo-Localization 综述", "", "en")
+    assert v.quota_bucket == "en"
+
+
+def test_japanese_title_with_many_han_still_ja():
+    """假名优先于汉字绝对数：日文标题汉字再多也不能判 zh。
+
+    script_signal 里 kana 分支在 Han 之前，绝对数通路没有改变这个顺序。
+    """
+    v = classify_language("深層学習を用いた画像認識の研究とその応用について", "", "")
+    assert v.language_code == "ja" and v.quota_bucket == "other"
 
 
 def test_latin_no_source_is_unknown_not_en():

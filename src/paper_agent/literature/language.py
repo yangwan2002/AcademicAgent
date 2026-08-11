@@ -31,6 +31,15 @@ class LanguageThresholds:
     kana_min: float = 0.05          # 假名占比 ≥ 此值 → 显著假名（→ ja）
     hangul_min: float = 0.05        # Hangul 占比 ≥ 此值 → 显著 Hangul（→ ko）
 
+    # 汉字**绝对数**下限：占比之外的第二条通路（满足其一即 Han 主导）。
+    # 动机（2026-08 真机校准，70 条 OpenAlex 标题）：中文标题里嵌模型名/软件名会把
+    # 拉丁占比顶上去 —— 「基于BERT-BiLSTM-CRF模型的中文实体识别」han 仅 0.46，
+    # 纯占比规则判成 latin、漏出 zh 配额，而它明显是中文论文。
+    # 定 6 的依据：实测中文标题汉字数 min=7、中位 20；纯英文标题（27 条）汉字数恒为 0，
+    # 故这条通路对英文侧**零误伤**（英文标题不可能凑出 6 个汉字）。
+    # 取 6 而非 4，是给「英文标题偶带一两个汉字注释」留出余量。
+    han_count_zh: int = 6
+
 
 DEFAULT_THRESHOLDS = LanguageThresholds()
 
@@ -122,7 +131,9 @@ def script_signal(text: str, thresholds: LanguageThresholds = DEFAULT_THRESHOLDS
         return "ja"
     if r["hangul"] >= thresholds.hangul_min:
         return "ko"
-    if r["han"] >= thresholds.han_ratio_zh:
+    # 占比**或**绝对数达标即 Han 主导。绝对数这条通路专治「中文标题嵌长英文缩写」，
+    # 见 `LanguageThresholds.han_count_zh`；两条都不满足才继续往下判拉丁。
+    if r["han"] >= thresholds.han_ratio_zh or counts["han"] >= thresholds.han_count_zh:
         return "han_dominant"
     if r["latin"] >= thresholds.latin_ratio:
         return "latin"
@@ -189,14 +200,24 @@ def classify_language(
     if title_sig == "cyrillic":
         return LanguageVerdict("other", "other", "medium", "script_analysis", ratios, ("cyrillic",))
 
-    # 2) Han 主导 → 中文（字符是硬证据）
+    # 2) Han 主导 → 中文，且**置信恒为 high**：汉字占比 ≥50% 基本不可能是误判，
+    #    而源 language 字段实测极不可靠。2026-08 真机实测（OpenAlex 4 个中文查询、
+    #    31 条中文标题文献）：字段为 en 的 16 条、ja 4 条、ru 1 条、空缺 4 条，
+    #    只有 6/31 标对 —— 准确率约 19%，其中「结合图论的异源影像点云配准方法」
+    #    这类纯中文标题被标成 ja。
+    #
+    #    旧实现把源字段缺失降 medium、冲突降 low，于是默认策略 high_only（只计 high）
+    #    下仅 6/31 能计入 zh 配额，`zh>=5` 这类要求**恒定失败**、检索白跑。
+    #    降置信名义上是保守，方向其实反了：那等于宁信一个 81% 出错的外部字段，
+    #    也不信眼前的汉字。故这里让硬证据说话，冲突/缺失只记 reason 供审计，不降置信。
     if title_sig == "han_dominant":
         if source == "zh":
             return LanguageVerdict("zh", "zh", "high", "agreement", ratios)
         if source == "unknown":
-            return LanguageVerdict("zh", "zh", "medium", "script_analysis", ratios, ("source_missing",))
-        # 源说非 zh，与字符冲突 → 信字符但降 low
-        return LanguageVerdict("zh", "zh", "low", "script_analysis", ratios, ("script_source_conflict",))
+            return LanguageVerdict("zh", "zh", "high", "script_analysis", ratios,
+                                   ("source_missing",))
+        return LanguageVerdict("zh", "zh", "high", "script_analysis", ratios,
+                               ("script_source_conflict",))
 
     # 3) 拉丁主导 → 英文靠源字段
     if title_sig == "latin":

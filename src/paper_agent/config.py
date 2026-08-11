@@ -89,6 +89,9 @@ class Config:
 
     # ---- literature-evidence / A2a 语言判定阈值（初始值，需由 Golden Set 校准）----
     literature_lang_han_zh: float = 0.50        # Han 占比 ≥ → Han 主导（中文候选）
+    # 汉字绝对数 ≥ → 也算 Han 主导（与占比是 OR 关系）。治「中文标题嵌 BERT-BiLSTM-CRF
+    # 这类缩写把拉丁占比顶过半」的漏判；英文标题汉字数恒 0，零误伤。见 language.py 注释。
+    literature_lang_han_count: int = 6
     literature_lang_latin: float = 0.50         # 拉丁占比 ≥ → 拉丁主导
     literature_lang_kana_min: float = 0.05      # 假名占比 ≥ → 显著假名（→ ja）
     literature_lang_hangul_min: float = 0.05    # Hangul 占比 ≥ → 显著 Hangul（→ ko）
@@ -211,6 +214,7 @@ def load_config() -> Config:
             "PAPER_LIT_SOURCE_PRIORITY", "openalex,semantic_scholar,arxiv"
         ),
         literature_lang_han_zh=_env_float("PAPER_LIT_LANG_HAN_ZH", 0.50, minimum=0.0),
+        literature_lang_han_count=_env_int("PAPER_LIT_LANG_HAN_COUNT", 6, minimum=1),
         literature_lang_latin=_env_float("PAPER_LIT_LANG_LATIN", 0.50, minimum=0.0),
         literature_lang_kana_min=_env_float("PAPER_LIT_LANG_KANA_MIN", 0.05, minimum=0.0),
         literature_lang_hangul_min=_env_float("PAPER_LIT_LANG_HANGUL_MIN", 0.05, minimum=0.0),

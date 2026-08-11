@@ -462,9 +462,26 @@ def test_filter_language_applies_policy():
     assert not filter_matches(_en("r2"), f, policy="high_only")
 
 
-def test_filter_language_high_only_excludes_medium():
-    # 中文标题但源缺失 → zh/medium；high_only 下语言 filter 不通过（D8）
+def test_filter_language_high_only_admits_chinese_without_source():
+    """中文标题即便源字段缺失，high_only 下也必须通过语言 filter。
+
+    改前判 zh/medium 被 high_only 挡掉，导致带 `zh>=N` 的检索恒定失败
+    （真机 OpenAlex 的 language 字段对中文文献只有约 19% 标对）。
+    """
     rec = _Rec(reference_id="r1", title="深度学习在医学诊断中的应用研究", language_hint="")
+    f = EligibilityFilter(FilterField.LANGUAGE, FilterOperator.EQ, "zh")
+    assert filter_matches(rec, f, policy="high_only")
+    assert filter_matches(rec, f, policy="include_low_with_warning")
+
+
+def test_filter_language_high_only_still_excludes_source_only_zh():
+    """放宽只针对**汉字硬证据**，不得顺带放宽「只有源字段说 zh」的低置信判定。
+
+    标题无可判书写系统（元数据残缺）+ 源说 zh → title_ambiguous/low，
+    high_only 下仍应挡住；否则这次改动就从「信字符」滑成了「信一切」，
+    而源字段恰恰是被实测证明不可靠的那一路信号。
+    """
+    rec = _Rec(reference_id="r2", title="2024 -- 12345", language_hint="zh")
     f = EligibilityFilter(FilterField.LANGUAGE, FilterOperator.EQ, "zh")
     assert not filter_matches(rec, f, policy="high_only")
     assert filter_matches(rec, f, policy="include_low_with_warning")

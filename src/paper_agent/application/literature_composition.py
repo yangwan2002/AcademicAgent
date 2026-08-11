@@ -62,6 +62,7 @@ class CompositionUnavailable(Exception):
 def _thresholds(config: Config) -> LanguageThresholds:
     return LanguageThresholds(
         han_ratio_zh=config.literature_lang_han_zh,
+        han_count_zh=config.literature_lang_han_count,
         latin_ratio=config.literature_lang_latin,
         kana_min=config.literature_lang_kana_min,
         hangul_min=config.literature_lang_hangul_min,
