@@ -16,7 +16,10 @@
 命令：
     :sections   列出章节
     :refs       回填参考文献著录字段（刊名/卷/期/页，按 DOI 查 Crossref）
-    :save       把 working copy 落盘到源文件
+    :save       把 working copy 落盘到源文件。docx 的引用会存成 Word 交叉引用域
+                （编号可在 Word 里 F9 自动更新）；加 --plain 存纯文本 [n]
+    :export     另存一份交叉引用版到**别的路径**（源文件不动），如投稿版
+                可选路径：:export D:\\out.docx；默认在源文件旁加 _crossref 后缀
     :undo       撤销上一次修改
     :stats      本次会话的 Turn 归属统计（新栈 / shadow / 静默降级到旧栈）
     :quit       退出（不自动保存源文件）
@@ -90,6 +93,101 @@ def _print_sections(index: SectionIndex) -> None:
     for i, s in enumerate(index.list(), start=1):
         indent = "  " * (s.level - 1)
         print(f"  {i}. {indent}{s.title}  [{s.id}]")
+
+
+def _note_save_crossref(session, attempted: bool) -> None:
+    """报告 `:save` 的升域结果 —— 成功、退化、或断链警告。"""
+    if not attempted:
+        return
+    err = getattr(session, "last_save_crossref_error", "")
+    if err:
+        print(f"⚠ 升成交叉引用失败（{err}），已按纯文本 [n] 保存，正文内容完整。")
+        return
+    rep = getattr(session, "last_save_crossref", None)
+    if rep is None:
+        return
+    if getattr(rep, "already_converted", False):
+        return
+    if rep.fields:
+        print(f"· 引用已存为交叉引用域（{rep.fields} 处，{rep.bookmarks} 条书签）。"
+              f"Word 里 Ctrl+A → F9 可重算编号。")
+    if rep.dangling:
+        print(f"⚠ 这些编号正文引用了但文献表没有，保留为纯文本："
+              f"{'、'.join(rep.dangling)}")
+    for w in getattr(rep, "warnings", []) or []:
+        print(f"⚠ {w}")
+
+
+def _note_crossref_import(session) -> None:
+    """告知「你的引用本来是交叉引用，已摊平成文本以便编辑，导出时会还原」。
+
+    不说的话，用户会看到 `:refs` 里凭空出现引用编号，却不知道文档被动过。
+    """
+    rep = getattr(session, "crossref_import", None)
+    err = getattr(session, "_crossref_error", "")
+    if err:
+        print(f"⚠ 交叉引用检测失败（{err}）；若原文引用是域，编辑可能错位。")
+        return
+    if rep is None:
+        return
+    if getattr(rep, "flattened", 0):
+        print(f"· 原文 {rep.flattened} 处引用是交叉引用域，已在副本里摊平成文本"
+              f"（源文件未动）。编辑后 `:export` 会还原成域并复用原书签。")
+    for w in getattr(rep, "warnings", []) or []:
+        print(f"⚠ {w}")
+
+
+def _cmd_export(session, msg: str) -> None:
+    """`:export [路径]` —— 另存一份引用为交叉引用域的 docx 到**别的路径**。
+
+    `:save` 现在默认也存域版（`import_crossrefs` 让带域文件能安全重新载入），
+    所以这条命令的用途收窄成「想留一份副本、不动源文件」，比如投稿版。
+    """
+    src = session.working_path
+    if not src.lower().endswith(".docx"):
+        print(":export 只支持 docx（tex 的 \\cite 由 LaTeX 自己排，md 无域概念）。")
+        return
+
+    arg = msg[len(":export"):].strip().strip('"')
+    if arg:
+        dest = os.path.abspath(arg)
+    else:
+        base, ext = os.path.splitext(session.source_path)
+        dest = f"{base}_crossref{ext}"
+
+    if os.path.exists(dest):
+        ans = input(f"目标已存在，覆盖？{dest} [y/N] ").strip().lower()
+        if ans not in ("y", "yes"):
+            print("已取消。")
+            return
+
+    # 原文引用本来就是域 → 复用原书签，避免别处引用旧书签的域断链。
+    imported = getattr(session, "crossref_import", None)
+    bmap = dict(getattr(imported, "bookmark_map", {}) or {})
+
+    from paper_agent.tools.docx_crossref import export_crossrefs
+    try:
+        rep = export_crossrefs(src, dest, superscript=True, bookmark_map=bmap)
+    except ValueError as exc:            # 目标 == 源文件等硬约束
+        print(f"未导出：{exc}")
+        return
+    except Exception as exc:             # noqa: BLE001 —— 导出失败不该拖垮会话
+        print(f"导出失败：{type(exc).__name__}: {exc}")
+        return
+
+    if rep.already_converted:
+        print(f"已导出（原文已含交叉引用域，未重复转换）：{rep.dest_path}")
+    else:
+        print(f"已导出：{rep.dest_path}")
+        print(f"  文献表书签 {rep.bookmarks} 条，正文交叉引用域 {rep.fields} 处")
+    if rep.dangling:
+        print(f"  ⚠ 正文引用了但文献表无对应条目（保留为纯文本）：{', '.join(rep.dangling)}")
+    if rep.uncited:
+        print(f"  · 文献表有但正文未引用：{', '.join(rep.uncited)}")
+    for w in rep.warnings:
+        print(f"  · {w}")
+    if rep.fields:
+        print("  提示：Word 打开后按 Ctrl+A → F9 可刷新域编号（Word 不会自动重算）。")
 
 
 def _warn_if_no_sections(session, index: SectionIndex) -> None:
@@ -424,6 +522,7 @@ def main(argv: list[str]) -> int:
     _print_sections(index)
     _warn_if_no_sections(session, index)
     _note_docx_scope(session)
+    _note_crossref_import(session)
     print("\n输入润色需求，或 :help 查看命令。")
 
     while True:
@@ -462,16 +561,27 @@ def main(argv: list[str]) -> int:
             facts.save()
             print(report.message)
             continue
-        if msg == ":save":
+        if msg == ":save" or msg == ":save --plain":
             # docx 与 md/tex 走同一条路：working 本身就是同格式副本，直接拷回。
             # 就地编辑不再有格式转换，因此不需要"另存以防丢排版"那套额外问答。
+            # docx 默认**存成交叉引用域版**（`--plain` 存纯文本 `[n]`）：编号能在
+            # Word 里自动更新，且下次载入会自动摊平，不必记额外命令。
+            want_xref = (
+                session.save_crossrefs
+                and bool(session.docx_source)
+                and msg != ":save --plain"
+            )
             saved: list[str] = []
 
             def _do_save(bus, _ct):
-                saved.append(session.save_to_source(bus=bus))
+                saved.append(session.save_to_source(bus=bus, crossrefs=want_xref))
                 return None
             coordinator.run(_do_save)  # :save 是独立 run
             print(f"已保存到：{saved[0] if saved else session.source_path}")
+            _note_save_crossref(session, want_xref)
+            continue
+        if msg == ":export" or msg.startswith(":export "):
+            _cmd_export(session, msg)
             continue
         if msg == ":undo":
             if session.undo():

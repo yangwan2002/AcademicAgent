@@ -67,11 +67,23 @@ class FileBackedSession:
     # （早前版本把 working 变成 markdown、保存时用 pandoc 重建，导致 run 级排版
     #   被静默丢弃 —— 纯排版请求会「报告成功但结果错误」。已弃用该路径。）
     docx_source: str = field(default="", init=False)
+    # 载入时把源文档里已有的 REF 交叉引用域摊平成纯文本后的报告（见 __post_init__）。
+    # 非 None 且 flattened>0 表示「用户提交的就是交叉引用版」—— 导出时要升回域。
+    crossref_import: object = field(default=None, init=False)
+    # `:save` 是否把 docx 存成交叉引用域版（默认是 —— 用户要的是能自动更新编号的
+    # 成品；working copy 仍保持纯文本，升域只作用于写出的那一份）。
+    save_crossrefs: bool = True
+    # 升域时 `[n]` 连方括号一起上标（GB/T 7714 顺序编码制的常见排法）。
+    crossref_superscript: bool = True
+    # 最近一次 `:save` 的升域报告与错误（由 `_write_crossref_copy` 填，上层负责提示）。
+    last_save_crossref: object = field(default=None, init=False)
+    last_save_crossref_error: str = field(default="", init=False)
     _snapshots: list[str] = field(default_factory=list, init=False)
     # 与每次 write_working 一一对应的「正文之外的待回退状态」（见 write_working）。
     # git 可用时 _snapshots 为空，这个栈仍照常压 —— 两条 undo 路径都要回放它。
     _undo_hooks: list[object] = field(default_factory=list, init=False)
     _pending_undo_state: object = field(default=None, init=False)
+    _crossref_error: str = field(default="", init=False)
     _git_ok: bool = field(default=False, init=False)
 
     def __post_init__(self) -> None:
@@ -90,8 +102,27 @@ class FileBackedSession:
             self.docx_source = self.source_path
         self.working_path = os.path.join(self.session_dir, f"current.{self.ext}")
         shutil.copyfile(self.source_path, self.working_path)  # 源自此不再被触碰
+        if self.docx_source:
+            self._flatten_crossrefs()
         if self.use_git and _git_available():
             self._git_ok = self._git_init()
+
+    def _flatten_crossrefs(self) -> None:
+        """把 working copy 里已有的 REF 域摊平成纯文本（只动副本，源文件不碰）。
+
+        用户提交的 docx 引用若已是交叉引用域，投影层看不见域内文字，后果是**静默
+        数据损坏**：模型看到空的 `[]` 会自己补引用，写回时域元素还会漂移到段尾
+        （实测 `[1]...[2]` → `[]...[12]`）。摊平后整条流水线按纯文本正常工作，
+        `:export` 时再升回域并复用原书签。
+
+        摊平失败不阻塞会话 —— 退化成「和以前一样」，但报告里留下警告。
+        """
+        try:
+            from paper_agent.tools.docx_crossref import import_crossrefs
+            self.crossref_import = import_crossrefs(self.working_path)
+        except Exception as exc:  # noqa: BLE001 —— 载入不能因此失败
+            self.crossref_import = None
+            self._crossref_error = f"{type(exc).__name__}: {exc}"
 
     # ---- working 读写 ----
     def read_working(self) -> str:
@@ -297,16 +328,26 @@ class FileBackedSession:
         return None
 
     # ---- 明确落盘到源文件（用户 save 时才调用）----
-    def save_to_source(self, *, bus=None) -> str:
+    def save_to_source(self, *, bus=None, crossrefs: bool = False) -> str:
         """把 working 原子写回源文件（二进制安全）；返回实际写入的路径。
 
         docx 与其他格式走**同一条路**：working 本身就是同格式副本，直接拷回即可，
         不再有格式转换、也就没有保真损失。
+
+        `crossrefs=True`（docx 专用）先把正文 `[n]` 升成 REF 交叉引用域再写回，
+        于是保存产物**本身**就是交叉引用版，不必额外记一条 `:export`。
+
+        以前这条路只能存纯文本，因为带域的 docx 重新载入会让投影层看不见引用。
+        `import_crossrefs` 消除了那个前提（载入即摊平），所以限制不再成立。
+        working copy 仍保持纯文本 —— 升域只发生在写出的那一份上。
         """
         # 先拷到源文件同目录的 tmp 再 os.replace，保证原子且不破坏二进制。
         dest = self.source_path
         tmp = f"{dest}.tmp.{uuid.uuid4().hex[:8]}"
-        shutil.copyfile(self.working_path, tmp)
+        if crossrefs and self.docx_source:
+            self._write_crossref_copy(tmp)
+        else:
+            shutil.copyfile(self.working_path, tmp)
         os.replace(tmp, dest)
         if bus is not None:
             bus.publish(
@@ -315,6 +356,35 @@ class FileBackedSession:
                 status="saved",
             )
         return dest
+
+    def _write_crossref_copy(self, dest_tmp: str) -> None:
+        """把 working 的交叉引用版写到 `dest_tmp`。转换失败则退回纯文本副本。
+
+        保存**不能因为升域失败而丢内容** —— 那是用户的正文。转换出错时照常写纯文本，
+        并把原因记在 `last_save_crossref_error` 里由上层提示。
+        """
+        from paper_agent.tools.docx_crossref import export_crossrefs
+
+        self.last_save_crossref = None
+        self.last_save_crossref_error = ""
+        staging = f"{dest_tmp}.xref.docx"
+        try:
+            bmap = dict(getattr(self.crossref_import, "bookmark_map", {}) or {})
+            rep = export_crossrefs(
+                self.working_path, staging,
+                superscript=self.crossref_superscript, bookmark_map=bmap,
+            )
+            self.last_save_crossref = rep
+            shutil.copyfile(staging, dest_tmp)
+        except Exception as exc:  # noqa: BLE001 —— 宁可存纯文本也不能丢正文
+            self.last_save_crossref_error = f"{type(exc).__name__}: {exc}"
+            shutil.copyfile(self.working_path, dest_tmp)
+        finally:
+            if os.path.exists(staging):
+                try:
+                    os.remove(staging)
+                except OSError:
+                    pass
 
     def read_source(self) -> str:
         """返回**源文件**的文本。
