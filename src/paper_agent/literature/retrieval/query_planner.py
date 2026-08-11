@@ -16,6 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
+from paper_agent.literature.language import script_counts
 from paper_agent.literature.untrusted import clean_external_text
 from paper_agent.providers.llm.base import LLMProvider, Message
 from paper_agent.providers.llm.structured import CallStatus, structured_call
@@ -46,12 +47,50 @@ class PlannerRequest:
     tried_queries: tuple[str, ...] = ()
     available_source_names: tuple[str, ...] = ()
     note: str = ""
+    # 用户原始表述（criteria.section_purpose）。合成器会把 semantic_topic 归一成英文
+    # （实测："跨视角图像地理定位" → "cross-view geo-localization"），于是补 language.zh
+    # 缺口时 Planner 手里只有英文，拼不出可用的中文查询。这里单独带上原文，
+    # **只用于构造查询**，不进 criteria / 不进 TaskFingerprint。
+    purpose: str = ""
 
 
 @runtime_checkable
 class QueryPlanner(Protocol):
     def propose(self, request: PlannerRequest) -> SearchPlan:
         ...
+
+
+def _has_han(text: str) -> bool:
+    return script_counts(text)["han"] > 0
+
+
+def _zh_query(base: str, purpose: str) -> str:
+    """补 `language.zh` 缺口用的查询词。
+
+    旧实现是 `f"{base} 中文"`。真机实测（2026-08，OpenAlex，per-page=20）该查询
+    召回**中文文献 0~1 条** —— 「中文」被当普通检索词，匹到的是标题里含 Chinese
+    的英文论文。换成中文检索词后同一主题召回中文 10~15 条：
+
+        主题                查询            中文条数  其中切题
+        跨视角图像地理定位   英文+「中文」        1        1
+        跨视角图像地理定位   中文原文            10        3
+        大语言模型代码生成   英文+「中文」        0        0
+        大语言模型代码生成   中文原文            13        7
+        知识图谱问答        英文+「中文」        1        1
+        知识图谱问答        中文原文            15       12
+
+    也试过 OpenAlex 原生 `filter=language:zh`：语言纯度最高（19/20）但**切题率归零**
+    （返回锂铌钽矿床、天体生物学之类），因为过滤只约束语言、不约束相关性；
+    「中英并置」在 3 个主题上不稳定（切题 4/9/1，且会把命中总数压到 6 条）。故取中文原文。
+
+    `base` 已含汉字时直接用；否则退回 `purpose`（用户原始表述）。两者都没有汉字
+    说明这个任务确实没有中文表述可用，保持旧行为 —— 不硬拼一个必然无效的查询。
+    """
+    if _has_han(base):
+        return base
+    if purpose and _has_han(purpose):
+        return purpose
+    return f"{base} 中文"
 
 
 class DeterministicQueryPlanner:
@@ -69,7 +108,7 @@ class DeterministicQueryPlanner:
         extra: list[str] = []
         for dim in request.gap_dimensions:
             if dim.endswith("zh"):
-                extra.append(f"{base} 中文")
+                extra.append(_zh_query(base, request.purpose))
             elif dim.endswith("en"):
                 extra.append(f"{base} review")
         queries = tuple(q for q in extra if q and q not in request.tried_queries)
@@ -102,6 +141,11 @@ _TOOL = {
 _SYSTEM = (
     "你是文献检索策略规划器。据未满足的配额维度提出下一轮查询词与检索源，"
     "目标是补齐缺口。只通过 propose_search_plan 返回；不得修改配额、任务标准或预算。"
+    # 实测：给英文查询拼「中文」二字召回中文文献 0~1 条（检索引擎把它当普通词），
+    # 必须用中文学术术语本身。见 `_zh_query` docstring 的三主题对照数据。
+    "\n补 language.zh 缺口时，查询词必须是**中文学术术语**（如「跨视角图像地理定位」），"
+    "不要用英文查询词，也不要在英文查询后附加「中文」二字——两种写法都检索不到中文文献。"
+    "补 language.en 缺口时同理用英文术语。"
 )
 
 
@@ -115,12 +159,20 @@ class LLMQueryPlanner:
     def propose(self, request: PlannerRequest) -> SearchPlan:
         gaps = "、".join(request.gap_dimensions) or "（无明确维度）"
         tried = "；".join(request.tried_queries[-5:])
-        user = "\n".join([
+        lines = [
             f"主题：{clean_external_text(request.topic or request.initial_query, max_chars=500)}",
+        ]
+        # 主题常已被合成器归一成英文；带上用户原始表述，模型补 language.zh 时才有
+        # 中文词可用（否则它只能照英文主题瞎译）。见 `_zh_query` 的实测数据。
+        purpose = clean_external_text(request.purpose or "", max_chars=500)
+        if purpose and purpose != lines[0].split("：", 1)[1]:
+            lines.append(f"用户原始表述：{purpose}")
+        lines += [
             f"未满足维度：{gaps}",
             f"已试查询：{tried}",
             f"可用源：{'、'.join(request.available_source_names)}",
-        ])
+        ]
+        user = "\n".join(lines)
         call = structured_call(
             self._llm,
             [Message(role="system", content=_SYSTEM), Message(role="user", content=user)],

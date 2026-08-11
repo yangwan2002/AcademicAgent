@@ -116,6 +116,13 @@ class SearchIntent:
     seeds: tuple[SearchSeed, ...] = ()
     origin: SearchIntentOrigin = SearchIntentOrigin.OPERATION_DERIVED
     schema_version: str = _SCHEMA_VERSION
+    # 用户原始表述，**只用于构造查询词**（不进任何 hash，见 `semantic_fingerprint`）。
+    # 为什么需要独立字段：`semantic_topic` 由合成器归一，真机实测中文课题会被译成英文
+    # （"跨视角图像地理定位" → "cross-view geo-localization"）。补 language.zh 缺口时
+    # Planner 手里没有任何中文词，只能拼出检索不到中文文献的查询。原先靠
+    # `section_purpose` 兜（dogfood 里它恰好等于课题名），但该字段语义上是「章节目的」，
+    # 生产路径填 add_section 的 purpose 槽、也可能是规范化章节类型，不保证含原文。
+    raw_topic: str = ""
 
     def __post_init__(self) -> None:
         topic = normalize_text(self.semantic_topic, max_chars=_TOPIC_MAX)
@@ -126,6 +133,10 @@ class SearchIntent:
         object.__setattr__(self, "semantic_topic", topic)
         object.__setattr__(self, "section_purpose",
                            normalize_text(self.section_purpose, max_chars=_TOPIC_MAX))
+        # 只归一化、**不校验**：raw_topic 是纯召回辅助信号，不参与判定也不进 hash，
+        # 非法值（通用章节名/空）退化为「没有原文可用」，不该让整个请求失败。
+        object.__setattr__(self, "raw_topic",
+                           normalize_text(self.raw_topic, max_chars=_TOPIC_MAX))
         deduped = _dedup_seeds(self.seeds)
         if not (1 <= len(deduped) <= _MAX_SEEDS):
             raise SearchIntentError(f"seed 数量非法（{len(deduped)}），须 1–{_MAX_SEEDS}")
@@ -135,6 +146,10 @@ class SearchIntent:
         """仅语义字段（schema_version + topic + section_purpose，**不含 seeds**）。
 
         进 RelevanceCriteria / TaskFingerprint：seed 增删/排序/planner 改写不改变它。
+
+        **`raw_topic` 故意不在内**：它只影响召回（查询词构造），不影响「什么算切题」。
+        放进来会让同一课题因原始表述措辞不同而产生不同指纹，白丢相关性缓存。
+        同理不进 `strategy_hash`。
         """
         payload = {
             "schema_version": self.schema_version,
@@ -254,6 +269,7 @@ def search_intent_to_dict(intent: SearchIntent) -> dict:
         "schema_version": intent.schema_version,
         "semantic_topic": intent.semantic_topic,
         "section_purpose": intent.section_purpose,
+        "raw_topic": intent.raw_topic,
         "origin": intent.origin.value,
         "seeds": [{"text": s.text, "target": s.target.value, "origin": s.origin.value}
                   for s in intent.seeds],
@@ -271,6 +287,8 @@ def search_intent_from_dict(d: dict) -> SearchIntent:
     return SearchIntent(
         semantic_topic=str(d.get("semantic_topic", "")),
         section_purpose=str(d.get("section_purpose", "")),
+        # 缺 key → ""：旧 payload（无 raw_topic）照常重建，退化为「没有原文可用」。
+        raw_topic=str(d.get("raw_topic", "")),
         seeds=seeds,
         origin=SearchIntentOrigin(d.get("origin", "operation_derived")),
         schema_version=str(d.get("schema_version", _SCHEMA_VERSION)),

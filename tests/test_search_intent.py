@@ -164,3 +164,33 @@ def test_build_seeds_drops_invalid_and_generic():
 
 def test_build_seeds_all_invalid_returns_empty():
     assert build_seeds([{"text": "引言"}, {"text": "x"}]) == ()
+
+
+# ---------------------------------------------------------------- raw_topic（召回辅助字段）
+
+def test_raw_topic_excluded_from_both_hashes():
+    """`raw_topic` 只影响召回、不影响「什么算切题」⇒ 不得进任何 hash。
+
+    否则同一课题因原始表述措辞不同就换指纹，白丢相关性缓存。
+    """
+    base = SearchIntent(semantic_topic="cross-view geo-localization", seeds=(_seed("cvgl"),))
+    with_raw = SearchIntent(semantic_topic="cross-view geo-localization",
+                            raw_topic="跨视角图像地理定位", seeds=(_seed("cvgl"),))
+    assert with_raw.semantic_fingerprint() == base.semantic_fingerprint()
+    assert with_raw.strategy_hash() == base.strategy_hash()
+
+
+def test_raw_topic_invalid_value_does_not_raise():
+    """非法 raw_topic（通用章节名）退化为无原文可用，不该让整个请求失败。"""
+    it = SearchIntent(semantic_topic="code generation", raw_topic="引言",
+                      seeds=(_seed("code generation"),))
+    assert it.raw_topic == "引言"          # 只归一化，不校验
+    assert it.semantic_fingerprint()       # 仍可用
+
+
+def test_raw_topic_defaults_empty_and_normalized():
+    it = SearchIntent(semantic_topic="code generation", seeds=(_seed("code generation"),))
+    assert it.raw_topic == ""
+    padded = SearchIntent(semantic_topic="code generation", raw_topic="  大模型代码生成  ",
+                          seeds=(_seed("code generation"),))
+    assert padded.raw_topic == "大模型代码生成"

@@ -70,9 +70,22 @@ def _explicit_intent(ctx: SearchContext) -> SearchIntent | None:
     topic = _first_informative(ctx.explicit_query, ctx.purpose, ctx.direction, ctx.target_title) or q
     try:
         return SearchIntent(semantic_topic=topic, section_purpose=ctx.purpose,
+                            raw_topic=_raw_topic(ctx),
                             seeds=seeds, origin=SearchIntentOrigin.USER_EXPLICIT)
     except SearchIntentError:
         return None
+
+
+def _raw_topic(ctx: SearchContext) -> str:
+    """用户原始表述，供 Planner 构造查询词（尤其补 language.zh 缺口）。
+
+    取第一个有信息量的用户输入槽位。这里**不**做语言判断 —— 存原样，
+    由 `_zh_query` 按是否含汉字决定用不用。`paper_title` 排在 operation 槽位后面：
+    它是文档属性而非本次请求的表述，作为兜底更合适。
+    """
+    return _first_informative(
+        ctx.explicit_query, ctx.purpose, ctx.direction, ctx.details, ctx.paper_title,
+    )
 
 
 def _first_informative(*candidates: str) -> str:
@@ -114,6 +127,7 @@ def _deterministic_projection(ctx: SearchContext) -> SearchIntent | None:
         return None
     try:
         return SearchIntent(semantic_topic=topic, section_purpose=ctx.purpose,
+                            raw_topic=_raw_topic(ctx),
                             seeds=seeds[:6], origin=origin)
     except SearchIntentError:
         return None
@@ -214,7 +228,10 @@ class LLMSearchIntentSynthesizer:
         purpose = normalize_text(str(payload.get("section_purpose", "") or ctx.purpose),
                                  max_chars=500)
         try:
+            # raw_topic 取自 ctx（用户输入），**不**取 payload —— 模型给的是归一后的
+            # 主题，正是丢掉原文的那一步，从它身上取不回原始表述。
             return SearchIntent(semantic_topic=topic, section_purpose=purpose,
+                                raw_topic=_raw_topic(ctx),
                                 seeds=seeds[:6], origin=SearchIntentOrigin.OPERATION_DERIVED)
         except SearchIntentError:
             return None

@@ -132,3 +132,24 @@ def test_old_envelope_without_search_intents_ok(tmp_path):
     f = SessionFacts.load(str(path))
     assert f.pending_search_intents == []
     assert f.corrupt_search_intent_count == 0
+
+
+def test_raw_topic_survives_roundtrip():
+    it = SearchIntent(semantic_topic="cross-view geo-localization",
+                      raw_topic="跨视角图像地理定位",
+                      seeds=(SearchSeed(text="cvgl"),))
+    back = search_intent_from_dict(search_intent_to_dict(it))
+    assert back.raw_topic == "跨视角图像地理定位"
+
+
+def test_old_payload_without_raw_topic_still_loads():
+    """旧 session 落盘的 payload 没有 raw_topic ⇒ 缺 key 退化为空，不报错。"""
+    payload = {
+        "schema_version": "a2f-1",
+        "semantic_topic": "cross-view geo-localization",
+        "section_purpose": "",
+        "origin": "operation_derived",
+        "seeds": [{"text": "cvgl", "target": "any", "origin": "operation_derived"}],
+    }
+    back = search_intent_from_dict(payload)
+    assert back.raw_topic == ""

@@ -312,6 +312,12 @@ def run_retrieval_loop(
             req = PlannerRequest(
                 initial_query=request.initial_query,
                 topic=getattr(criteria, "topic", ""),
+                # `topic` 是合成器归一后的语义主题（实测常被译成英文），补 language.zh
+                # 缺口拼不出中文查询。优先用 intent.raw_topic（专为召回保留的原始表述）；
+                # 它为空时退回 criteria.section_purpose —— 后者语义上是章节目的，
+                # 只是真机上常恰好等于课题名，属兜底而非可依赖来源。
+                purpose=(getattr(request.search_intent, "raw_topic", "")
+                         or getattr(criteria, "section_purpose", "")),
                 gap_dimensions=tuple(g.dimension.value for g in gaps),
                 tried_queries=tuple(tried_queries),
                 available_source_names=source_names,
