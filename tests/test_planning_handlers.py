@@ -198,6 +198,78 @@ def test_format_non_docx_rejected(tmp_path):
     assert res.status is OperationStatus.REJECTED
 
 
+def _present_vb(value, verbatim):
+    return SlotValue(value=value, field_status=FieldStatus.PRESENT,
+                     source=SlotSource.USER_EXPLICIT, verbatim=verbatim)
+
+
+def test_verbatim_fallback_applies_format_when_ops_empty(tmp_path):
+    """`SlotValue.verbatim` 是**执行兜底输入**，不只是排障字段。
+
+    `FormatDocxHandler.execute` 在结构化 ops 为空时，把 verbatim 当自然语言喂给
+    `parse_format_ops()` 正则重抠一遍。此前无人测这条路 —— 而它会真改文档，
+    删掉/规范化这个字段会静默改变产出。
+
+    这条同时钉住 verbatim「必须逐字原话」的约束：正则认的是「四号」这类中文说法，
+    喂规范化后的值（比如 `14.0`）反而抠不出东西。
+    """
+    docx = pytest.importorskip("docx")
+    if not _git_available():
+        pytest.skip("需要 git")
+    from paper_agent.intents.format_docx import _format_target
+
+    path = tmp_path / "d.docx"
+    d = docx.Document()
+    d.add_paragraph("body text 0.87")
+    d.save(str(path))
+
+    session = FileBackedSession(str(path), workspace_root=str(tmp_path / "ws"))
+    if not session.git_enabled:
+        pytest.skip("需要 git 支持")
+
+    ctx = HandlerContext(session=session)
+    # ops 为空 + verbatim 带原话 → 走 parse_format_ops 兜底
+    op = _op(Intent.FORMAT_DOCX, {"operations": _present_vb([], "全文四号字")})
+    res = handler_for(Intent.FORMAT_DOCX).execute(op, ctx)
+
+    assert res.status is OperationStatus.SUCCEEDED, res.message
+    out = docx.Document(_format_target(session))
+    sizes = [r.font.size.pt for p in out.paragraphs for r in p.runs if r.font.size]
+    assert sizes and all(s == 14 for s in sizes), f"四号=14pt 未落地：{sizes}"
+
+
+def test_structured_ops_win_over_verbatim_fallback(tmp_path):
+    """两者都在时，结构化 ops 优先 —— 兜底不得覆盖模型的结构化结果。
+
+    避免「FormatOp → 中文 → 再解析」的有损往返（见 `execute_format` 文档）。
+    """
+    docx = pytest.importorskip("docx")
+    if not _git_available():
+        pytest.skip("需要 git")
+    from paper_agent.intents.format_docx import _format_target
+    from paper_agent.tools.docx_format import FormatOp
+
+    path = tmp_path / "d.docx"
+    d = docx.Document()
+    d.add_paragraph("body text")
+    d.save(str(path))
+
+    session = FileBackedSession(str(path), workspace_root=str(tmp_path / "ws"))
+    if not session.git_enabled:
+        pytest.skip("需要 git 支持")
+
+    ctx = HandlerContext(session=session)
+    # 结构化说 20pt，verbatim 说四号（14pt）→ 必须听结构化的
+    op = _op(Intent.FORMAT_DOCX,
+             {"operations": _present_vb([FormatOp("set_font_size", 20, "all")], "全文四号字")})
+    res = handler_for(Intent.FORMAT_DOCX).execute(op, ctx)
+
+    assert res.status is OperationStatus.SUCCEEDED, res.message
+    out = docx.Document(_format_target(session))
+    sizes = [r.font.size.pt for p in out.paragraphs for r in p.runs if r.font.size]
+    assert sizes and all(s == 20 for s in sizes), f"结构化 ops 被兜底覆盖：{sizes}"
+
+
 # ============ 每个 IntentSpec 可执行 Slot 确被 Handler 消费 ============
 
 def test_every_spec_slot_is_consumed_by_handler_source():

@@ -109,7 +109,22 @@ class SlotValue:
     value: Any = None
     field_status: FieldStatus = FieldStatus.USER_ABSENT
     source: SlotSource | None = None
+    #: 该槽位消费了哪些 requirement。**权威来源是模型自报**（抽取 schema 的
+    #: `slot_consumed_requirements`）—— 消费关系是语义事实，只在模型做「原话 →
+    #: 槽值」转换的那一刻产生，原文里并不存在答案，程序无从反推。
+    #: `_infer_consumption` 的文本匹配只是模型漏报时的兜底。
     requirement_ids: tuple[str, ...] = ()
+    #: 该槽位对应的**用户原话**片段。三个用途，按重要性排：
+    #:
+    #: 1. **执行兜底输入** —— `format_docx` 在结构化 `ops` 为空时，拿它回退去跑
+    #:    `parse_format_ops()` 正则重新抠一遍（`handlers.py` → `docx_format.py`）。
+    #:    这是真会影响产出的路径，故本字段**不可删**。
+    #: 2. 记账锚点 —— 喂 `_slot_texts()` 做兜底匹配。已降为次要（见上）。
+    #: 3. 排障 —— trace 里能看到用户当时究竟怎么说的。
+    #:
+    #: 三个用途对它的要求**一致**：都要逐字原话。用途 1 的正则匹配的就是「小四」
+    #: 「宋体」「双栏」这类自然语言，规范化后的值反而喂不进去。故 schema 里
+    #: 「照抄用户的说法，不要改写」这条约束对三者同时成立。
     verbatim: str | None = None
 
 
