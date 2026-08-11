@@ -193,6 +193,25 @@ def test_prefers_strongest_match_not_first_occurrence():
     assert s.title == "引言"       # rank 5 精确 > rank 4 包含
 
 
+def test_regression_heading_with_pasted_markdown_leftover():
+    """真机 2026-08-06：docx 标题里混着从 md 粘来的 `###` 字面文字。
+
+    Word 里 `1 引言### （1）空地协同SLAM的视觉关联需求` 是**一个** Heading 2 段落，
+    去编号后键为 `引言_1_空地协同slam的视觉关联需求`。此时 `引言部分` 与它双向包含
+    都不成立 —— 只剥编号救不了，必须连尾部指代词一起剥。
+    """
+    title = "1 引言### （1）空地协同SLAM的视觉关联需求"
+    idx = SectionIndex(f"## {title}\n\n正文。\n\n## 5 结论\n\n正文。\n", "md")
+
+    for anchor in ("引言部分", "引言", "引言这一章"):
+        s = idx.find(anchor)
+        assert s is not None, anchor
+        assert s.title == title, anchor
+
+    outcome = _validate("引言部分", idx)
+    assert SECTION_NOT_FOUND not in [i.code for i in outcome.issues]
+
+
 def test_numbering_only_title_does_not_match_everything():
     """标题只有编号时 match_key 会变空串，不得因此匹配上任意 anchor。"""
     idx = SectionIndex("## 1.2\n\n正文。\n\n## 引言\n\n正文。\n", "md")
@@ -213,10 +232,19 @@ def test_numbering_only_title_does_not_match_everything():
         ("2_1跨视角图像匹配研究", "跨视角图像匹配研究"),
         ("3.4 跨平台几何约束构建与UGV轨迹优化", "跨平台几何约束构建与ugv轨迹优化"),
         ("一、引言", "引言"),
-        ("引言部分", "引言部分"),
         ("sec:引言", "引言"),
         ("Introduction", "introduction"),
         ("", ""),
+        # 尾部指代词也剥（真机 2026-08-06）：标题里混着粘贴残留时，
+        # 只剥编号不足以让双向包含成立。
+        ("引言部分", "引言"),
+        ("引言这一章", "引言"),
+        ("结论那章", "结论"),
+        ("相关工作章节", "相关工作"),
+        ("3.2 小节", "小节"),          # 编号剥掉后只剩指代词 → 保留，不得变空
+        ("部分", "部分"),              # 整词就是指代词 → 保留
+        ("内容", "内容"),
+        ("消融实验", "消融实验"),        # 实词以「验」结尾，不得误剥
     ],
 )
 def test_match_key(raw, expected):
@@ -237,7 +265,9 @@ def test_rank_levels():
     assert anchor_match_rank("1_引言", "1_引言", "1 引言") == 5   # id 精确
     assert anchor_match_rank("1 引言", "1_引言", "1 引言") == 5   # 标题精确
     assert anchor_match_rank("引言", "1_引言", "1 引言") == 4     # 去编号后精确
-    assert anchor_match_rank("引言部分", "1_引言", "1 引言") == 2  # 章节名 ⊂ anchor
+    # 「引言部分」现在也归一到 `引言` → 升到档 4（原为档 2 的「章节名 ⊂ anchor」）
+    assert anchor_match_rank("引言部分", "1_引言", "1 引言") == 4
+    assert anchor_match_rank("引言与相关工作部分", "1_引言", "1 引言") == 2  # 章节名 ⊂ anchor
     assert anchor_match_rank("引言", "引言与相关工作", "引言与相关工作") == 3
     assert anchor_match_rank("致谢", "1_引言", "1 引言") == 0
     assert anchor_match_rank("", "1_引言", "1 引言") == 0

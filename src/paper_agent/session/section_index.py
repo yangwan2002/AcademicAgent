@@ -72,17 +72,31 @@ _LEADING_ORDINAL = re.compile(
 )
 
 
+#: 指代性后缀：用户说「引言**部分**」「方法**这章**」指的都是章节本身。
+#: 只在**尾部**剥，且剥完必须还剩东西 —— 免得「部分」这种整词 anchor 归一成空。
+_TRAILING_DEIXIS = re.compile(
+    r"(?:_?(?:这|那)?(?:一)?(?:部分|章节|小节|章|节|段|内容))+$"
+)
+
+
 def match_key(anchor: str) -> str:
     """章节指代 → **匹配用**归一键。与 `slugify`（id 用）刻意分开。
 
-    只做一件 slugify 不该做的事：**剥掉章节编号**。因为
-    「`1 引言`」这种标题 slug 化成 `1_引言`，而用户永远只会说「引言」/「引言部分」，
-    编号前缀会让双向包含匹配同时失效（真机 2026-08-01 的 `section_not_found`）。
+    做两件 slugify 不该做的事：
+
+    1. **剥掉章节编号**。「`1 引言`」slug 化成 `1_引言`，而用户只会说「引言」，
+       编号前缀会让双向包含匹配同时失效（真机 2026-08-01 的 `section_not_found`）。
+    2. **剥掉尾部指代词**（部分/这章/小节/内容）。真机 2026-08-06：用户说
+       「重写我的引言部分」，标题实际是 `1 引言### （1）空地协同SLAM的视觉关联需求`
+       （docx 里 `###` 是粘贴残留的字面文字，同属一个 Heading 2 段落）。去编号后
+       章节键是 `引言_1_空地协同slam的视觉关联需求`，`引言部分` 与它双向包含都不
+       成立 → 又一次 `section_not_found`。剥掉「部分」后 `引言 ⊂ 章节键` 成立。
     """
     s = str(anchor).strip()
     if ":" in s:                      # 去 `sec:` 之类前缀
         s = s.split(":")[-1]
-    return _LEADING_ORDINAL.sub("", _slug_core(s)).strip("_")
+    key = _LEADING_ORDINAL.sub("", _slug_core(s)).strip("_")
+    return (_TRAILING_DEIXIS.sub("", key).strip("_") or key)
 
 
 def anchor_match_rank(anchor: str, section_id: str, section_title: str) -> int:
