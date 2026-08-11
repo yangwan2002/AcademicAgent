@@ -27,7 +27,9 @@ def test_config_a2c_defaults():
     c = Config()
     assert c.literature_discovery_enabled is False       # Discovery 默认关
     assert c.literature_retrieval_max_iters == 6
-    assert c.literature_retrieval_time_budget_s == 120.0
+    # 360s 而非旧的 120s：旧值只够约 2 轮，max_iters=6 名义上限跑不到。
+    # 依据与关系型断言见 tests/test_retrieval_budget_coherence.py。
+    assert c.literature_retrieval_time_budget_s == 360.0
 
 
 def test_config_a2c_env(monkeypatch):

@@ -20,7 +20,8 @@ from paper_agent.literature.relevance import RelevanceAssessment
 # ---------------------------------------------------------------- max_provider_calls 可配
 
 def test_max_provider_calls_default_and_config():
-    assert Config().literature_retrieval_max_provider_calls == 200
+    # 240 而非旧的 200：verify 上限抬到 150 后，须保证 ≥ search 30 + verify 150。
+    assert Config().literature_retrieval_max_provider_calls == 240
     lim = _limits(Config(literature_retrieval_max_provider_calls=500))
     assert lim.max_provider_calls == 500                # 之前恒为 60（漏映射），现在贯通
 

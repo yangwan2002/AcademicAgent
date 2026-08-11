@@ -113,12 +113,19 @@ class Config:
 
     # ---- literature-evidence / A2c 检索 Loop（组合层据此构造 RetrievalLimits 注入）----
     literature_discovery_enabled: bool = False          # Discovery 兜底默认关（无真实 Web 后端）
+    # 下面四个上限与 max_iters 是**一组**，改一个要连带核另外几个：否则名义轮数跑不到，
+    # 检索会以 budget_exhausted 静默收尾（结果保留，但配额补不齐）。
+    # 2026-08 真机校准（zh=5/en=7，7 次 attempt、273.9s）：单 attempt 实测耗时均值
+    # 42.9s / 最坏 54.5s，verify 均值 18.3 次 / 最坏 20 次。旧值 time=120s 只够 ~2 轮、
+    # verify=120 只够 6 轮但会与时间同时见底 —— 实跑停在 iterations=3、
+    # exhausted_dimensions=['max_verify_calls']，且有 3 条候选取回后未判完即丢
+    # （reasons=relevance:budget_exhausted）。故按「6 轮最坏情况 + 余量」重定。
     literature_retrieval_max_iters: int = 6
-    literature_retrieval_max_provider_calls: int = 200  # 全局 provider 调用上限（search+verify）
+    literature_retrieval_max_provider_calls: int = 240  # 全局上限，须 ≥ search + verify
     literature_retrieval_max_search_calls: int = 30
-    literature_retrieval_max_verify_calls: int = 120
-    literature_retrieval_max_llm_calls: int = 30
-    literature_retrieval_time_budget_s: float = 120.0
+    literature_retrieval_max_verify_calls: int = 150    # 6 轮最坏 120 次 + 25% 余量
+    literature_retrieval_max_llm_calls: int = 30        # 实测 7 轮仅 12 次，余量充足
+    literature_retrieval_time_budget_s: float = 360.0   # 6 轮最坏 327s + 余量
     # 接受相关性等级：仅 relevant | 也收 weakly_relevant（引言常引背景/邻近工作）
     literature_accept_weakly_relevant: bool = False
     # F-3：接受策略模式。真机数据（2026-08-01）显示 18 个候选里 10 个判 weakly_relevant，
@@ -228,17 +235,17 @@ def load_config() -> Config:
         literature_discovery_enabled=_env_flag("PAPER_LIT_DISCOVERY_ENABLED", False),
         literature_retrieval_max_iters=_env_int("PAPER_LIT_RETRIEVAL_MAX_ITERS", 6, minimum=1),
         literature_retrieval_max_provider_calls=_env_int(
-            "PAPER_LIT_RETRIEVAL_MAX_PROVIDER_CALLS", 200, minimum=1),
+            "PAPER_LIT_RETRIEVAL_MAX_PROVIDER_CALLS", 240, minimum=1),
         literature_retrieval_max_search_calls=_env_int("PAPER_LIT_RETRIEVAL_MAX_SEARCH_CALLS", 30, minimum=1),
-        literature_retrieval_max_verify_calls=_env_int("PAPER_LIT_RETRIEVAL_MAX_VERIFY_CALLS", 120, minimum=1),
+        literature_retrieval_max_verify_calls=_env_int("PAPER_LIT_RETRIEVAL_MAX_VERIFY_CALLS", 150, minimum=1),
         literature_retrieval_max_llm_calls=_env_int("PAPER_LIT_RETRIEVAL_MAX_LLM_CALLS", 30, minimum=1),
-        literature_retrieval_time_budget_s=_env_float("PAPER_LIT_RETRIEVAL_TIME_BUDGET", 120.0, minimum=0.0),
+        literature_retrieval_time_budget_s=_env_float("PAPER_LIT_RETRIEVAL_TIME_BUDGET", 360.0, minimum=0.0),
         literature_accept_weakly_relevant=_env_flag("PAPER_LIT_ACCEPT_WEAKLY_RELEVANT", False),
         literature_acceptance_mode=_env_acceptance_mode(
             "PAPER_LIT_ACCEPTANCE_MODE", "strict"),
         # 0 = 不限（build_bundle 对 budget_chars<=0 视为无预算），故 minimum=0。
         literature_bundle_budget_chars=_env_int(
-            "PAPER_LIT_BUNDLE_BUDGET_CHARS", 24000, minimum=0),
+            "PAPER_LIT_BUNDLE_BUDGET_CHARS", 40000, minimum=0),
         literature_relevance_batch_enabled=_env_flag(
             "PAPER_LIT_RELEVANCE_BATCH_ENABLED", True),
         literature_relevance_batch_size=_env_int(
