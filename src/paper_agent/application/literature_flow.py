@@ -302,17 +302,31 @@ class WritingLiteratureOrchestrator:
             acceptance=acceptance,
         )
         if build.status is BundleStatus.CONTEXT_BUDGET_INSUFFICIENT:
-            # 上下文预算装不下 effective 下界 → 需决策，**不进 Writer Loop**
+            # 上下文预算连**最短摘要档**都装不下 effective 下界 → 需决策，不进 Writer Loop。
+            # `build_bundle` 已先自动试过截断阶梯，走到这里说明降级也救不了。
+            # 消息带上量化缺口：只说"装不下"，用户无法判断该提预算还是该减篇数。
+            shortfall = build.shortfall_chars()
+            detail = (
+                f"（最短摘要档 {build.min_abstract_limit} 字符下仍需 "
+                f"{build.required_chars} 字符，预算 {build.budget_chars}，"
+                f"差 {shortfall}）"
+            ) if build.required_chars else ""
             return _pause(FlowState.NEEDS_GAP_DECISION, gaps=gaps, availability=availability,
-                          message="上下文预算不足以容纳配额所需证据，需调整预算或接受偏差")
+                          message=f"上下文预算不足以容纳配额所需证据{detail}："
+                                  f"需提高预算（PAPER_LIT_BUNDLE_BUDGET_CHARS）或降低引用数量要求")
 
         # 7) NEEDS_BUNDLE_CONFIRMATION（supervised 默认；A2c-5 评测门槛）
         if self._supervised:
             if port is None:
                 return _pause(FlowState.NEEDS_BUNDLE_CONFIRMATION, gaps=gaps,
                               availability=availability, message="需确认证据集清单")
+            # 降级必须**出现在用户确认页**上：证据是截断摘要而用户以为是全文摘要，
+            # 会让他对写作质量的预期失真（design：不静默降级）。
             bd = port.confirm_evidence_bundle(
                 {"bundle_id": build.bundle.bundle_id,
+                 "degradation": build.bundle.degradation,
+                 "abstract_limit": build.bundle.abstract_limit,
+                 "truncated_entries": build.bundle.truncated_entry_count(),
                  "entries": [(e.reference_id, e.title, e.language_bucket)
                              for e in build.bundle.entries]}
             )

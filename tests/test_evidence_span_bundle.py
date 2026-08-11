@@ -5,6 +5,8 @@ from __future__ import annotations
 from paper_agent.literature.evidence import (
     BundleStatus,
     EvidenceCapability,
+    _sha as _sha_full,
+    _truncate_abstract_end,
     build_bundle,
     capability_of,
     is_stale,
@@ -174,6 +176,7 @@ def test_char_cost_does_not_double_count_title():
 
 
 def test_bundle_budget_insufficient():
+    # budget=100 连最短档（400）都装不下 → 降级救不了，仍判 INSUFFICIENT
     long_abs = "x" * 2000
     a = _verified("ra", "Deep Learning A", long_abs, numeric="1")
     records = [a]
@@ -183,6 +186,128 @@ def test_bundle_budget_insufficient():
                        budget_chars=100, classifier=_classifier, judge_key="j")
     assert res.status is BundleStatus.CONTEXT_BUDGET_INSUFFICIENT
     assert res.bundle is None and res.bundle_gaps
+    # 缺口必须**量化**：只说"装不下"，调用方无法判断该提预算还是该减篇数
+    assert res.required_chars > 0
+    assert res.budget_chars == 100
+    assert res.shortfall_chars() == res.required_chars - 100
+    assert res.min_abstract_limit == 400
+
+
+# ---------------- 分级降级（改法 C）----------------
+
+def _long_records(n, *, abs_chars=1500):
+    """n 条长摘要英文记录。句子长 ~30 字符，保证有句边界可回退。"""
+    out = []
+    sent = "This study examines medical imaging deeply. "
+    for i in range(n):
+        body = (sent * (abs_chars // len(sent) + 2))[:abs_chars]
+        out.append(_verified(f"r{i}", f"Deep Learning {i}", body, numeric=str(i + 1)))
+    return out
+
+
+def test_bundle_truncates_abstract_instead_of_dropping_entries():
+    """全摘要装不下配额下限时，先截摘要保篇数，而不是直接判 INSUFFICIENT。
+
+    真机动机（total=20）：25 条需 28698 字符 > 预算 24000，旧实现直接失败，
+    检索白跑。少给篇数会违背用户明确要求的引用数量，代价高于截短摘要。
+    """
+    records = _long_records(10)                     # 每条 ~1540 字符
+    cons = [CountConstraint(CountDimension.TOTAL, CountOperator.MIN, 10)]
+    # 10 条全摘要需 ~15400，装不下；截到 1000 档需 ~10400，装得下
+    res = build_bundle(records, criteria=_CRIT, quota=_quota(cons),
+                       relevance_store=_store(records), effective_constraints=cons,
+                       budget_chars=12000, classifier=_classifier, judge_key="j")
+    assert res.status is BundleStatus.OK
+    assert len(res.bundle.entries) == 10           # 配额篇数保住了
+    assert res.bundle.degradation == "truncated_abstract"
+    assert res.bundle.abstract_limit == 1000
+    assert res.bundle.truncated_entry_count() == 10
+    assert sum(e.char_cost() for e in res.bundle.entries) <= 12000
+
+
+def test_default_budget_avoids_truncation_at_real_corpus_scale():
+    """**默认预算**必须撑得住真机规模的全摘要，不触发截断。
+
+    P-3a 实测：截断让正文的可核验性能数字从 12 个掉到 0 个（引用率三档都 ~100%，
+    区分不出好坏，别用它判质量）。24000 时恒定截断，故默认值改为 40000。
+    这条钉的是「默认配置下不降级」这个结论本身 —— 有人调小默认值、或摘要变长
+    导致悄悄退回截断，都会让它变红。
+    """
+    from paper_agent.config import Config
+
+    budget = Config().literature_bundle_budget_chars
+    # 真机语料规模：25 条、平均 ~1500 字符/条（2026-08 dogfood 账本实测）
+    records = _long_records(25)
+    cons = [CountConstraint(CountDimension.TOTAL, CountOperator.MIN, 20)]
+    res = build_bundle(records, criteria=_CRIT, quota=_quota(cons),
+                       relevance_store=_store(records), effective_constraints=cons,
+                       budget_chars=budget, classifier=_classifier, judge_key="j")
+    assert res.status is BundleStatus.OK
+    assert res.bundle.degradation == "full", (
+        f"默认预算 {budget} 在 25 条真机规模下退回了截断"
+        f"（{res.bundle.degradation}/{res.bundle.abstract_limit}）")
+    assert res.bundle.truncated_entry_count() == 0
+    assert len(res.bundle.entries) >= 20          # 配额篇数同时保住
+
+
+def test_bundle_no_degradation_when_budget_fits():
+    """预算够时不得降级——降级只在必要时发生，否则白损信息。"""
+    records = _long_records(3)
+    cons = [CountConstraint(CountDimension.TOTAL, CountOperator.MIN, 3)]
+    res = build_bundle(records, criteria=_CRIT, quota=_quota(cons),
+                       relevance_store=_store(records), effective_constraints=cons,
+                       budget_chars=0, classifier=_classifier, judge_key="j")
+    assert res.bundle.degradation == "full"
+    assert res.bundle.abstract_limit == 0
+    assert res.bundle.truncated_entry_count() == 0
+    assert all(e.abstract_truncated_from == 0 for e in res.bundle.entries)
+
+
+def test_bundle_picks_shallowest_ladder_tier_that_fits():
+    """阶梯取**第一个装得下**的档，不过度截断。"""
+    records = _long_records(10)
+    cons = [CountConstraint(CountDimension.TOTAL, CountOperator.MIN, 10)]
+    # ~7500 只够 700 档（10*740=7400），1000 档需 ~10400
+    res = build_bundle(records, criteria=_CRIT, quota=_quota(cons),
+                       relevance_store=_store(records), effective_constraints=cons,
+                       budget_chars=7800, classifier=_classifier, judge_key="j")
+    assert res.status is BundleStatus.OK
+    assert res.bundle.abstract_limit == 700
+
+
+def test_truncated_span_preserves_verbatim_and_source_hash():
+    """截断必须保住溯源：verbatim_text 仍是 normalized[start:end)，
+    content_hash 仍是**完整**字段哈希（Req 12.5/12.6）。否则引用无法回溯原文。"""
+    records = _long_records(10)
+    cons = [CountConstraint(CountDimension.TOTAL, CountOperator.MIN, 10)]
+    res = build_bundle(records, criteria=_CRIT, quota=_quota(cons),
+                       relevance_store=_store(records), effective_constraints=cons,
+                       budget_chars=12000, classifier=_classifier, judge_key="j")
+    entry = res.bundle.entries[0]
+    rec = next(r for r in records if r.reference_id == entry.reference_id)
+    span = next(s for s in entry.spans if s.source_field == "abstract")
+    full = normalize_source(rec.abstract)
+    assert span.verbatim_text == full[span.start_offset:span.end_offset]
+    assert span.end_offset < len(full)              # 确实截了
+    assert span.content_hash == _sha_full(full)     # 哈希仍指向完整原文
+    assert not is_stale(span, rec.abstract)         # 故不算 stale
+
+
+def test_truncation_lands_on_sentence_boundary():
+    """截断落在句边界，不截半句/半词——半句证据会误导写作。"""
+    text = "First sentence here. " * 100
+    end = _truncate_abstract_end(text, 400)
+    assert normalize_source(text)[:end].endswith(".")
+    assert end <= 400
+
+
+def test_truncation_falls_back_to_word_boundary():
+    """超长句（窗口内无句末）退到词边界，仍不截半词。真机 1/25 会走到这里。"""
+    text = "word " * 400                            # 无任何句末标点
+    end = _truncate_abstract_end(text, 400)
+    sliced = normalize_source(text)[:end]
+    assert not sliced.endswith("wor")               # 没截在半词
+    assert sliced.endswith("word") or sliced.endswith(" ")
 
 
 def test_bundle_id_content_sensitive():

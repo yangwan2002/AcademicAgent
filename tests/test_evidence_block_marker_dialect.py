@@ -13,6 +13,7 @@ import pytest
 
 from paper_agent.generate.context_builder import build_evidence_block
 from paper_agent.gates.diff_gate import extract_citation_tokens
+from paper_agent.literature.evidence import BundleEntry, make_span
 from paper_agent.literature.ledger import ReferenceLedger
 from paper_agent.literature.migration import record_from_dict
 
@@ -56,6 +57,38 @@ def test_omitted_ext_defaults_to_numeric():
     保证同一故障能再来一次。缺省走数字是安全的一侧：md/docx/txt 都用方括号，
     唯有 tex 需要 bibkey，而 tex 路径一律显式传 ext。"""
     assert _first_marker(build_evidence_block(_Bundle())) == "3"
+
+
+def test_truncated_abstract_is_disclosed_in_block():
+    """摘要被截断时数据块必须声明,否则模型会把「截掉的部分」当成「原文没有」,
+    据缺失推出「该文献未做 X」这类凭空结论(截断见 evidence.build_bundle 分级降级)。"""
+    span = make_span("r1", "abstract", "Full abstract text about SLAM. More detail here.",
+                     end=30)
+    entry = BundleEntry(reference_id="r1", bibkey="k", numeric_alias="1",
+                        title="T", year=2023, language_bucket="en",
+                        spans=(span,), evidence_available=True,
+                        abstract_truncated_from=48)
+
+    class _B:
+        entries = (entry,)
+
+    block = build_evidence_block(_B(), "md")
+    assert "已按上下文预算截断" in block
+    assert "不代表" in block and "原文没有" in block
+
+
+def test_untruncated_abstract_has_no_truncation_notice():
+    """未截断时不得出现该提示 —— 无谓的警告会稀释模型对真实约束的注意。"""
+    span = make_span("r1", "abstract", "Full abstract text about SLAM.")
+    entry = BundleEntry(reference_id="r1", bibkey="k", numeric_alias="1",
+                        title="T", year=2023, language_bucket="en",
+                        spans=(span,), evidence_available=True,
+                        abstract_truncated_from=0)
+
+    class _B:
+        entries = (entry,)
+
+    assert "截断" not in build_evidence_block(_B(), "md")
 
 
 def test_empty_bundle_renders_nothing():

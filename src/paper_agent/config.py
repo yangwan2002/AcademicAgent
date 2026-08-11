@@ -145,10 +145,19 @@ class Config:
     # 于是 `total=10` 恒定触发 CONTEXT_BUDGET_INSUFFICIENT → 操作被 rejected。
     # 24000 ≈ 16 条全摘要，覆盖「引言 10 篇」这类常见要求且留余量。
     #
+    # 40000（2026-08，P-3a 三臂 A/B 定）：24000 会**恒定触发摘要截断**，而截断的代价
+    # 实测很重 —— 同一批 25 条语料、同一写作模型，全摘要档写出 12 个有摘要出处的
+    # 性能数字（如「Recall@1 达 92.23%」），截断档写出 0 个，行文退化为「显著提升」
+    # 这类定性描述。注意引用率三档都是 ~100%，**区分不出好坏**，别用它判证据质量。
+    # 阈值实测（25 条真机语料）：30000 仍截断；31000 起不截但只装 20 篇；
+    # 40000 不截且 25 篇全给 —— 取 40000。见 tests/eval/literature_dogfood/
+    # ab_context_budget.py 与 test_bundle_budget_no_truncation。
+    #
     # 计量口径是**字符**而非 token（backlog P-3 已记）：中文约 1–1.5 字符/token、
     # 英文约 4 字符/token，故同一预算下中文的真实 token 成本是英文的 3–4 倍。
     # 换 token 计量属独立改动，不在本次范围。
-    literature_bundle_budget_chars: int = 24000
+    # 上述阈值均在**全英文**语料上实测；中文摘要同字符装的信息更多，未验。
+    literature_bundle_budget_chars: int = 40000
 
     # ---- retrieval-throughput / B1（默认关；size=1 保持逐篇语义）----
     # B1 默认开启（2026-08-06 受控 A/B）：单篇判定时 relevance LLM 占 125s 里的

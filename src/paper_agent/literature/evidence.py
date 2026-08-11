@@ -133,6 +133,9 @@ class BundleEntry:
     relevance_confidence: str = ""
     spans: tuple[EvidenceSpan, ...] = ()
     evidence_available: bool = False      # 有无 CLAIM_SUPPORT span（Req 12.12）
+    # >0 表示摘要被截断，值为截断前的完整长度（0 = 未截断）。**显式标记，不静默降级**：
+    # Gate 与 trace 都要能看出证据是截断版。
+    abstract_truncated_from: int = 0
 
     def char_cost(self) -> int:
         """送进 prompt 的字符成本（span 文本 + 元数据近似）。
@@ -155,9 +158,17 @@ class EvidenceBundle:
     budget_chars: int = 0
     policy_version: str = VerificationPolicy.STRICT_FINAL_V1.value
     authority_registry_version: str = ""
+    # 分级降级实际落在哪一档（见 `build_bundle`）。full = 未降级。
+    degradation: str = "full"
+    # 该档使用的摘要上限（0 = 不限）。便于 trace 与 A/B 复现。
+    abstract_limit: int = 0
 
     def reference_ids(self) -> tuple[str, ...]:
         return tuple(e.reference_id for e in self.entries)
+
+    def truncated_entry_count(self) -> int:
+        """被截断摘要的条数（供 Gate/呈现层提示降级范围）。"""
+        return sum(1 for e in self.entries if e.abstract_truncated_from > 0)
 
 
 class BundleStatus(str, Enum):
@@ -171,6 +182,20 @@ class BundleBuildResult:
     bundle: EvidenceBundle | None = None
     bundle_gaps: tuple = ()               # 预算不足时逐维度缺口
     excluded_count: int = 0
+    # 预算不足时的**量化**信息：光说"装不下"无法判断该提预算还是该减篇数。
+    required_chars: int = 0               # 最省一档实际需要多少字符
+    budget_chars: int = 0                 # 当时的预算
+    min_abstract_limit: int = 0           # 已尝试的最短摘要档
+
+    def shortfall_chars(self) -> int:
+        """还差多少字符（<=0 表示不缺）。供呈现层给出可执行建议。"""
+        return max(0, self.required_chars - self.budget_chars)
+
+
+# 摘要上限阶梯（字符）。全摘要装不下时依次下探，取第一个装得下的档。
+# 1000 ≈ 摘要前 3–5 句（问题陈述 + 方法 + 主要结论），真机摘要中位 1456 字符；
+# 400 是下限，再短就只剩问题陈述、对写作贡献有限，故不再下探而是交上层决策。
+_ABSTRACT_LIMIT_LADDER = (1000, 700, 400)
 
 
 def _lower_bound(constraints, dimension) -> int:
@@ -187,11 +212,53 @@ def _lower_bound(constraints, dimension) -> int:
 _VERDICT_RANK = {"relevant": 0, "weakly_relevant": 1, "unrelated": 2, "": 3}
 _CONF_RANK = {"high": 0, "medium": 1, "low": 2, "": 3, None: 3}
 
+# 摘要截断的句末标记（中英）。截断优先落在句边界，避免把半句送进 prompt。
+_SENTENCE_ENDS = "。！？.!?"
+# 回退窗口：从硬截点往前最多找这么多字符的句末。找不到就硬截。
+# 300 按真机实测定（2026-08-10，25 条 OpenAlex 摘要）：句长中位 149、p90 256、max 484。
+# 200 时 1/25 条回退失败被硬截在半词上；300 覆盖 p90，且仍远小于最短档 400。
+# 太大会让实际长度显著短于目标档，太小则形同没有回退。
+_BOUNDARY_LOOKBACK = 300
 
-def _entry_of(record, verdict, confidence, bucket) -> BundleEntry:
+
+def _truncate_abstract_end(text: str, limit: int) -> int:
+    """返回摘要应截到的 offset（码位），优先句边界。
+
+    只回答"截到哪"，不切文本——切片由 `make_span(start=, end=)` 完成，这样
+    `verbatim_text == normalized[start:end)` 的不变量（Req 12.5）仍然由它保证，
+    `content_hash` 记的是**完整**字段哈希，故截断后溯源依然成立。
+    """
+    normalized = normalize_source(text)
+    if limit <= 0 or len(normalized) <= limit:
+        return len(normalized)
+    lo = max(0, limit - _BOUNDARY_LOOKBACK)
+    for i in range(limit - 1, lo - 1, -1):
+        if normalized[i] in _SENTENCE_ENDS:
+            return i + 1          # 含句末标点
+    # 窗口内无句末（超长句，实测 1/25 会走到这里）→ 退到词边界，至少不截在半词上。
+    ws = normalized.rfind(" ", lo, limit)
+    if ws > lo:
+        return ws
+    return limit                  # 连空格都没有（如无空格中文长句）→ 硬截
+
+
+def _entry_of(record, verdict, confidence, bucket, *,
+              abstract_limit: int = 0) -> BundleEntry:
+    """构造 BundleEntry。
+
+    `abstract_limit>0` → 摘要按该上限截断（分级降级第 2 档，见 `build_bundle`）。
+    截断保留摘要**开头**：问题陈述与贡献通常在前几句，实验细节在后半段，对写作
+    价值最低。
+    """
     spans: list[EvidenceSpan] = []
+    truncated_from = 0
     if record.abstract:
+        end = _truncate_abstract_end(record.abstract, abstract_limit)
+        full_len = len(normalize_source(record.abstract))
+        if end < full_len:
+            truncated_from = full_len
         spans.append(make_span(record.reference_id, "abstract", record.abstract,
+                               end=(end if truncated_from else None),
                                source_version=record.abstract_content_hash))
     if record.title:
         spans.append(make_span(record.reference_id, "title", record.title))
@@ -207,6 +274,7 @@ def _entry_of(record, verdict, confidence, bucket) -> BundleEntry:
         relevance_confidence=confidence or "",
         spans=tuple(spans),
         evidence_available=has_claim,
+        abstract_truncated_from=truncated_from,
     )
 
 
@@ -225,6 +293,7 @@ def build_bundle(
     preexisting_cited_ids: tuple[str, ...] = (),
     authority_registry_version: str = "",
     acceptance=STRICT_ACCEPTANCE,
+    abstract_ladder: tuple[int, ...] = _ABSTRACT_LIMIT_LADDER,
 ) -> BundleBuildResult:
     """构造 quota-aware EvidenceBundle（design D6）。
 
@@ -234,6 +303,18 @@ def build_bundle(
     `acceptance`（F-3）：接受语义由**调用方注入**，必须与 `assess_availability` 用
     同一对象——否则会出现「统计说够了但证据集是空的」。此前本函数硬编码
     `("relevant",)`。默认严格 → 不传时行为逐字节不变。
+
+    **分级降级**：全摘要装不下配额下限时，按 `_ABSTRACT_LIMIT_LADDER` 逐档截短摘要
+    重试，取第一个装得下的档；连最短档都装不下才返回 `CONTEXT_BUDGET_INSUFFICIENT`
+    （附 `required_chars` / `shortfall_chars()`）。降级在 `EvidenceBundle.degradation`
+    与 `BundleEntry.abstract_truncated_from` 上**显式可见**，不静默。
+
+    `abstract_ladder`：截断阶梯，可注入以做受控实验（传 `()` 即关闭降级、恢复旧行为，
+    P-3a 三臂 A/B 用；传单元素元组可钉死某一档）。默认取 `_ABSTRACT_LIMIT_LADDER`。
+
+    动机（真机 2026-08-10，total=20）：25 条合格记录需 28698 字符 > 预算 24000，
+    旧实现直接判 INSUFFICIENT，检索白跑。而"20 篇截到 1000 字符"装得下且信息覆盖
+    更广——摘要后半段多为实验细节，对写引言价值低于多覆盖 3 篇文献。
     """
     task_fp = criteria.fingerprint()
 
@@ -265,43 +346,80 @@ def build_bundle(
     ))
 
     by_id = {t[0].reference_id: t for t in eligible}
-    selected: list[str] = []
 
-    def _take(rid: str) -> None:
-        if rid not in selected and rid in by_id:
-            selected.append(rid)
+    def _select(abstract_limit: int):
+        """在给定摘要上限下走 2→5 步。返回 (entries, cost, truncated, 是否装下下限)。"""
+        selected: list[str] = []
 
-    # 2) 固定原文已合法引用者（rewrite：可推进「正文实际引用」配额）
-    for rid in preexisting_cited_ids:
-        _take(rid)
+        def _take(rid: str) -> None:
+            if rid not in selected and rid in by_id:
+                selected.append(rid)
 
-    # 3) 保语言下限
-    for dim, bucket in ((CountDimension.LANGUAGE_ZH, "zh"), (CountDimension.LANGUAGE_EN, "en")):
-        need = _lower_bound(effective_constraints, dim)
-        if need <= 0:
-            continue
-        have = sum(1 for rid in selected
-                   if counts_toward(classifier(by_id[rid][0]), bucket, policy))
+        # 2) 固定原文已合法引用者（rewrite：可推进「正文实际引用」配额）
+        for rid in preexisting_cited_ids:
+            _take(rid)
+
+        # 3) 保语言下限
+        for dim, bucket in ((CountDimension.LANGUAGE_ZH, "zh"),
+                            (CountDimension.LANGUAGE_EN, "en")):
+            need = _lower_bound(effective_constraints, dim)
+            if need <= 0:
+                continue
+            have = sum(1 for rid in selected
+                       if counts_toward(classifier(by_id[rid][0]), bucket, policy))
+            for rec, _v, _c, _b in eligible:
+                if have >= need:
+                    break
+                if rec.reference_id in selected:
+                    continue
+                if counts_toward(classifier(rec), bucket, policy):
+                    _take(rec.reference_id)
+                    have += 1
+
+        # 4) 补 total
+        total_need = _lower_bound(effective_constraints, CountDimension.TOTAL)
         for rec, _v, _c, _b in eligible:
-            if have >= need:
+            if len(selected) >= total_need:
                 break
+            _take(rec.reference_id)
+
+        entries = [_entry_of(*by_id[rid], abstract_limit=abstract_limit)
+                   for rid in selected]
+        cost = sum(e.char_cost() for e in entries)
+        if budget_chars > 0 and cost > budget_chars:
+            return entries, cost, 0, False
+
+        # 5) 剩余预算补高相关
+        truncated = 0
+        for rec, _v, _c, _b in eligible:
             if rec.reference_id in selected:
                 continue
-            if counts_toward(classifier(rec), bucket, policy):
-                _take(rec.reference_id)
-                have += 1
+            entry = _entry_of(*by_id[rec.reference_id], abstract_limit=abstract_limit)
+            if budget_chars > 0 and cost + entry.char_cost() > budget_chars:
+                truncated += 1
+                continue
+            selected.append(rec.reference_id)
+            entries.append(entry)
+            cost += entry.char_cost()
+        return entries, cost, truncated, True
 
-    # 4) 补 total
-    total_need = _lower_bound(effective_constraints, CountDimension.TOTAL)
-    for rec, _v, _c, _b in eligible:
-        if len(selected) >= total_need:
-            break
-        _take(rec.reference_id)
+    # 分级降级：全摘要装不下配额下限时，先截摘要再谈放弃篇数（改法 C）。
+    # 只调数字（8000→24000）治不了根：预算是常量、配额是用户输入的变量，
+    # total 一大就必然重现（真机 total=20 需 28698 > 24000）。
+    # 截断保住 verbatim 溯源（见 `_truncate_abstract_end`），故这是无损降级；
+    # 而少给篇数会直接违背用户明确要求的引用数量，代价更高——所以先截后减。
+    entries, cost, truncated, ok = _select(0)
+    degradation, used_limit = "full", 0
+    if not ok:
+        for limit in abstract_ladder:
+            entries, cost, truncated, ok = _select(limit)
+            if ok:
+                degradation, used_limit = "truncated_abstract", limit
+                break
 
-    # 预算校验：装不下 effective 下界 → 需决策，不产可用 Bundle
-    entries = [_entry_of(*by_id[rid]) for rid in selected]
-    cost = sum(e.char_cost() for e in entries)
-    if budget_chars > 0 and cost > budget_chars:
+    if not ok:
+        # 连最短一档都装不下 → 真无解，交上层决策。附**量化**缺口：
+        # 光说"装不下"无法判断是预算设小了还是摘要偏长。
         gaps = tuple(
             (d.value, _lower_bound(effective_constraints, d))
             for d in (CountDimension.TOTAL, CountDimension.LANGUAGE_ZH, CountDimension.LANGUAGE_EN)
@@ -310,20 +428,9 @@ def build_bundle(
         return BundleBuildResult(
             status=BundleStatus.CONTEXT_BUDGET_INSUFFICIENT, bundle=None,
             bundle_gaps=gaps, excluded_count=excluded,
+            required_chars=cost, budget_chars=budget_chars,
+            min_abstract_limit=(abstract_ladder[-1] if abstract_ladder else 0),
         )
-
-    # 5) 剩余预算补高相关
-    truncated = 0
-    for rec, _v, _c, _b in eligible:
-        if rec.reference_id in selected:
-            continue
-        entry = _entry_of(*by_id[rec.reference_id])
-        if budget_chars > 0 and cost + entry.char_cost() > budget_chars:
-            truncated += 1
-            continue
-        selected.append(rec.reference_id)
-        entries.append(entry)
-        cost += entry.char_cost()
 
     payload = {
         "task_fingerprint": task_fp,
@@ -344,6 +451,8 @@ def build_bundle(
         truncated_count=truncated,
         budget_chars=budget_chars,
         authority_registry_version=authority_registry_version,
+        degradation=degradation,
+        abstract_limit=used_limit,
     )
     return BundleBuildResult(status=BundleStatus.OK, bundle=bundle, excluded_count=excluded)
 

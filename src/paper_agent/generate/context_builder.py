@@ -297,6 +297,12 @@ def build_evidence_block(bundle, ext: str = "") -> str:
         if claims:
             for s in claims:
                 lines.append(f"  摘要依据：{s.verbatim_text}")
+            # 截断必须告知模型：否则它会把「截掉的部分」当成「原文没有」，
+            # 据缺失推出「该文献未做 X」这类假结论（预算不足时摘要按档截短，
+            # 见 `evidence.build_bundle` 的分级降级）。
+            if e.abstract_truncated_from:
+                lines.append("  （摘要已按上下文预算截断，非全文；未出现的内容不代表"
+                             "原文没有，不得据此推断该文献的局限或未做之事。）")
         else:
             lines.append("  （无摘要可用：不得据其标题推导具体结论，只能说明该文献存在。）")
     body = "\n".join(lines)
