@@ -1,0 +1,71 @@
+# 依赖锁定 —— 完整传递闭包，精确版本
+#
+# 用途：让「真实跑」的环境可复现。`pyproject.toml` 的 extras 只钉上下界
+# （便于库使用者解析），本文件钉死具体版本（便于部署与排障复现）。
+#
+# 怎么用：
+#   pip install -r requirements.lock && pip install -e . --no-deps
+#
+# 为什么需要它：本项目的第三方依赖全在 optional-dependencies 里，且 src/ 中
+# 一律惰性导入。好处是核心包零依赖可导入，代价是「装了什么版本」完全不受约束 ——
+# 上界 <3 / <4 挡得住大版本破坏，挡不住小版本行为漂移。真机排障时若不能复现
+# 当时的版本组合，trace 就失去对照价值。
+#
+# 这些版本的来源：不是解析器算出来的，是**本机实测 1941 测试全绿 + 真机跑通
+# docx 润色链路**的那一组，用 importlib.metadata 导出实际闭包。
+#
+# 无哈希：本机无 uv / pip-compile。哈希锁（--require-hashes）需要那两个工具之一，
+# 补齐后可升级本文件。当前形态防的是「版本漂移」，防不了「上游重打包同版本号」。
+#
+# 维护：升级依赖时重新导出，不要手改单行 —— 传递闭包会跟着变。
+# 生成时间：2026-08-14　Python 3.12 / Windows
+# 平台备注：colorama 仅 Windows 下由 tqdm 拉入；Linux CI 装不上也无妨（pip 会跳过
+# 不匹配的平台条件，但此处无 marker，故 CI 用 pyproject extras 而非本文件）。
+
+# ---- LLM provider：OpenAI 兼容端点 ----
+openai==1.62.0
+distro==1.9.0
+jiter==0.13.0
+tqdm==4.67.1
+colorama==0.4.6
+
+# ---- LLM provider：Anthropic ----
+anthropic==0.89.0
+docstring-parser==0.17.0
+
+# ---- HTTP（检索 provider 与 anthropic/openai 共用）----
+httpx==0.28.1
+httpcore==1.0.9
+h11==0.16.0
+certifi==2025.11.12
+idna==3.18
+anyio==4.13.0
+sniffio==1.3.1
+
+# ---- 数据模型（openai / anthropic / langfuse 共用）----
+pydantic==2.12.5
+pydantic-core==2.41.5
+annotated-types==0.7.0
+typing-inspection==0.4.2
+typing-extensions==4.15.0
+
+# ---- docx 读写与排版 ----
+python-docx==1.2.0
+lxml==6.1.1
+
+# ---- trace 导出到 Langfuse（可选的观测第二路）----
+langfuse==3.11.1
+backoff==2.2.1
+wrapt==1.17.3
+packaging==25.0
+requests==2.32.5
+charset-normalizer==3.4.4
+urllib3==2.5.0
+opentelemetry-api==1.44.0
+opentelemetry-sdk==1.44.0
+opentelemetry-semantic-conventions==0.65b0
+opentelemetry-proto==1.44.0
+opentelemetry-exporter-otlp-proto-http==1.44.0
+opentelemetry-exporter-otlp-proto-common==1.44.0
+googleapis-common-protos==1.75.1
+protobuf==7.35.1

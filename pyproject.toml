@@ -7,6 +7,10 @@ name = "paper-agent"
 version = "0.2.0"
 description = "学术论文写作 Agent（V2：意图驱动 + Diff Gate）"
 requires-python = ">=3.10"
+# 故意保持为空：`src/` 里所有第三方 import 都是**函数内惰性导入**（`_docx_module()`
+# / `_openai()` / `http_util._httpx()` 等），缺包时抛带装法提示的领域异常而非
+# ImportError。CI 的 `import-check` job 守住这个承诺。要真跑起来请装 extras，
+# 见下方 `all`（部署用 `.[all]`，开发用 `.[all,dev]`）。
 dependencies = []
 
 [project.optional-dependencies]
@@ -32,11 +36,15 @@ dev = [
     "ruff>=0.6,<1",
 ]
 # 一次装齐真实跑所需的全部依赖（CI 与真机 dogfood 用）。
+# 含 langfuse：缺它时 recorder 会兜住导出异常、只往 stderr 打一行，
+# 于是 PAPER_LANGFUSE=true 也拿不到任何数据 —— 属于"开了却静默无效"，
+# 比直接报错更难发现，所以纳入 all。
 all = [
     "openai>=1.0,<3",
     "anthropic>=0.40,<1",
     "httpx>=0.27,<1",
     "python-docx>=1.1,<2",
+    "langfuse>=3.0,<4",
 ]
 
 [tool.setuptools.packages.find]
