@@ -3,7 +3,8 @@
 ## 问题
 
 真机跑完一轮 rewrite，正文里有 `[6]`、`[12, 21]`，但文末**没有任何参考文献条目** ——
-`tools/bibliography.py` 第 33 行 `if session.ext != "tex": return`，md 直接不做；
+当时唯一管文献区的是 `tools/bibliography.py`（已随 `fix_bibliography` 意图删除，
+见 backlog B-2），它第一句就是 `if session.ext != "tex": return`，md 直接不做；
 而 rewrite / add_section 提交时只写章节正文，从不碰文末。于是引用全是悬空的。
 账本里这些文献的元数据是齐的（标题/作者/年份都在），只是没人负责渲染。
 

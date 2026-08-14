@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     # 仅供类型标注：TYPE_CHECKING 块运行时不执行，故不会与上述循环依赖冲突。
     # 靠 `from __future__ import annotations` 让签名里的标注延迟求值。
+    from paper_agent.literature.citation_usage import CitationUsage
     from paper_agent.literature.ledger import ReferenceLedger
 
 
@@ -70,6 +71,7 @@ class SessionFacts:
     ) -> None:
         from paper_agent.literature.ledger import ReferenceLedger
 
+        from paper_agent.literature.citation_usage import CitationUsage
         from paper_agent.literature.relevance import RelevanceStore
 
         self.path = path
@@ -86,6 +88,8 @@ class SessionFacts:
         # A2f：暂停时冻结的检索意图（canonical payload；会话状态，不进 trace）。
         self.pending_search_intents: list[dict] = []
         self.corrupt_search_intent_count: int = 0
+        # P-2：正文实际引用的章节归属（`refresh_citation_usage` 重算）。
+        self.citation_usage = CitationUsage()
         if known_refs:
             self.ledger.ingest_known_refs(known_refs)
 
@@ -125,6 +129,9 @@ class SessionFacts:
             "known_numbers": [asdict(n) for n in self.known_numbers],
             "claims": self.claims,
             "relevance_store": self.relevance_store.to_json(),
+            # P-2 唯一真缺口：正文实际引用的章节归属。派生数据（可从正文重算），
+            # 但落盘是必要的 —— B-2 写 bibitem 需要它，而重算要有 working copy 在手。
+            "citation_usage": self.citation_usage.to_json(),
             "pending_batches": list(self.pending_batches),
             "committed_batch_ids": list(self.committed_batch_ids),
             "pending_literature_flows": list(self.pending_literature_flows),
@@ -181,6 +188,7 @@ class SessionFacts:
 
     @classmethod
     def load(cls, path: str) -> "SessionFacts":
+        from paper_agent.literature.citation_usage import CitationUsage
         from paper_agent.literature.ledger import ReferenceLedger
 
         if not os.path.isfile(path):
@@ -234,6 +242,8 @@ class SessionFacts:
                 corrupt_si += 1
         facts.pending_search_intents = intents
         facts.corrupt_search_intent_count = corrupt_si
+        # P-2：章节引用归属（旧 envelope 无此段 → 空表；可由 refresh_citation_usage 重算）。
+        facts.citation_usage = CitationUsage.from_json(data.get("citation_usage", []))
         return facts
 
     # ---- 引用查询 / 变更（保持 resolvable 语义）----
@@ -319,6 +329,19 @@ class SessionFacts:
 
     def get_claim(self, key: str, default=None):
         return self.claims.get(key, default)
+
+    # ---- 章节引用归属（P-2）----
+    def refresh_citation_usage(self, text: str, ext: str) -> "CitationUsage":
+        """按当前正文整体重算「哪章引了哪篇」，替换旧表并返回。
+
+        整体重算而非增量：正文可被任意意图改写，增量维护要求每个写入路径都记得更新，
+        那正是 `citation_aliases` 语义漂移的成因。**不自动 save** —— 调用方决定何时落盘，
+        与本类其他 mutator 一致。
+        """
+        from paper_agent.literature.citation_usage import scan_usage
+
+        self.citation_usage = scan_usage(text, ext, self.ledger)
+        return self.citation_usage
 
 
 __all__ = ["KnownRef", "KnownNumber", "SessionFacts", "project_facts_path"]

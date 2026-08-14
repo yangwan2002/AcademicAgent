@@ -238,6 +238,85 @@ def _cmd_export(session, msg: str) -> None:
         print("  提示：Word 打开后按 Ctrl+A → F9 可刷新域编号（Word 不会自动重算）。")
 
 
+def _note_dangling_refs(session) -> None:
+    """载入时报一次悬空引用（只读）。
+
+    这是 `fix_bibliography`（已删，B-2）唯一剩下的价值：用户原稿里的悬空引用系统
+    补不了（facts 里没那篇文献的元数据），但不说他就永远不知道 —— LaTeX 那处编译
+    出来是 `[?]`。系统自己写的引用不需要这一步，commit 时 `apply_bibliography`
+    已经对齐了。
+    """
+    from paper_agent.literature.dangling_refs import diagnose_dangling
+    try:
+        text = session.read_working()
+    except Exception:  # noqa: BLE001 —— 诊断失败不该挡住会话启动
+        return
+    rep = diagnose_dangling(text, session.ext)
+    if not rep.has_findings:
+        return
+    print(f"\n[注意] 正文有 {len(rep.dangling)} 处引用在参考文献区找不到条目："
+          f"{', '.join(rep.dangling[:8])}"
+          + ("…" if len(rep.dangling) > 8 else ""))
+    print("       这些引用在编译/导出后会显示成问号。系统补不了（缺元数据），"
+          "可让我搜文献补齐，或自行补条目。")
+    if rep.low_confidence:
+        print("       （docx 的文献表形态多样，若上面这些其实有条目，可忽略此提示。）")
+
+
+def _verify_draft_refs(facts, facts_path: str) -> None:
+    """载入时核验初稿手写的文献（Crossref 书目反查），结果按项目缓存。
+
+    `extract_refs` 只做文本扫描，抽出的条目 `verified` 恒为 False；在此之前系统
+    既不核验用户原稿的文献，也不说自己没核验，而「抽取到 N 条文献引用」很容易被
+    读成「这 N 条已验过」。
+
+    缓存（`draft_refs_cache.json`，与 facts.json 同目录）让反复载入只付一次网络
+    成本；键是归一化题名，因此换个编号或改动标点都还能命中。缓存只存稳定结论，
+    UNCHECKED 不入盘 —— 否则一次网络故障会被永久固化成结论。
+
+    三态措辞见 `literature.draft_refs` 模块文档：「Crossref 查不到」绝不表述为
+    「疑似虚假」，否则中文文献会大面积误报，用户学会无视警告后连真造假也一起漏掉。
+    """
+    from paper_agent.literature import draft_refs as dr
+
+    refs = [r for r in facts.known_refs if not r.verified]
+    if not refs:
+        return
+
+    cpath = dr.cache_path_for(facts_path)
+    cache = dr.load_cache(cpath)
+    fresh = sum(1 for r in refs
+                if dr.parse_citation(r.title or "").usable
+                and _dedup_key(r.title or "") not in cache)
+    # 实测单条反查约 2s（Crossref，顺序发），36 条初稿 ≈ 73s。首次载入不能白等这么久
+    # 又不给交代，所以先说清要多久、可以 Ctrl-C 跳过；已验过的项目走缓存则近乎零延迟。
+    if fresh:
+        print(f"       正在核验 {fresh} 条初稿文献（Crossref 书目反查，"
+              f"约 {max(1, round(fresh * 2 / 5)) * 5} 秒；Ctrl-C 可跳过）…")
+
+    from paper_agent.providers.retrieval.crossref import CrossrefVerifyProvider
+    try:
+        report = dr.verify_draft_refs(refs, CrossrefVerifyProvider(), cache=cache)
+    except KeyboardInterrupt:
+        # 已完成的部分仍落盘：下次载入不必重跑，中断不会白费。
+        dr.save_cache(cpath, cache)
+        print("\n       （已跳过初稿文献核验；已验部分已缓存，下次载入继续）")
+        return
+    except Exception as exc:  # noqa: BLE001 —— 核验失败不能挡住会话启动
+        print(f"       （初稿文献核验未完成：{type(exc).__name__}，不影响其他功能）")
+        return
+    dr.save_cache(cpath, cache)
+
+    for line in dr.format_report(report):
+        print("       " + line)
+
+
+def _dedup_key(title: str) -> str:
+    from paper_agent.literature import dedup as _d
+    from paper_agent.literature.draft_refs import parse_citation
+    return _d.normalize_title(parse_citation(title).title)
+
+
 def _warn_if_no_sections(session, index: SectionIndex) -> None:
     """载入时就说清「这个格式做不了什么」，而不是等用户提请求后报 section_not_found。
 
@@ -590,12 +669,16 @@ def main(argv: list[str]) -> int:
     index = _build_index(session)
     print(f"已载入 {source}（working: {session.working_path}）")
     print(f"抽取到 {len(facts.known_refs)} 条文献引用、{len(facts.known_numbers)} 个表格数字。")
+    _verify_draft_refs(facts, project_facts_path(config.workspace_root, source))
     if _remembered:
         print(f"（已记住 {_remembered} 个此前章节的意图/结构，可复用）")
     _print_sections(index)
     _warn_if_no_sections(session, index)
     _note_docx_scope(session)
     _note_crossref_import(session)
+    # 必须排在 _note_crossref_import 之后：docx 的交叉引用域在载入时才被摊平成
+    # 纯文本，摊平前投影层看不见域内文字 ⇒ 那些引用会被误判成"正文没引用"。
+    _note_dangling_refs(session)
     print("\n输入润色需求，或 :help 查看命令。")
 
     while True:
