@@ -23,6 +23,9 @@ venv/
 # （结论应落到 spec 或 backlog，不是把原始输出留在仓库里）
 # 不限后缀：三臂 A/B 的生成正文是 ab_gen_*.md，同属一次性产物。
 tests/eval/**/ab_*
+# 逐条明细：runner 与 A/B 每次跑都重写（`bundle_<臂名>.jsonl` / `bundle.jsonl`），
+# 同属一次性产物。`ab_*` 挡不住它们 —— 文件名以 bundle_ 开头。
+tests/eval/**/bundle*.jsonl
 
 # 排障时随手重定向的 pytest 输出 / 事实文件备份（`_x.txt`、`_x.bak.json`）。
 # 曾有 5 个这类文件被误提交，故按模式挡住。

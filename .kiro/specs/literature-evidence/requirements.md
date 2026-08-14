@@ -560,10 +560,24 @@
     SHALL NOT 在写作尝试进行中原地更新。
 11. THE Evidence_Bundle SHALL 携带 `bundle_id` 与其 Task_Fingerprint，
     使「更换 Bundle」可被识别为一次**新的**写作尝试。
-12. WHERE 某 Reference 无可用于 Claim 支撑的证据（无摘要，仅有 `DISCOVERY_ONLY`），
-    THE system SHALL 标注「无摘要可用」并要求生成时不得就其内容做具体断言。
+12. WHERE 某 Reference 无可用于 Claim 支撑的证据（仅有 `DISCOVERY_ONLY`），
+    THE system SHALL 要求生成时不得就其内容做具体断言；且 SHALL 在告知中**区分成因**：
+    - 记录本身无摘要 → 标注「无摘要可用」；
+    - 有摘要但因上下文预算未纳入（Requirement 12.14 的退回题录降级）→ 标注
+      「摘要因预算未纳入，并非不存在」。
+
+    THE system SHALL NOT 把后者说成前者：那会让模型据此向用户断言该文献没有摘要，
+    把系统自身的取舍陈述为文献的事实。
 13. THE system SHALL 明确本系统的证据强度为**摘要级**，SHALL NOT 声称保证全文支持或
     结论正确性。
+14. WHEN 上下文预算装不下 Effective_Quota 下限所需证据，THE system SHALL **分级降级**
+    而非否决用户明确提出的引用数量（预算是实现约束，不是学术正确性约束），
+    依次尝试并取第一个装得下的档：(a) 全摘要；(b) 逐档截短摘要，截断处 SHALL 落在
+    句/词边界且 SHALL 保住 Evidence_Span 的 verbatim 溯源；(c) 按相关性排序**退回题录**
+    ——靠后的条目只给题录、摘要留给靠前的，且 SHALL 至少为一条保留摘要。
+    三档均装不下时 THE system SHALL 报告**最省档**的量化缺口（而非全摘要档的），
+    使用户能判断该提高预算还是降低数量要求。
+    每一档 SHALL 在 Evidence_Bundle 上**显式可见**，SHALL NOT 静默降级。
 
 ### Requirement 13: 写作前文献预检（LiteraturePreflight）
 
@@ -668,15 +682,19 @@
 1. THE system SHALL 提供 `search_literature` 意图：只检索、核验、入库，**不写正文**。
 2. THE system SHALL 为 `rewrite` 与 `add_section` 增加配额相关槽位，使带引用的写作可携带
    Citation_Quota。
-3. THE system SHALL 提供 `fix_bibliography` 意图：只负责正文引用与参考文献列表**对齐**，
-   不负责检索新文献。
+3. ~~THE system SHALL 提供 `fix_bibliography` 意图~~ —— **已撤销**（backlog B-2）。
+   「正文引用与参考文献列表对齐」保留为**写入路径的不变量**而非意图：
+   THE system SHALL 在 rewrite / add_section commit 时同步重建参考文献区
+   （`apply_bibliography`，与正文同一次写入）。
+   THE system SHALL 在载入时只读诊断用户原稿的悬空引用（`diagnose_dangling`），
+   且 WHERE 参考文献区无法识别，SHALL NOT 把引用判为悬空（避免误报噪音）。
 4. THE system SHALL 为上述每个意图的每个槽位声明 execution_binding，且 Handler SHALL
    真实消费之。
 5. WHERE 规划层不支持某个旧路径已支持的意图，THE system SHALL 明确回退旧执行器或明确
    拒绝，SHALL NOT 静默丢为未映射。
-6. WHEN 同一计划同时包含 `fix_bibliography` 与可能新增引用的写作操作，THE Plan_Validator
-   SHALL 检出顺序问题并给出重排建议或要求分两轮，SHALL NOT 静默按用户序执行导致新引用
-   缺条目。
+6. ~~WHEN 同一计划同时包含 `fix_bibliography` 与可能新增引用的写作操作……~~ —— **已消解**
+   （B-2）。`fix_bibliography` 不再是意图，故不存在这个排序冲突：文献区同步发生在每次
+   写作操作**自己的 commit 里**，天然在该操作新增引用之后。
 
 ### Requirement 17: 不可信外部输入防护
 

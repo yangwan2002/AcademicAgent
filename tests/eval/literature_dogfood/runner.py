@@ -159,8 +159,12 @@ def _run_build_bundle(*, facts, criteria, quota, eff, classifier, policy,
     need_total = _lower_bound(eff, CountDimension.TOTAL)
     need_zh = _lower_bound(eff, CountDimension.LANGUAGE_ZH)
     need_en = _lower_bound(eff, CountDimension.LANGUAGE_EN)
-    floor_n = max(need_total, need_zh + need_en)
-    extra_n = max(0, len(b.entries) - floor_n)
+    # 下限可能**大于**实际选入篇数（候选不足时 build_bundle 只能给这么多），
+    # 不夹住会让 floor_cost 把整个 bundle 都算成「下限必需」而 extra_n=0，
+    # 看上去像「第5步未触发」，其实是候选不够 —— 两种情形结论不同，必须分开。
+    want_n = max(need_total, need_zh + need_en)
+    floor_n = min(want_n, len(b.entries))
+    extra_n = len(b.entries) - floor_n
     floor_cost = sum(e.char_cost() for e in b.entries[:floor_n])
 
     _emit(f"    选入 {len(b.entries)} 篇, 占用 {used}/{budget_chars} 字符 "
@@ -171,10 +175,19 @@ def _run_build_bundle(*, facts, criteria, quota, eff, classifier, policy,
         _emit(f"    降级档: {b.degradation} 摘要上限={b.abstract_limit} 字符, "
               f"实际截断 {b.truncated_entry_count()}/{len(b.entries)} 条")
         _emit("    → 全摘要装不下配额下限,已自动截短保住篇数(旧实现此处直接失败)")
+        # 退题录必须单独报：它比截断严重(一点摘要都没给),混在截断数里会被掩盖。
+        if b.dropped_abstract_count():
+            _emit(f"    退回题录 {b.dropped_abstract_count()}/{len(b.entries)} 条"
+                  f"(有摘要但预算装不下,只给了题录;摘要留给排序靠前的)")
+            _emit("    → 连最短摘要档都装不下,已按相关性把摘要让给最相关的那批"
+                  "(X-10 A;旧实现此处否决用户要求的篇数)")
     _emit(f"    其中 满足下限需 {floor_n} 篇({floor_cost} 字符), "
           f"**第5步补满多塞 {extra_n} 篇({used - floor_cost} 字符)**")
     if extra_n == 0:
-        _emit("    → 第5步未触发(候选不足或预算已满),本次无法据此验 context rot。")
+        # 夹紧过要说清是哪一种：否则「下限 13 篇」会被读成「配额只要 13 篇」。
+        why = (f"候选只够 {len(b.entries)} 篇,配额下限本是 {want_n} 篇"
+               if want_n > len(b.entries) else "预算已满")
+        _emit(f"    → 第5步未触发({why}),本次无法据此验 context rot。")
     else:
         pct = (used - floor_cost) * 100 // max(1, used)
         _emit(f"    → 第5步贡献了 {pct}% 的证据字符。若这些文献最终没被正文引用,"
@@ -194,6 +207,9 @@ def _run_build_bundle(*, facts, criteria, quota, eff, classifier, policy,
                 "evidence_available": e.evidence_available,
                 # >0 = 摘要被截断,值为截断前长度。用于判断降级损失了多少信息。
                 "abstract_truncated_from": e.abstract_truncated_from,
+                # True = 有摘要但因预算退回题录(X-10 A)。与"本身没摘要"区分开:
+                # 后者 abstract_dropped=False 而 evidence_available 同为 False。
+                "abstract_dropped": e.abstract_dropped,
             }
             fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
     _emit(f"    逐条明细 → {_BUNDLE_PATH.name}(role=floor 为下限必需, topup 为第5步补满)")

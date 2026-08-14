@@ -28,13 +28,43 @@ active 下不可达:  add_section_batch, fix_bibliography
 而 `chat.py:_handle_planned_turn` 在 active 下无条件 `return True`，
 导致 `chat.py` 里 `if route.intent is Intent.FIX_BIBLIOGRAPHY:` 等 legacy 分支永不可达。
 
-**状态**：未处理。处理方案见 B-2 / B-3（两个意图各自的结论不同）。
+**状态**：`fix_bibliography` 已删除（B-2 已完成）。剩 `add_section_batch` 一个不可达，
+方案见 B-3（脱糖，不是修接线）。所以 B-1 现在只剩一半。
 
 ---
 
-### B-2 · `fix_bibliography` 应从意图降级为写入路径的内部不变量
+### B-2 · `fix_bibliography` 应从意图降级为写入路径的内部不变量 ✅ 已完成
 
 **结论**：这个意图要**删除**，能力保留但换位置。
+
+> **完成记录（2026-08-06）**
+>
+> 实际删除时发现依据 2「产出是残废的」和「正确形态」表格第一行**已经被另一套实现
+> 解决了**：`literature/bibliography_sync.py` 的 `apply_bibliography` 早已在
+> `_commit_add_section` / `_commit_rewrite` 里跑（`intents/add_section.py:194`），
+> 按正文实际引用重建整个文献区、走 `citation_styles` 渲染完整著录、且与正文**同一次**
+> `write_working`（`:undo` 原子性 —— 比本条原方案设想的更完整）。
+>
+> 所以本条真正的结论不是「能力要搬到 commit」，而是**能力早就在 commit 了，这个意图
+> 是重复且更差的实现**：只支持 tex、只写题名、单独一次写入会让 `:undo` 留半截状态
+> （正文引用还在而文献区已撤销）。
+>
+> 下面「待处理的设计细节」那个 `splice` 契约冲突同样已由「同一次写入」解决，不需要
+> 再扩 commit 语义。
+>
+> 落地内容：
+> - 删 `Intent.FIX_BIBLIOGRAPHY`、`router._BIB_KW`、`tools/bibliography.py`、
+>   `chat.py` 的分支、`tasking/rule_analysis.py` 的映射
+> - 新增 `literature/dangling_refs.py`（只读诊断）+ `chat.py:_note_dangling_refs`，
+>   接在 `_note_crossref_import` **之后** —— docx 的交叉引用域要先摊平，否则投影层
+>   看不见域内文字，那些引用会被误判成「正文没引用」
+> - `ask_context._OP_LABELS` 里的 `fix_bibliography` **保留**：老项目 git 历史里仍有
+>   以它为 message 的 commit，删了那些历史条目会显示成原始英文
+>
+> 实测副作用：「参考文献」不再是路由关键词后，原被 `_BIB_KW` 劫持的祈使句现在落
+> `UNCLEAR`，**不是依据 3 预期的 `rewrite`** —— 「多引几篇」这类措辞不在任何关键词
+> 表里。`UNCLEAR` 只打印功能列表、不改文档，是安全的一侧；要让它落 rewrite 需单独
+> 扩 `_REWRITE_KW`，已记为 B-8。
 
 **三条依据**：
 
@@ -77,11 +107,103 @@ commit 时写条目是确定性查表操作，无需 LLM、无需询问。
 "正文 + 引用条目原子提交"，并让它出现在 diff 里，不能静默修改。
 
 **动作**：
-- [ ] 删 `Intent.FIX_BIBLIOGRAPHY` 与 `router._BIB_KW` 分支（顺带解决抢流量）
-- [ ] 载入时悬空引用诊断（只读，零风险，可先做）
-- [ ] commit 时同步写 `\bibitem`，补全 authors/year/DOI（涉及写入契约，需改测试）
+- [x] 删 `Intent.FIX_BIBLIOGRAPHY` 与 `router._BIB_KW` 分支（顺带解决抢流量）
+- [x] 载入时悬空引用诊断（只读，零风险，可先做）
+      → `literature/dangling_refs.py`，tex / md / docx 三种都做。**保守规则**：文献区
+      识别不出来时保持沉默，不把所有引用判成悬空 —— 误报的代价比漏报高（用户会学会
+      忽略这个提示）。docx 额外标 `low_confidence`（Word 编号列表/域形态，投影不一定
+      认得出条目）。诊断认**用户的原生形态**（`thebibliography` / `## 参考文献`），
+      不能复用 `_citation_tokens_in_body` 那套系统自己的界定标记 —— 用户原稿没有那些
+      标记，整个文献区会被当成正文，条目自己被抽成引用，悬空判定恒为空。
+- [x] ~~commit 时同步写 `\bibitem`，补全 authors/year/DOI~~
+      → **本就已完成**，由 `apply_bibliography` 承担（见上方完成记录）。
+
+**遗留（不属于本条）**：真实账本（2 个项目共 51 条，去重后 48 条）实测
+`title`/`authors`/`year`/DOI 覆盖率 **100%**，但 `container_title` 45.8% /
+`volume` 43.8% / `pages` 50.0% —— 约一半条目凑不出完整期刊著录，
+`render_bibliography` 走 `report.incomplete`（「已简化著录」）。
+
+**成因不是抽取器缺字段，是存量数据。** 按 `reference_type` 分组一看就分层：
+
+```
+reference_type 为空   n=22   container_title=0    volume=0   pages=0
+article              n=20   container_title=20   volume=20  pages=19
+conference-paper     n= 6   container_title=2    volume=1   pages=5
+```
+
+`providers/retrieval/openalex.py:225-252` 已经在取 `primary_location.source.display_name`
+（刊名）、`biblio.volume/issue/first_page`，注释里写明了「原先未取 ⇒ 覆盖率恒为 0」。
+所以取字段的代码是对的：**新抽取的 `article` 条目覆盖率 100%（20/20）**，
+而那 22 条连 `reference_type` 都为空 —— 是补字段**之前**入库的旧记录，
+集中在 `proj_1780f6e14f27`（36 条里 25 条无 type，container 仅 8）；
+`proj_75eb4322afff`（15 条，全部有 type，container 14）则基本齐全。
+
+因此真正的动作有两个，且**不是**原先写的「从 DOI 反查刊物元数据」：
+
+1. **存量回填**：这 22 条 `work_identifiers` 里 DOI 齐全（100%），拿 DOI 重新打一次
+   OpenAlex/Crossref 就能补上，不需要新通路。属一次性数据迁移。
+2. **`conference-paper` 口径**：它的 container 本就该是会议名，但 `conference_name`
+   覆盖率 0%、`container_title` 只 2/6。会议论文的著录字段映射需要单独看
+   （OpenAlex 对会议的 `source` 语义与期刊不同），这才是需要设计的部分。
+
+`article_number` 覆盖率 0% 同理待查（电子期刊用它替代页码）。归属 F-6。
+
+**已修（同批）**：docx 初稿的参考文献抽取 + 「未核验」如实告知，见 B-9。
 
 ---
+
+### B-9 · docx 初稿的文献不入 facts；抽取被误当成核验 —— 已修
+
+**问题 1：docx 抽到 0 条。** `chat.py` 的 `_TEXT_EXT`（= `SECTIONABLE_EXTS`，
+含 docx）会调 `extract_refs`，但 `extractor.py` 里只有 `is_tex(ext)` 和
+`ext in ("md","markdown")` 两个分支 —— docx 都不匹配，静默返回空。实测同一份内容
+docx 抽 0 条、md 抽 2 条，而 docx 投影文本本身就是 `[1] Title` 这种行，形态和 md 一致。
+
+修法：md 分支加上 `docx`。但不能直接复用 —— docx 投影是**一段一行**，正文段落若以
+`[3]` 开头就会被 `_MD_REF_LINE`（行首约束）当成条目。故抽取限定在参考文献区内
+（复用 `doc_stats.split_bibliography`），切不出区则退回全文以保持旧行为。
+
+**问题 2：抽取被当成核验。** `extract_refs` 产出的 `KnownRef.verified` 恒为 False，
+且这个字段**没有任何消费者**（全仓只有两处 `.verified`，都是检索链路的
+`outcome.verified` 计数，与它无关）。于是系统既不核验用户原稿的文献，也不说自己
+没核验；而载入时那句「抽取到 N 条文献引用」很容易被读成「这 N 条已验过」。
+
+修法（第一版）：不为 `verified` 造消费者，而是在那句话后面补一行
+`_note_refs_unverified` 声明「这些未查证」。
+
+> **第二版（2026-08-12）：改成真去核验，声明已删。**
+>
+> 只声明「我没查」价值有限 —— 用户想知道的是「这条到底存不存在」。新增
+> `literature/draft_refs.py`：解析题名 → Crossref `query.bibliographic` 反查 →
+> 比题名相似度，四态 MATCHED / MISMATCH / NOT_IN_SOURCE / UNCHECKED。
+> `_note_refs_unverified` 与其 4 个测试一并删除。
+>
+> 三个实测才发现的要点：
+> - **Crossref 模糊检索几乎总有返回**。编造的题名会拿回一篇不相关的真论文，所以
+>   「有候选」不能判问题，必须看题名相似度（≥0.75 通过，[0.55,0.75) 才提示不符）。
+>   最初按「有候选就是元数据不符」写，一连真源就露馅。
+> - **「Crossref 查不到」绝不表述为「疑似虚假」**。中文期刊、书籍、学位论文大量
+>   不在 Crossref；误报一多，用户学会无视提示，连真造假也一起漏掉。
+>   `PROVIDER_ERROR` 同理走 UNCHECKED —— 把网络故障说成文献造假是最坏的错。
+> - **成本要交代**。单条约 2s，36 条初稿 ≈ 73s，故打印预估耗时、支持 Ctrl-C 跳过，
+>   且中断时已验部分照样落盘（`draft_refs_cache.json`，键为归一化题名）。
+>   UNCHECKED 不入缓存，否则一次网络故障会被永久固化成结论。
+
+**同批修的另两处**：
+
+- **自动编号列表抽 0 条**：文献表用 Word 的 `List Number` 样式时，编号由 `numPr`
+  渲染、**不在文本流里**，投影只剩 `Zhang X. Visual SLAM. 2021.`，而 `_MD_REF_LINE`
+  要求行首有 `[n]`。加位置回退：按段落顺序补 1..n（Word 自动编号默认也是 1 起顺排，
+  故与用户看到的一致）。只在显式编号**一条都没抽到**时才走，避免同篇稿子里编号
+  来源不一致。
+- **Crossref 301 重定向**（`http_util.get_with_retry`）：httpx 默认不跟随，被取代的
+  DOI（`10.55417/fr.2023001` → `10.1109/tfr.2024.3492160`）回 301 → 被归到非 404
+  的失败分支 → `RetrievalUnavailable`。于是**记录明明在库里**却报「源不可用」，
+  回填静默留空。由「51 条里唯独 1 条回填失败」暴露。已固定 `follow_redirects=True`，
+  所有走该函数的源都受益。
+
+**顺带**：用真实 Crossref 回填了两个存量项目的著录字段（29 条），有刊名的从
+22/51 升到 51/51。改前已备份 `facts.json`。
 
 ### B-3 · `add_section_batch` 不是"add_section 的线性叠加"
 
@@ -122,6 +244,36 @@ commit 时写条目是确定性查表操作，无需 LLM、无需询问。
 **动作**：
 - [ ] 重新评估「意图 vs 命令 vs 脱糖」三选一
 - [ ] 若选脱糖：实现提议步 + 处理 `max_operations` 上限（倾向"一轮最多 5 章"）
+
+---
+
+### B-8 · 「多引几篇文献」这类改写请求落 UNCLEAR，不落 rewrite
+
+**来源**：B-2 删掉 `_BIB_KW` 后的实测发现（不是 B-2 引入的，是它**暴露**的）。
+
+删除前这句话被 `_BIB_KW` 劫为 `fix_bibliography`；B-2 依据 3 写的是「本应是 rewrite」。
+删除后实测落 `UNCLEAR`：
+
+```
+帮我在相关工作里多引几篇参考文献   -> unclear
+参考文献格式帮我修一下           -> unclear
+```
+
+**原因**：`_REWRITE_KW` 是 `["改写","重写","补论证","补充论证","换叙述","重新组织",
+"改结构","展开","详细写","补一段","加一段","补一句", ...]` —— 「多引几篇」「格式修一下」
+一个都不命中。所以这不是 B-2 没做完，是这类措辞**从来没被任何关键词表覆盖过**，
+以前只是恰好被 `_BIB_KW` 接住（接错了地方，但至少没落 UNCLEAR）。
+
+**当前行为可接受**：`UNCLEAR` 只打印功能列表，不改文档，是安全的一侧。
+active 模式下走 LLM 理解层，本来就不吃这些关键词表，不受影响。
+
+**待评估**：off 模式下要不要扩 `_REWRITE_KW`。倾向**不扩** —— 关键词表加词就是加劫持面
+（B-2 的教训正是子串匹配无条件返回），而 active 模式是长期方向。若要做，得先有一批
+真实措辞样本，按「误判代价 vs 漏判代价」逐个判，不能凭想象加词。
+
+**动作**：
+- [ ] 收集 off 模式下落 UNCLEAR 的真实措辞（可从 `runs/` 里捞）
+- [ ] 据样本决定扩表 / 不扩 / 改提示文案（UNCLEAR 的功能列表可以更像"你是不是想…"）
 
 ---
 
@@ -706,14 +858,25 @@ B 臂是 UAV-VisLoc 数据集、跨视角注意力掩码、卫星影像实时地
 | 1 | `fix_bibliography` 在 active 不可达 | analyzer 不支持该意图，`_handle_planned_turn` 无条件接管 | 没有「active 下每个意图都可达」的测试 |
 | 2 | 相关性判定在 OpenAI 端点全失败 | 工具 schema 缺 `type`，Anthropic 容忍/OpenAI 不容忍 | `MockLLMProvider` 无条件吸收 `tools`、不校验形状 |
 | 3 | `by_purpose` 静默失效 | 判断字段是自由文本，精确匹配永不命中 | 测试喂了实践中不存在的合成字符串 |
+| 4 | 只读问答通路整条无观测（2026-08-12 修） | `plan.md` 列了 `ASK_TURN_START/TOOL_CALL/TURN_END` 三个落点，实现时整项漏做；且 `:ask` 跑在 `Coordinator.run` 之外，压根没有 bus | 25 问真机评测只看**答得对不对**，不看 trace 里有没有；当时 1912 个测试没有一条断言埋点存在 |
 
 **共同结构**：单元测试验证了「函数逻辑对」，但没验证「真实数据能流到这个函数」。
+
+第 4 例多一层教训：**通路的观测面本身也是"接线"**，而它的缺失比功能缺失更难发现 ——
+功能坏了用户会说，观测坏了没有人报错，只在事后要归因时才发现查不到。react 通路
+（模型自己决定调什么工具）比写死阶段的 workflow 更依赖埋点：后者靠
+`GENERATION_ATTEMPT_*`/`GATE_*` 能还原过程，前者不记录就无从复现。
+补的测试**读落盘的 `trace.json`**，不 spy `bus` —— `recorder._record_event` 有一张
+kind 白名单，只断言"publish 被调了"会在漏加白名单时照样绿。
 
 **建议的纪律（低成本，未实施）**：
 - [ ] 每个新 flag/mode 必须有一条**「真的改变了可观测行为」**的测试，
       输入用**真实路径产生的值**，而非合成的理想值
 - [ ] `MockLLMProvider` 增「严格模式」：在测试里校验 tool schema 协议合法性（第二道防线）
 - [ ] 扩展 `scripts/_wiring_check.py`：把「每个意图在 active 下可达」纳入断言
+- [ ] **新通路的 spec 落点清单要逐条勾掉再算完成**。第 4 例就是落点写在
+      `plan.md` 里、实现时跳过、没人对账。`agent-loop/plan.md` 现在改成
+      「顺序与验收」逐条带 ~~删除线~~ + 完成日期，缺的一眼看得出。
 
 #### F-4 · B2 的离线 gate 严重低估了它的真实收益
 
@@ -975,6 +1138,31 @@ bibkey + numeric_alias 双标记体系、`resolvable_*` vs `citable_*` 两个引
 **顺序**：先跑 P-1，看真实的 `facts.json` 长什么样，再决定要不要改 Ledger。
 你还没见过一次真实检索入库的结果。
 
+#### 已完成（2026-08-12）：`citation_usage.py`
+
+按上面的建议做了，没建新子系统：`src/paper_agent/literature/citation_usage.py`
+（约 160 行），复用既有 `SectionIndex` 分章 + `Ledger.resolve_token` 解析，
+落在 facts.json envelope 的 `citation_usage` 段。旧 envelope 无此段 → 空表，向后兼容。
+
+- `SessionFacts.refresh_citation_usage(text, ext)` 整体重算（不增量）。增量维护要求
+  每个正文写入路径都记得更新，那正是 `citation_aliases` 语义漂移的成因；全量重算
+  对万字级文档的开销可忽略，换来"表与正文必然一致"。
+- 解析失败**留痕不静默丢**：NOT_FOUND / AMBIGUOUS 记入 `unresolved`。把"引了一篇
+  我不认识的文献"记成"本章没引"，会让配额判定和 bibliography 都建在假数据上。
+  AMBIGUOUS 照 `resolve_token` 的纪律绝不任选。
+- 分不出章节的格式归到伪章节 `_document`，不返回空表 —— 否则 `all_cited_ids()`
+  会把"我分不出章节"谎报成"这篇没有引用"。
+
+顺带把它接进了 `:ask` 只读问答：新工具 `section_citations` 回答"引言引了哪些文献"
+"某篇在哪几章被引"，此前这类问题只能靠模型读正文数方括号（不准且贵）。
+`capture(session, facts)` 是只读的 —— 不写回 `citation_usage`、不 save，
+`:ask` 保持零副作用（有测试钉住）。没传 facts 时报"无法回答"而非"没有引用"。
+
+测试：`tests/test_citation_usage.py`（9 条）、`tests/test_ask_section_citations.py`（10 条）。
+
+**B-2 的下一步**：commit 时写 bibitem 现在可以是查表操作 —— `sections_citing(rid)`
+与 `all_cited_ids()` 已就位。还没接进 `sync_bibliography`，那是独立的一步。
+
 ### P-2a · `trace.json` 不能当记忆用（结构性原因，比隐私理由更硬）
 
 一度考虑"关掉脱敏后把 trace 当记忆"。**不可行，而且主因不是隐私。**
@@ -1052,6 +1240,49 @@ Claude Code 的记忆载体是文件：`CLAUDE.md`、todo list、`claude-progres
 **这比 D-4 更有价值**：D-4 是让预算统一，这条是**质疑预算该不该用满**。
 E2E 之后可直接做 A/B（同一任务，补满 vs 只保下限），成本低、结论明确。
 
+#### P-3a 三臂 A/B 结果：假设未成立，但发现了一个更值钱的取舍（2026-08-12）
+
+真机跑过（25 条语料、预算固定 24000 字符、`--generate` 已发请求）。
+脚本 `tests/eval/literature_dogfood/ab_context_budget.py`，
+报告 `ab_context_budget.25rec.txt`，三臂正文 `ab_gen_{A_full,B_trunc1000,C_trunc700}.md`。
+**这些产物都被 `.gitignore:25` 挡住不入库，所以结论必须记在这里**，否则下次会重复付费。
+
+| 臂 | 摘要档 | 选入 | 占用 | 引用率 | 带出处的具体数据 |
+|---|---|---|---|---|---|
+| A_full | 全摘要 | 15 篇 | 23821（99%） | 15/15 | **12 个百分比** |
+| B_trunc1000 | 截 1000 | 23 篇 | 23375（97%） | 23/23 | 0 |
+| C_trunc700 | 截 700 | 25 篇 | 17940（74%） | 25/25 | 0 |
+
+**1. P-3a 的假设（补满 → 浪费）未观察到。** 三臂引用率全是 100% —— 给多少篇模型就引
+多少篇，不存在「塞进去没被引用」的篇目。按 P-3a 原本的判据（未被引用即浪费），
+补满的浪费为零。
+
+**2. 真正的代价在另一个维度：截摘要会让正文丢掉具体数据。**
+A 臂产出 12 个有摘要出处的百分比，B/C 两臂都是 0，行文停留在定性描述。
+摘要后半段被当作「多为实验细节、价值低」而截掉 —— 但那里正是**可引用的量化结果**，
+而具体数据恰是学术写作的核心价值。这个损失比篇数少几篇严重得多。
+
+**3. 由此得到的策略**：截断应是**最后手段**，不是扩大覆盖面的默认手段。
+优先级为 全摘要少篇 > 截摘要多篇。`_ABSTRACT_LIMIT_LADDER` 现在的行为
+（装不下就逐档截）方向是对的（比旧实现直接判 INSUFFICIENT 好），
+但不应为了多塞篇数而主动降档。
+
+**结论强度的两点保留**（避免把它当成已定论）：
+- A 臂原按 total=20 装不下（需 30645 > 24000），是下探到 15 篇才参与对比的
+- 100% 引用率本身可疑：读 C 臂正文，25 篇呈现为一句一个标记的罗列式行文，
+  更像堆砌而非每篇真的必要。「引用率 100%」不等于「每篇都有价值」，
+  这个判据本身偏弱，后续要换成人工判行文质量
+
+**未完成**：25 条那次没落 `bundle_*.jsonl` 逐条明细，floor/topup 划分事后无法复原。
+现已补上（两个脚本都写），但盘上的 `bundle_*.jsonl` 是 13 条语料那次的，
+两者不可混用。
+
+**一个踩过的坑**：`ab_context_budget.txt` 固定文件名，被一次 13 条语料的离线重跑
+覆盖掉了 25 条那次的付费结果（内容已复原）。现在输出按语料规模分文件
+（`ab_context_budget.<N>rec.txt`），且离线跑不许覆盖含真机结果的报告。
+另外 13 条语料时三臂产出**完全相同**（全摘要就装得下、阶梯不触发），
+脚本现在会显式警告「本次不构成 A/B」—— 否则会被误读成「三臂无差异」。
+
 ### P-3b · agent loop 与写作意图应采用**不同**的组装策略（两者不矛盾）
 
 | | 组装策略 | 为什么 |
@@ -1114,6 +1345,20 @@ return RouteResult(intent=Intent.UNCLEAR,
 
 **可并行**：只读、新增、不碰现有路径，不依赖 P-1。
 
+> **状态：已实施（2026-08-12），默认 `on`。** 见 `.kiro/specs/agent-loop/plan.md`。
+>
+> 落地形态与上面这段设想的三处差别：
+> - **工具是 5 个，不是这里列的 4 个那套**。`list_references` / `get_section_intent`
+>   都没做：真正被问的是"哪一章引了哪几篇"（→ `section_citations`），不是题录列表；
+>   `claims` 真机是空的（X-10 未修项 B），提供恒返回"没有记录"的工具只会诱导模型去调。
+>   计划外补了 `edit_history` —— 真机 25 问里历史类 3 问全答不上，而数据一直在
+>   session 的 git commit 里，缺的只是读取通路。
+> - 上面举的**第三个例子答不了**（"引言这章你是怎么规划的"），卡在 claims 没数据，
+>   不在循环。前两个能答。
+> - **红线守住了，且是结构性的**：`AskContext` 是 frozen 快照、**不持有 session**，
+>   工具闭包里根本没有 `write_working` 可调 —— 比"约定工具不写"强。
+>   `tests/test_ask_loop.py` 把写入面做成会记账的假实现并断言零调用。
+
 ---
 
 ## 四、元风险（记录用）
@@ -1162,12 +1407,17 @@ E2E 跑通后，优先级发生了实质变化。**新的第一优先级是检�
   已默认开启，见 F-7。教训同 F-4：估算收益占比时必须落到秒。
 - **P-2 记忆系统进一步确认不必新建** —— `facts.json` v4 落盘结构完整、
   `relevance_store` 缓存有效、幂等键正常。唯一缺口仍是 `CitationUsage`（哪章引了哪篇）。
+  → **该缺口已补（2026-08-12）**：`literature/citation_usage.py`，落在 facts envelope
+  的 `citation_usage` 段，并接进 `:ask` 的 `section_citations` 工具。见 P-2 小节。
 - **P-3 上下文工程尚无数据支撑** —— 本次只有 1 篇入库，`build_bundle` 的
   "补满预算"路径（P-3a 质疑的那步）根本没触发。要验证 context rot 假设，
   需要先有 ≥10 篇的证据集，即先解决 F-1。
   → **F-1 已修后此前提解除**：非受控跑已见入库 10 篇（`quota_satisfied`）。
   P-3a 质疑的那步现在**够条件跑了**，但 runner 仍在 `[OK] 配额可满足` 就结束、
   没调 `build_bundle`。要验 context rot，下一步是让 runner 跑完 BUILD_BUNDLE。
+  → **已跑完（2026-08-12）**：三臂 A/B 完成，P-3a 假设未成立（引用率三臂皆 100%、
+  无浪费），但发现截摘要会让正文丢掉全部量化数据（12 个百分比 → 0）。
+  见上面「P-3a 三臂 A/B 结果」。上下文工程这块**已有数据**，不再是"无支撑"。
 
 ---
 
@@ -1816,7 +2066,7 @@ X-9 的修复不给上述任何一项制造债务：它改动的代码在重构�
 
 ---
 
-## 十三、X-10 · 证据集预算 8000 硬编码，让 `total=10` 恒定失败（2026-08-02，已修）
+## 十三、X-10 · 证据集预算 8000 硬编码，让 `total=10` 恒定失败（2026-08-02，已修；未修项 A 已于 2026-08-12 补修）
 
 ### 现象
 
@@ -1863,22 +2113,49 @@ rejected — 写作前文献预检未完成（needs_gap_decision）：
 **验证**：拿真机 `facts.json` 的 10 条原样复算 ——
 旧 8000 → `context_budget_insufficient`；新 24000 → `ok`，10 条全进，cost=14467。
 
+### A（预算被当成正确性约束在执行）— 已修，2026-08-12
+
+原文记的缺陷：`build_bundle` 资源不足时**否决用户明确提出的要求**，而不是降级；
+而按这批文献的相关性分布（2 relevant / 8 weakly）实测「relevant 全摘要 +
+weakly 只给题录」只需 ≈4000 字符，即连 8000 都够用 —— 撞墙的是「一律全摘要」
+这个一刀切，不是预算值。
+
+修法：`build_bundle` 的降级阶梯从两档扩到**三档**，依次尝试、取第一个装得下的：
+
+1. 全摘要（`degradation="full"`）
+2. 按 `abstract_ladder` 截短摘要（`"truncated_abstract"`，原有）
+3. **按 `drop_ladder` 退回题录**（`"bibliographic_only"`，本次新增）：排序靠后的
+   条目只给题录，摘要留给靠前的；每退一档都重新从全摘要试起，因为腾出的空间
+   可能让留下的条目拿回全摘要（依据 P-3a：全摘要少篇 > 截摘要多篇）
+
+三档都装不下才 `CONTEXT_BUDGET_INSUFFICIENT`。原文说的「降级机制已经存在但没接上」
+正是这么接的：退回题录后 `evidence_available=False`，Req 12.12 那条
+「不得据标题推导具体结论」自动生效，没有新写 prompt 约束。
+
+**按排序位次而不是按 verdict 分级**（与原文表格的差异，重要）：默认
+`STRICT_ACCEPTANCE` 只接受 `relevant`，`eligible` 里全是同一个 verdict ⇒ 按 verdict
+分级在默认档下**恒等于什么都不做**，正好在本条抱怨的场景里失效。改用 `eligible`
+既有的稳定排序（verdict → confidence → 年份新 → id）位次：verdict 混合时
+（`WEAKLY_ACCEPTANCE`）weakly 自然排在后面先被退掉，两种接受档下都成立。
+阶梯 `(0.5, 0.75, 0.9)` 刻意不含 1.0，且至少留 1 条摘要 —— 全是题录的 bundle
+支撑不了写作，那时该交上层决策而不是产出空壳。
+
+`BundleEntry.abstract_dropped` 与「记录本身没摘要」**必须分开**：两者
+`evidence_available` 同为 False，但渲染措辞不同。把"我没给"说成"原文没有"，
+模型会据此向用户断言该文献没有摘要 —— 那是把我们的取舍讲成文献的事实。
+
+**验证**：10 条 ~1540 字符记录、`total=10`，budget=4000 ⇒ 旧行为
+`INSUFFICIENT`（用户要的 10 篇一篇不给）、新行为 `ok` 且 10 篇全进；
+混合 verdict（2 relevant / 8 weakly）下 budget 降到 2000 仍 ok，
+退掉的 8 条全是 weakly、2 条 relevant 保住摘要 —— 与原文表格的判据一致。
+新增 6 条 bundle 测试 + 2 条渲染措辞测试。
+
+`degradation` 现有三个取值，A/B 脚本 `ab_context_budget.py` 已显式
+`drop_ladder=()` 关掉第 3 档 —— 该实验的自变量只能是 `abstract_ladder`，
+否则 A 臂会从"少给几篇全摘要"变成"给满篇数但部分只有题录"，与已归档的
+25rec 真机付费结果不再可比。
+
 ### 未修（本次范围外，按严重性排序）
-
-**A. 预算被当成正确性约束在执行 —— 这是真正的设计缺陷。**
-`build_bundle` 资源不足时**否决用户明确提出的要求**，而不是降级。
-正确处置是砍摘要退回题录。**降级机制已经存在但没接上**：
-`EvidenceCapability` 已区分 `CLAIM_SUPPORT`/`DISCOVERY_ONLY`，
-`evidence_available=False` 的条目在 prompt 里已渲染成「不得据标题推导结论」。
-
-按这批文献的相关性分布（2 relevant / 8 weakly）实测：
-| 策略 | 10 条成本 |
-|---|---|
-| 现在：一律全摘要 | 15213 → 爆 |
-| relevant 全摘要 + weakly 只给题录 | **≈4000** |
-
-即**连 8000 都够用**，撞墙的是「一律全摘要」这个一刀切，不是预算值。
-调大默认值只是让常见情况能跑通，没有解决这条。
 
 **B. rewrite 完全看不到全文上下文 —— 不报错，但静默降低质量。**
 grep `generate/` 确认：无任何地方把论文标题、大纲、其他章节标题、
@@ -1902,3 +2179,5 @@ grep `generate/` 确认：无任何地方把论文标题、大纲、其他章节
 
 **注**：A 与 P-3a 是同一件事的两面 —— P-3a 质疑「补满预算」是负收益（context rot），
 A 指出预算不足时该降级而非否决。两者都指向**分级证据**而非**调大预算**。
+A 已修（见上），P-3a 的「补满是否负收益」仍未定论；C/D 的计量口径问题不受 A 影响 ——
+三档降级仍按字符计，中文真实 token 成本仍被低估 3–4 倍。

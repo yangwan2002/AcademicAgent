@@ -17,7 +17,10 @@
 **跨意图共享设施**：
 - Facts 系统（`facts.json`）：渐进式积累声明/数字/术语/文献，替代 v1 的 artifact
 - 共享子 SOP：搜文献 + 核验 + 引用（供 rewrite / add_section 引用）
-- 共享工具：`fix_bibliography`（修复正文引用 [id]/\cite{} 但 bibliography 缺条目的情况）
+- ~~共享工具：`fix_bibliography`~~ —— **已废弃**（backlog B-2）。文献区同步改由
+  `literature/bibliography_sync.py:apply_bibliography` 在 rewrite / add_section
+  commit 时自动承担（与正文同一次写入，`:undo` 原子）；用户原稿的悬空引用改由载入时
+  只读诊断报告（`literature/dangling_refs.py`）。下方「共享设施 C」整节同此。
 
 ---
 
@@ -338,7 +341,22 @@ f. [代码] 返回给上层 SOP：新加入的 `[id]` 列表 + 每条简介，�
 
 ---
 
-## 跨意图共享设施 C · `fix_bibliography` 工具
+## 跨意图共享设施 C · `fix_bibliography` 工具 —— ⚠️ 已废弃（B-2）
+
+> **本节保留为设计史，不再描述现行系统。**
+>
+> 实现（`tools/bibliography.py`）与 `Intent.FIX_BIBLIOGRAPHY` 已删除。理由见
+> `docs/backlog.md` B-2：它只支持 .tex、只写题名（authors/year/DOI 全丢），且
+> 单独一次 `write_working` 会让 `:undo` 留半截状态。
+>
+> 现行形态分两半：
+> - **写入侧**：`apply_bibliography` 在 commit 时按正文实际引用重建文献区，走
+>   `citation_styles` 渲染完整著录，与正文同一次写入。
+> - **诊断侧**：`diagnose_dangling` 在载入时只读报告悬空引用（下面「触发方式」
+>   第二条的自动扫描就是它，但**只报告不修**——缺元数据时补不了）。
+>
+> 下面的「操作步骤」c/d 两步（问用户 / 搜文献补元数据）**没有实现**，也不打算按
+> 这个形态实现：交互式补文献属搜文献链路。
 
 **动机**：用户手写的初稿常见问题——正文中有 `[3]` 或 `\cite{smith2020}` 引用，但 bibliography 段缺失对应条目。这不是 rewrite / add_section 的范畴，是**结构性修复**。
 
@@ -758,7 +776,7 @@ C3. 引用管理工具           search_refs / verify_refs / confirm_new_number
 C4. 格式转换工具           check_pandoc / convert_document
 C5. 格式排版工具           Layer 1 硬编码 20+ 个（set_font_size 等）
 C6. 逃生舱                 run_python_script（沙箱）
-C7. 修复工具               fix_bibliography
+C7. 修复工具               ~~fix_bibliography~~（已删，B-2）
 
 Layer D · CLI / Entry
 ──────────────────────────────────────────────────
@@ -931,7 +949,7 @@ $ python scripts/chat_v2.py my_paper.tex
 - C2 add_section 工具
 - extract_structure_from（从参考论文抽小节骨架）
 - Facts 跨意图复用逻辑（`section_intents` / `section_structures` 沿用提示）
-- 共享设施 C（fix_bibliography 工具）
+- 共享设施 C（fix_bibliography 工具）—— 后已废弃，见 B-2
 
 **验收**：
 ```
@@ -1014,7 +1032,7 @@ $ python scripts/chat_v2.py my_paper.tex
 - [x] 卡 1-5 · 5 张意图卡
 - [x] 共享设施 A · Facts 系统
 - [x] 共享设施 B · 搜文献子 SOP
-- [x] 共享设施 C · fix_bibliography
+- [x] 共享设施 C · fix_bibliography（后废弃，B-2）
 - [x] Step 3 · 模块清单
 - [x] Step 4 · Milestone 表
 

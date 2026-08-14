@@ -33,7 +33,11 @@ if str(_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(_ROOT / "src"))
 
 _FACTS = _HERE / "_dogfood_facts.json"
-_OUT = _HERE / "ab_context_budget.txt"
+#: 输出按语料规模分文件。曾经固定写 `ab_context_budget.txt`，结果一次 13 条语料的
+#: 离线重跑覆盖了 25 条那次的**真机付费结果**。语料一换，三臂就可能全都装得下、
+#: 退化成同一个 bundle（13 条时实测如此），两份报告不可比却同名 —— 必须分开存。
+def _out_path(n_records: int) -> Path:
+    return _HERE / f"ab_context_budget.{n_records}rec.txt"
 
 # 三臂定义：(名字, abstract_ladder)。() = 关闭降级 = 旧行为。
 _ARMS = (
@@ -51,6 +55,9 @@ _ARMS = (
 # 算出来的篇数会偏乐观（我按成本估的 17 实测仍需 26811 > 24000）。改为**实测下探**。
 
 _log: list[str] = []
+
+#: 每臂实际生效的约束（A 臂下探过 total）。算 floor 必须用该臂自己的，见 `_dump_bundles`。
+_ARM_EFF: dict[str, object] = {}
 
 
 def _emit(line: str = "") -> None:
@@ -142,6 +149,36 @@ def _relaxed_eff(eff, total: int):
     return tuple(out)
 
 
+def _floor_topup_line(ctx, bundle, used: int, *, arm_eff=None) -> str:
+    """把选入的篇目拆成「下限必需」与「第 5 步补满」两段。
+
+    P-3a 质疑的是**第 5 步**（剩余预算补高相关），不是整个 bundle。不拆开就分不清
+    「20 篇里 20 篇都是配额要求的」和「下限只要 5 篇、另 15 篇是补满塞的」——
+    前者与 context rot 无关（少给就违背用户明确的引用数量要求），后者才是那个质疑。
+
+    `build_bundle` 的选取顺序是 2→5 步依次 append，所以前 `floor_n` 条即下限部分；
+    这与 runner 的算法一致，两处口径必须相同。`arm_eff` 是该臂实际用的约束
+    （A 臂下探过 total，不能用 `ctx["eff"]`，否则 floor 会被高估）。
+    """
+    eff = arm_eff if arm_eff is not None else ctx["eff"]
+    need_total = _lower_bound_of(eff, "TOTAL")
+    need_zh = _lower_bound_of(eff, "LANGUAGE_ZH")
+    need_en = _lower_bound_of(eff, "LANGUAGE_EN")
+    want_n = max(need_total, need_zh + need_en)
+    n = len(bundle.entries)
+    floor_n = min(want_n, n)
+    floor_cost = sum(e.char_cost() for e in bundle.entries[:floor_n])
+    extra_n = n - floor_n
+    if extra_n <= 0:
+        # 夹紧过就必须说出来：`下限 13 篇` 会把"候选只有 13 篇、配额其实要 20 篇"
+        # 读成"配额只要 13 篇"，而这正是本函数要区分开的两种情形之一。
+        short = f",配额下限 {want_n} 篇但候选只够 {n} 篇" if want_n > n else ""
+        return (f"第5步补满: 未触发（选入 {n} 篇全是配额必需{short}）")
+    pct = (used - floor_cost) * 100 // max(1, used)
+    return (f"第5步补满: 下限需 {floor_n} 篇({floor_cost} 字符), "
+            f"补满多塞 {extra_n} 篇({used - floor_cost} 字符 = {pct}% 的证据字符)")
+
+
 def _build_arm(ctx, ladder, budget, *, eff=None):
     from paper_agent.literature.evidence import build_bundle
 
@@ -153,6 +190,11 @@ def _build_arm(ctx, ladder, budget, *, eff=None):
         classifier=ctx["orch"]._classifier, policy=ctx["orch"]._policy,
         judge_key=ctx["judge_key"], acceptance=ctx["acceptance"],
         abstract_ladder=ladder,
+        # 必须显式关掉退回题录档（X-10 A 之后它是默认开的）：本实验问的是
+        # 「同样预算，少而全 vs 多而截」，三臂的自变量只能是 `abstract_ladder`。
+        # 留着默认档，A 臂就会从"少给几篇全摘要"变成"给满篇数但部分只有题录",
+        # 与**已归档的 25rec 真机付费结果**不再可比。要评测退题录档得另开一臂。
+        drop_ladder=(),
     )
 
 
@@ -197,6 +239,7 @@ def _compose(ctx, budget: int):
                       f"到 {relaxed_to}（= 接受偏差,改法 C 之前用户唯一的出路）。")
         res = _build_arm(ctx, ladder, budget, eff=eff)
         results[name] = res
+        _ARM_EFF[name] = eff if eff is not None else ctx["eff"]
         if res.status is not BundleStatus.OK or res.bundle is None:
             _emit(f"\n[{name}] 装不下 → status={res.status.value} "
                   f"需 {res.required_chars} 差 {res.shortfall_chars()}")
@@ -212,6 +255,7 @@ def _compose(ctx, budget: int):
         _emit(f"    截断 {b.truncated_entry_count()} 条, 落选 {b.truncated_count} 篇")
         ev = sum(1 for e in b.entries if e.evidence_available)
         _emit(f"    有摘要证据（可支撑 Claim）: {ev}/{len(b.entries)} 篇")
+        _emit("    " + _floor_topup_line(ctx, b, used, arm_eff=eff))
         # 同题不同 DOI = 同一研究的会议/期刊两个版本（本语料的 InLoc 即 CVPR'18 与
         # TPAMI'19）。**不是重复入库**：标识符各自唯一,是两条合法记录,配额也该各记一篇。
         # 但写引言时通常只引其一,故作为「引用冗余」信号报出,供判断覆盖面的真实增量。
@@ -223,6 +267,14 @@ def _compose(ctx, budget: int):
 
     ok = {k: v for k, v in results.items()
           if v.status is BundleStatus.OK and v.bundle}
+    # 语料太小时全摘要就装得下 ⇒ 截断阶梯根本不触发 ⇒ 三臂产出同一个 bundle。
+    # 这时报告看着正常但**没有对比价值**，必须显式说出来，否则会被当成「三臂无差异」
+    # 这个结论（13 条语料时实测如此：三臂全是 13 篇、21950 字符、degradation=full）。
+    sigs = {tuple(r.bundle.reference_ids()) for r in ok.values()}
+    if len(ok) >= 2 and len(sigs) == 1:
+        _emit(f"\n⚠ 三臂产出完全相同（各 {len(next(iter(sigs)))} 篇）：本语料全摘要即装得下,")
+        _emit("  截断阶梯未触发,故本次跑**不构成 A/B**。要有对比需更大语料")
+        _emit("  （历史上 25 条时 A 装 15 篇、C 装 25 篇才有差异）。")
     if len(ok) >= 2:
         _emit("\n--- 覆盖面差异（同预算下多覆盖了哪些文献）---")
         base = min(ok.values(), key=lambda r: len(r.bundle.entries))
@@ -240,7 +292,49 @@ def _compose(ctx, budget: int):
                 _emit(f"    ... 另 {len(extra) - 6} 篇")
         _emit("\n  多覆盖的文献若最终被正文引用 → 降级是净赚；若没被引用 → 纯浪费(P-3a)。")
         _emit("  这一步只能量到「可引用面」，引不引得动要靠 --generate 实测。")
+    _dump_bundles(ctx, results)
     return results
+
+
+_BUNDLE_DIR = _HERE
+
+
+def _dump_bundles(ctx, results) -> None:
+    """逐条明细落盘，每臂一个 `bundle_<arm>.jsonl`。
+
+    runner 也写 `bundle.jsonl`，但那要一次联网真机跑；组成分析是离线的，能零成本
+    得到同样的明细。`role` 字段是关键：floor / topup 决定了 P-3a 该看哪些条目。
+    """
+    from paper_agent.literature.evidence import BundleStatus
+
+    for name, res in results.items():
+        if res.status is not BundleStatus.OK or not res.bundle:
+            continue
+        b = res.bundle
+        # A 臂下探过 total，必须用该臂实际的约束算 floor，否则会被高估
+        eff = _ARM_EFF.get(name) or ctx["eff"]
+        need = max(_lower_bound_of(eff, "TOTAL"),
+                   _lower_bound_of(eff, "LANGUAGE_ZH") + _lower_bound_of(eff, "LANGUAGE_EN"))
+        floor_n = min(need, len(b.entries))
+        path = _BUNDLE_DIR / f"bundle_{name}.jsonl"
+        with open(path, "w", encoding="utf-8") as fh:
+            for i, e in enumerate(b.entries):
+                fh.write(json.dumps({
+                    "rank": i,
+                    "role": "floor" if i < floor_n else "topup",
+                    "rid": e.reference_id,
+                    "chars": e.char_cost(),
+                    "spans": len(e.spans),
+                    "title": e.title,
+                    "year": e.year,
+                    "bucket": e.language_bucket,
+                    "verdict": e.relevance_verdict,
+                    "confidence": e.relevance_confidence,
+                    "evidence_available": e.evidence_available,
+                    # >0 = 摘要被截断，值为截断前长度（量降级损失了多少信息）
+                    "abstract_truncated_from": e.abstract_truncated_from,
+                }, ensure_ascii=False) + "\n")
+        _emit(f"  逐条明细 → {path.name}（role=floor 为下限必需, topup 为第5步补满）")
 
 
 def _describe_generation_cost(ctx, results) -> None:
@@ -377,8 +471,14 @@ def main() -> int:
     else:
         _describe_generation_cost(ctx, results)
 
-    _OUT.write_text("\n".join(_log) + "\n", encoding="utf-8")
-    _emit(f"\n完整报告 → {_OUT.name}")
+    out = _out_path(len(ctx["records"]))
+    # 真机 `--generate` 的结果是**花过钱的**，不许被离线重跑悄悄盖掉。
+    if out.exists() and not args.generate and "已发请求" in out.read_text(encoding="utf-8"):
+        alt = out.with_suffix(".offline.txt")
+        _emit(f"\n注意：{out.name} 含真机生成结果，本次为离线跑，改写入 {alt.name}")
+        out = alt
+    out.write_text("\n".join(_log) + "\n", encoding="utf-8")
+    _emit(f"\n完整报告 → {out.name}")
     return 0
 
 
