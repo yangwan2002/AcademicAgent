@@ -382,7 +382,26 @@ def _dispatch(coordinator, intent_name, work, **route_data):
     return report
 
 
+def _force_utf8_output() -> None:
+    """让 stdout/stderr 按 UTF-8 输出，且编不出的字符退化成 `?` 而不是崩。
+
+    交互式终端本就是 UTF-8，但输出一旦被**重定向**（管道、`> log.txt`、CI、
+    后台跑），Python 会回退到系统默认编码；简体 Windows 下是 GBK，而提示里的
+    `⚠`(U+26A0) 不在 GBK 中 → `UnicodeEncodeError` 直接中断整个会话。
+
+    统一在入口处 reconfigure，而不是把符号逐个换成 ASCII —— 后者治不了以后
+    新加的符号。`errors="replace"` 是兜底：真遇到编不出的字符，宁可显示 `?`
+    也不能让写作过程崩在一个装饰性字符上。
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, OSError):       # 非常规流（被接管/已关闭）
+            pass
+
+
 def main(argv: list[str]) -> int:
+    _force_utf8_output()
     if len(argv) < 2:
         print("用法：python scripts/chat.py <论文文件路径>")
         return 2
