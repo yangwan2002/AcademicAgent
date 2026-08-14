@@ -17,6 +17,8 @@
 from __future__ import annotations
 
 import os
+import platform
+import sys
 from typing import Iterator
 
 from paper_agent.providers.llm.base import (
@@ -30,6 +32,56 @@ from paper_agent.providers.llm.base import (
 )
 
 _DEFAULT_MAX_TOKENS = 4096
+
+
+def _prewarm_platform_cache() -> None:
+    """填 `platform` 缓存，规避 Windows 上 anthropic SDK 的 WMI 挂死。
+
+    SDK 每次构造请求头都会调 `platform.platform()` 取 UA（`_base_client.get_platform`）。
+    在部分 Windows 环境下这条路径会走 WMI（`platform._wmi_query`）并**长时间挂住**：
+    实测本机每次 `complete()` 卡 45 秒以上直到超时，而同一个请求用 urllib 直发网关
+    只要 2 秒 —— 网络和网关都正常，时间全花在取 UA 字符串上。
+
+    WMI 有三处入口，逐一堵掉（少一处就仍然卡，实测确认）：
+
+    1. `uname()` 的 `_uname_cache` —— 填好即不再查；
+    2. `platform.platform()` 另走 `win32_ver()`；
+    3. `uname_result.processor` 是 `functools.cached_property`，`platform()` 迭代
+       uname 时**才**触发 WMI —— 所以只填 1 不够，得把 processor 一起定死。
+
+    数据取自 `sys.getwindowsversion()` 与环境变量，都是免 WMI 的来源；UA 字符串
+    仅用于遥测，精度不影响功能。非 Windows 直接返回，任何异常都忽略。
+
+    放模块导入期而非调用期：SDK 构造请求头时就读，届时再补已经晚了。
+    """
+    if os.name != "nt":
+        return
+    try:
+        wv = sys.getwindowsversion()
+        version = f"{wv.major}.{wv.minor}.{wv.build}"
+        release = "11" if wv.build >= 22000 else "10"
+        machine = os.environ.get("PROCESSOR_ARCHITECTURE", "AMD64")
+        node = os.environ.get("COMPUTERNAME", "localhost")
+
+        cached = platform.uname_result("Windows", node, release, version, machine)
+        # processor 是 cached_property：直接塞进实例字典，堵掉第 3 处 WMI。
+        try:
+            object.__setattr__(
+                cached, "processor", os.environ.get("PROCESSOR_IDENTIFIER", machine)
+            )
+        except Exception:  # noqa: BLE001 - 塞不进就算了，最多慢，不会错
+            pass
+        platform._uname_cache = cached  # type: ignore[attr-defined]
+
+        sp_major = getattr(wv, "service_pack_major", 0) or 0
+        platform.win32_ver = lambda *a, **k: (  # type: ignore[assignment]
+            release, version, f"SP{sp_major}" if sp_major else "", "Multiprocessor Free"
+        )
+    except Exception:  # noqa: BLE001 - 性能兜底，绝不因此让 provider 不可用
+        pass
+
+
+_prewarm_platform_cache()
 
 
 def _to_anthropic_tools(openai_tools: list[dict]) -> list[dict]:

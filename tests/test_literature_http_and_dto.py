@@ -42,8 +42,10 @@ class _FakeHttpx:
         self._outcomes = list(outcomes)
         self.calls = 0
 
-    def get(self, url, params=None, headers=None, timeout=None):
+    def get(self, url, params=None, headers=None, timeout=None,
+            follow_redirects=None):
         self.calls += 1
+        self.last_follow_redirects = follow_redirects
         outcome = self._outcomes[min(self.calls - 1, len(self._outcomes) - 1)]
         if isinstance(outcome, Exception):
             raise outcome
@@ -64,6 +66,18 @@ def test_404_raises_not_found_no_retry(patch_httpx):
     with pytest.raises(RetrievalNotFound):
         http_util.get_with_retry("http://x", {}, max_retries=3, backoff=0)
     assert fake.calls == 1          # 404 不重试
+
+
+def test_follows_redirects(patch_httpx):
+    """必须跟随重定向：Crossref 对被取代的 DOI 回 301 指向新号。
+
+    httpx 默认不跟随，于是 301 会被 raise_for_status 变成 RetrievalUnavailable ——
+    记录明明在库里，却报成「源不可用」，回填静默留空、核验落到「查不到」。
+    实测 10.55417/fr.2023001 → 10.1109/tfr.2024.3492160。
+    """
+    fake = patch_httpx([_Resp(200)])
+    http_util.get_with_retry("http://x", {}, max_retries=0, backoff=0)
+    assert fake.last_follow_redirects is True
 
 
 def test_404_is_retrieval_error_subclass(patch_httpx):

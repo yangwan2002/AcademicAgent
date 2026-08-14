@@ -63,8 +63,14 @@ def get_with_retry(
     last_exc: Exception | None = None
     for attempt in range(max_retries + 1):
         try:
+            # follow_redirects=True 是必须的：httpx 默认**不**跟随，而 Crossref 对
+            # 被取代的 DOI 回 301 指向新号（实测 10.55417/fr.2023001 →
+            # 10.1109/tfr.2024.3492160）。不跟随的话 raise_for_status 把 301 判成
+            # 非 404 的 4xx/3xx → RetrievalUnavailable，于是「记录明明在库里」却被
+            # 报成源不可用，回填静默留空、核验落到「查不到」。
             resp = httpx.get(
-                url, params=params, headers=headers or {}, timeout=timeout
+                url, params=params, headers=headers or {}, timeout=timeout,
+                follow_redirects=True,
             )
             # 404 立即判「查无此文」，不重试。
             if resp.status_code == 404:
