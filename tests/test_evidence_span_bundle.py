@@ -27,6 +27,7 @@ from paper_agent.literature.relevance import (
     RelevanceAssessment,
     RelevanceCriteria,
     RelevanceStore,
+    WEAKLY_ACCEPTANCE,
 )
 from paper_agent.literature.language import DEFAULT_THRESHOLDS, classify_record_language
 from paper_agent.literature.verification import EventKind, make_event
@@ -273,6 +274,159 @@ def test_bundle_picks_shallowest_ladder_tier_that_fits():
                        budget_chars=7800, classifier=_classifier, judge_key="j")
     assert res.status is BundleStatus.OK
     assert res.bundle.abstract_limit == 700
+
+
+# ---------------- 退回题录（X-10 A）----------------
+
+def _store_verdicts(records, verdicts, *, judge_key="j"):
+    """按 verdict 列表逐条建 store（混合相关性场景用）。"""
+    s = RelevanceStore()
+    # strict=True：records 与 verdicts 必须一一对应，长度不齐是调用方写错了测试数据，
+    # 静默 zip 到短的那个会让"10 条里 2 relevant"变成悄悄少判几条。
+    for r, v in zip(records, verdicts, strict=True):
+        s.put(RelevanceAssessment(
+            r.reference_id, _CRIT.fingerprint(),
+            relevance_content_hash(r.title, r.abstract), judge_key,
+            status="SUCCESS", verdict=v, confidence="high",
+            basis="title_and_abstract",
+        ))
+    return s
+
+
+def test_drops_abstracts_instead_of_vetoing_user_quota():
+    """截断档用尽后**退回题录**，而不是用预算否决用户明确要求的引用篇数（X-10 A）。
+
+    这是 X-10 A 的核心：预算是实现约束、不是学术正确性约束。此前 `build_bundle`
+    在装不下时返回 INSUFFICIENT ⇒ 用户要 10 篇、系统一篇不给。
+    """
+    records = _long_records(10)                     # 每条 ~1540 字符
+    cons = [CountConstraint(CountDimension.TOTAL, CountOperator.MIN, 10)]
+    # 4000 连最短档（10*440=4400）都装不下 ⇒ 旧实现必判 INSUFFICIENT
+    kw = dict(criteria=_CRIT, quota=_quota(cons), relevance_store=_store(records),
+              effective_constraints=cons, budget_chars=4000,
+              classifier=_classifier, judge_key="j")
+    old = build_bundle(records, drop_ladder=(), **kw)
+    assert old.status is BundleStatus.CONTEXT_BUDGET_INSUFFICIENT   # 旧行为：否决
+
+    res = build_bundle(records, **kw)
+    assert res.status is BundleStatus.OK
+    assert len(res.bundle.entries) == 10                    # 用户要的篇数保住了
+    assert res.bundle.degradation == "bibliographic_only"
+    assert res.bundle.dropped_abstract_count() > 0
+    assert sum(e.char_cost() for e in res.bundle.entries) <= 4000
+
+
+def test_dropped_entries_keep_title_and_lose_claim_support():
+    """退回题录 = 只剩 title span ⇒ `evidence_available=False`。
+
+    这条钉的是"复用既有机制"：`evidence_available=False` 会让 Req 12.12 的
+    「不得据标题推导具体结论」自动生效，不需要为这档降级新写 prompt 约束。
+    """
+    records = _long_records(10)
+    cons = [CountConstraint(CountDimension.TOTAL, CountOperator.MIN, 10)]
+    res = build_bundle(records, criteria=_CRIT, quota=_quota(cons),
+                       relevance_store=_store(records), effective_constraints=cons,
+                       budget_chars=4000, classifier=_classifier, judge_key="j")
+    dropped = [e for e in res.bundle.entries if e.abstract_dropped]
+    assert dropped
+    for e in dropped:
+        assert e.evidence_available is False
+        assert [s.source_field for s in e.spans] == ["title"]
+        assert e.title                                  # 题录信息仍在
+        assert e.abstract_truncated_from == 0           # 不是截断，是整条没给
+
+
+def test_abstracts_go_to_most_relevant_first():
+    """摘要留给最相关的：weakly_relevant 先被退成题录，relevant 保住摘要。
+
+    依据 P-3a 三臂 A/B：摘要里的量化结果是学术写作的核心价值（全摘要 12 个带出处的
+    百分比 → 截断后 0 个），所以摘要要优先给最可能被实质引用的那批。
+    X-10 A 实测的正是这个分布（2 relevant / 8 weakly）。
+    """
+    records = _long_records(10)
+    verdicts = ["relevant"] * 2 + ["weakly_relevant"] * 8
+    cons = [CountConstraint(CountDimension.TOTAL, CountOperator.MIN, 10)]
+    res = build_bundle(records, criteria=_CRIT, quota=_quota(cons),
+                       relevance_store=_store_verdicts(records, verdicts),
+                       effective_constraints=cons, budget_chars=2000,
+                       classifier=_classifier, judge_key="j",
+                       acceptance=WEAKLY_ACCEPTANCE)
+    assert res.status is BundleStatus.OK
+    assert len(res.bundle.entries) == 10
+    kept = [e for e in res.bundle.entries if not e.abstract_dropped]
+    assert kept, "至少要有一条留着摘要，否则证据集无可引用内容"
+    # relevant 全部留住摘要；被退掉的必须全是 weakly
+    assert all(e.relevance_verdict == "relevant" for e in kept[:2])
+    assert all(e.relevance_verdict == "weakly_relevant"
+               for e in res.bundle.entries if e.abstract_dropped)
+
+
+def test_drop_ladder_never_strips_every_abstract():
+    """最深一档也要留至少 1 条摘要 —— 全是题录的 bundle 支撑不了写作。
+
+    那种情况该交上层决策（提预算/减篇数），不该产出一个看着 OK 的空壳。
+    """
+    records = _long_records(20)
+    cons = [CountConstraint(CountDimension.TOTAL, CountOperator.MIN, 20)]
+    res = build_bundle(records, criteria=_CRIT, quota=_quota(cons),
+                       relevance_store=_store(records), effective_constraints=cons,
+                       budget_chars=2400, classifier=_classifier, judge_key="j")
+    # 这个预算刻意选在**最深一档恰好装下**处（20 条里只留 1 条摘要），
+    # 否则断言会因走到 INSUFFICIENT 而空过 —— 那样这条测试就白写了。
+    assert res.status is BundleStatus.OK and res.bundle.degradation == "bibliographic_only"
+    assert sum(1 for e in res.bundle.entries if e.evidence_available) == 1
+
+
+def test_truncation_preferred_over_dropping():
+    """能靠截断装下就不退题录 —— 降级顺序不得颠倒。
+
+    截断是"给了一部分"，退题录是"一点没给"，后者损失更大，必须排在后面。
+    """
+    records = _long_records(10)
+    cons = [CountConstraint(CountDimension.TOTAL, CountOperator.MIN, 10)]
+    res = build_bundle(records, criteria=_CRIT, quota=_quota(cons),
+                       relevance_store=_store(records), effective_constraints=cons,
+                       budget_chars=12000, classifier=_classifier, judge_key="j")
+    assert res.bundle.degradation == "truncated_abstract"
+    assert res.bundle.dropped_abstract_count() == 0
+    assert all(e.evidence_available for e in res.bundle.entries)
+
+
+def test_insufficient_reports_cheapest_configuration_shortfall():
+    """判 INSUFFICIENT 时，`required_chars` 必须是**最省降级配置**的开销。
+
+    降级从两档变三档后，若这个数还按全摘要/纯截断算，用户会以为"稍微提点预算就够"，
+    而实际连退题录都不够 —— 缺口数必须是"无论怎么降级都还差多少"才有指导性。
+    钉法：拿 required_chars 当预算重跑一次，必须刚好装下。
+    """
+    records = _long_records(10)
+    cons = [CountConstraint(CountDimension.TOTAL, CountOperator.MIN, 10)]
+    kw = dict(criteria=_CRIT, quota=_quota(cons), relevance_store=_store(records),
+              effective_constraints=cons, classifier=_classifier, judge_key="j")
+    res = build_bundle(records, budget_chars=800, **kw)
+    assert res.status is BundleStatus.CONTEXT_BUDGET_INSUFFICIENT
+    assert res.shortfall_chars() == res.required_chars - 800
+
+    exact = build_bundle(records, budget_chars=res.required_chars, **kw)
+    assert exact.status is BundleStatus.OK, "报出的 required_chars 应当刚好够用"
+    assert len(exact.bundle.entries) == 10
+    assert exact.bundle.dropped_abstract_count() > 0        # 靠退题录才装下的
+
+
+def test_no_drop_flag_when_record_has_no_abstract():
+    """记录本身没摘要 ≠ 我们退掉了它的摘要。
+
+    两者都 `evidence_available=False`，但 `abstract_dropped` 必须能区分 ——
+    渲染措辞不同（见 `context_builder`）：把"我没给"说成"原文没有"是假话。
+    """
+    no_abs = _verified("rn", "Title Only Paper", "", numeric="1")
+    cons = [CountConstraint(CountDimension.TOTAL, CountOperator.MIN, 1)]
+    res = build_bundle([no_abs], criteria=_CRIT, quota=_quota(cons),
+                       relevance_store=_store([no_abs]), effective_constraints=cons,
+                       budget_chars=0, classifier=_classifier, judge_key="j")
+    e = res.bundle.entries[0]
+    assert e.evidence_available is False
+    assert e.abstract_dropped is False           # 不是降级造成的
 
 
 def test_truncated_span_preserves_verbatim_and_source_hash():

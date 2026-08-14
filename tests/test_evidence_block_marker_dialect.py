@@ -91,6 +91,42 @@ def test_untruncated_abstract_has_no_truncation_notice():
     assert "截断" not in build_evidence_block(_B(), "md")
 
 
+def _title_only_bundle(*, dropped: bool):
+    """只有 title span 的条目（`evidence_available=False`）。
+
+    `dropped` 区分两种成因：True = 我们因预算退回题录，False = 记录本身没摘要。
+    """
+    entry = BundleEntry(reference_id="r1", bibkey="k", numeric_alias="1",
+                        title="T", year=2023, language_bucket="en",
+                        spans=(make_span("r1", "title", "T"),),
+                        evidence_available=False, abstract_dropped=dropped)
+
+    class _B:
+        entries = (entry,)
+
+    return _B()
+
+
+def test_dropped_abstract_is_not_reported_as_missing():
+    """退回题录时不得说成「无摘要可用」（X-10 A）。
+
+    该文献**有**摘要，是我们因预算没纳入。说成不存在，模型会据此向用户断言
+    「这篇没有摘要」—— 把我们的取舍讲成了文献的事实，那是假话。
+    """
+    block = build_evidence_block(_title_only_bundle(dropped=True), "md")
+    assert "并非不存在" in block
+    assert "无摘要可用" not in block
+    # 约束本身仍要在：题录不足以支撑具体结论
+    assert "不得据其标题推导具体结论" in block
+
+
+def test_genuinely_missing_abstract_still_says_so():
+    """记录本身没摘要时，措辞保持原样 —— 不能反过来暗示"其实有、只是没给"。"""
+    block = build_evidence_block(_title_only_bundle(dropped=False), "md")
+    assert "无摘要可用" in block
+    assert "并非不存在" not in block
+
+
 def test_empty_bundle_renders_nothing():
     class _Empty:
         entries = ()

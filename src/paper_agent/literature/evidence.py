@@ -136,6 +136,11 @@ class BundleEntry:
     # >0 表示摘要被截断，值为截断前的完整长度（0 = 未截断）。**显式标记，不静默降级**：
     # Gate 与 trace 都要能看出证据是截断版。
     abstract_truncated_from: int = 0
+    # True 表示该记录**有**摘要但因预算未纳入（退回题录，X-10 A 的分级降级）。
+    # 与"记录本身没摘要"必须分开：前者是我们的取舍，后者是数据缺失，
+    # 渲染措辞不同（见 `context_builder.build_evidence_block`）——把"我没给"
+    # 说成"原文没有"，模型会据此向用户断言该文献无摘要，那是假话。
+    abstract_dropped: bool = False
 
     def char_cost(self) -> int:
         """送进 prompt 的字符成本（span 文本 + 元数据近似）。
@@ -170,6 +175,14 @@ class EvidenceBundle:
         """被截断摘要的条数（供 Gate/呈现层提示降级范围）。"""
         return sum(1 for e in self.entries if e.abstract_truncated_from > 0)
 
+    def dropped_abstract_count(self) -> int:
+        """有摘要但被退回题录的条数（X-10 A 的最后一档降级）。
+
+        与 `truncated_entry_count()` 分开报：截断是"给了一部分"，退回题录是
+        "一点没给"，对写作质量的影响量级不同，合并成一个数会掩盖后者。
+        """
+        return sum(1 for e in self.entries if e.abstract_dropped)
+
 
 class BundleStatus(str, Enum):
     OK = "ok"
@@ -198,6 +211,7 @@ class BundleBuildResult:
 _ABSTRACT_LIMIT_LADDER = (1000, 700, 400)
 
 
+
 def _lower_bound(constraints, dimension) -> int:
     for c in constraints:
         if c.dimension is not dimension:
@@ -211,6 +225,21 @@ def _lower_bound(constraints, dimension) -> int:
 
 _VERDICT_RANK = {"relevant": 0, "weakly_relevant": 1, "unrelated": 2, "": 3}
 _CONF_RANK = {"high": 0, "medium": 1, "low": 2, "": 3, None: 3}
+
+# 退回题录的比例阶梯（X-10 A）。截断阶梯用尽后依次尝试：把**排序最靠后**的这个比例
+# 的条目退成只给题录，摘要留给靠前的。0.5 → 0.75 → 0.9，最后一档仍给最相关的 10%
+# 留摘要。
+#
+# **为什么按排序位次而不是按 relevance verdict**：默认 `STRICT_ACCEPTANCE` 只接受
+# `relevant`，`eligible` 里全是同一个 verdict —— 按 verdict 分级在默认档下**恒等于
+# 什么都不做**，正好在 X-10 A 抱怨的那个场景里失效。而 `eligible` 已按
+# （verdict → confidence → 年份新 → id）稳定排好序，位次天然是"谁更该留摘要"的
+# 现成排名，且 verdict 混合时（`WEAKLY_ACCEPTANCE`）weakly 自然排在后面先被退掉，
+# 两种档位下都成立。
+#
+# **不含 1.0**：全部退成题录等于整个证据集没有可引用的具体内容，那时该让上层决策
+# （提预算 / 减篇数），而不是产出一个看着 OK 实则支撑不了写作的 bundle。
+_DROP_ABSTRACT_LADDER = (0.5, 0.75, 0.9)
 
 # 摘要截断的句末标记（中英）。截断优先落在句边界，避免把半句送进 prompt。
 _SENTENCE_ENDS = "。！？.!?"
@@ -243,16 +272,21 @@ def _truncate_abstract_end(text: str, limit: int) -> int:
 
 
 def _entry_of(record, verdict, confidence, bucket, *,
-              abstract_limit: int = 0) -> BundleEntry:
+              abstract_limit: int = 0, drop_abstract: bool = False) -> BundleEntry:
     """构造 BundleEntry。
 
     `abstract_limit>0` → 摘要按该上限截断（分级降级第 2 档，见 `build_bundle`）。
     截断保留摘要**开头**：问题陈述与贡献通常在前几句，实验细节在后半段，对写作
     价值最低。
+
+    `drop_abstract=True` → 完全不建 abstract span，只留题录（最后一档，X-10 A）。
+    结果 `evidence_available=False`，于是既有的「不得据标题推导具体结论」约束
+    自动生效 —— 这条降级不需要新的 prompt 机制，复用 Req 12.12 那条。
     """
     spans: list[EvidenceSpan] = []
     truncated_from = 0
-    if record.abstract:
+    dropped = bool(drop_abstract and record.abstract)
+    if record.abstract and not drop_abstract:
         end = _truncate_abstract_end(record.abstract, abstract_limit)
         full_len = len(normalize_source(record.abstract))
         if end < full_len:
@@ -275,6 +309,7 @@ def _entry_of(record, verdict, confidence, bucket, *,
         spans=tuple(spans),
         evidence_available=has_claim,
         abstract_truncated_from=truncated_from,
+        abstract_dropped=dropped,
     )
 
 
@@ -294,6 +329,7 @@ def build_bundle(
     authority_registry_version: str = "",
     acceptance=STRICT_ACCEPTANCE,
     abstract_ladder: tuple[int, ...] = _ABSTRACT_LIMIT_LADDER,
+    drop_ladder: tuple[float, ...] = _DROP_ABSTRACT_LADDER,
 ) -> BundleBuildResult:
     """构造 quota-aware EvidenceBundle（design D6）。
 
@@ -304,13 +340,26 @@ def build_bundle(
     同一对象——否则会出现「统计说够了但证据集是空的」。此前本函数硬编码
     `("relevant",)`。默认严格 → 不传时行为逐字节不变。
 
-    **分级降级**：全摘要装不下配额下限时，按 `_ABSTRACT_LIMIT_LADDER` 逐档截短摘要
-    重试，取第一个装得下的档；连最短档都装不下才返回 `CONTEXT_BUDGET_INSUFFICIENT`
-    （附 `required_chars` / `shortfall_chars()`）。降级在 `EvidenceBundle.degradation`
-    与 `BundleEntry.abstract_truncated_from` 上**显式可见**，不静默。
+    **分级降级**（三档，依次尝试，取第一个装得下的）：
 
-    `abstract_ladder`：截断阶梯，可注入以做受控实验（传 `()` 即关闭降级、恢复旧行为，
-    P-3a 三臂 A/B 用；传单元素元组可钉死某一档）。默认取 `_ABSTRACT_LIMIT_LADDER`。
+    1. 全摘要（`degradation="full"`）
+    2. 按 `abstract_ladder` 逐档**截短**摘要（`"truncated_abstract"`）
+    3. 按 `drop_ladder` 逐档**退回题录**：排序靠后的条目只给题录、摘要留给靠前的
+       （`"bibliographic_only"`）；每退一档都重新从全摘要试起，因为腾出的空间
+       可能让留下的条目拿回全摘要
+
+    三档都装不下才返回 `CONTEXT_BUDGET_INSUFFICIENT`（附 `required_chars` /
+    `shortfall_chars()`）。降级在 `EvidenceBundle.degradation`、
+    `BundleEntry.abstract_truncated_from` 与 `.abstract_dropped` 上**显式可见**，不静默。
+
+    第 3 档是 X-10 A 的修复：在它之前，预算不足会**否决用户明确提出的引用数量**——
+    而预算是实现约束、不是学术正确性约束。真机实测（2 relevant / 8 weakly）
+    「relevant 全摘要 + weakly 只给题录」只需约 4000 字符，即连 8000 都够用；
+    撞墙的是"一律全摘要"这个一刀切。分级顺序的依据是 P-3a 三臂 A/B：摘要里的
+    量化结果是学术写作的核心价值，所以要优先留给最可能被实质引用的那批。
+
+    `abstract_ladder` / `drop_ladder`：两条阶梯都可注入以做受控实验
+    （各传 `()` 即关闭对应档、恢复旧行为，P-3a 三臂 A/B 用；传单元素元组可钉死某一档）。
 
     动机（真机 2026-08-10，total=20）：25 条合格记录需 28698 字符 > 预算 24000，
     旧实现直接判 INSUFFICIENT，检索白跑。而"20 篇截到 1000 字符"装得下且信息覆盖
@@ -347,8 +396,21 @@ def build_bundle(
 
     by_id = {t[0].reference_id: t for t in eligible}
 
-    def _select(abstract_limit: int):
-        """在给定摘要上限下走 2→5 步。返回 (entries, cost, truncated, 是否装下下限)。"""
+    # `eligible` 的位次即"谁更该留摘要"的排名（见 `_DROP_ABSTRACT_LADDER`）。
+    rank_of = {t[0].reference_id: i for i, t in enumerate(eligible)}
+
+    def _select(abstract_limit: int, drop_ratio: float = 0.0):
+        """在给定摘要档下走 2→5 步。返回 (entries, cost, truncated, 是否装下下限)。
+
+        `drop_ratio>0`：排序最靠后的这个比例的条目**只给题录**（不建 abstract span）。
+        """
+        # 保留摘要的名额：至少 1 条，否则最后一档会退成"全是题录"。
+        keep_n = len(eligible) if drop_ratio <= 0 else max(
+            1, int(len(eligible) * (1.0 - drop_ratio)))
+
+        def _drops(rid: str) -> bool:
+            return drop_ratio > 0 and rank_of.get(rid, 0) >= keep_n
+
         selected: list[str] = []
 
         def _take(rid: str) -> None:
@@ -383,7 +445,8 @@ def build_bundle(
                 break
             _take(rec.reference_id)
 
-        entries = [_entry_of(*by_id[rid], abstract_limit=abstract_limit)
+        entries = [_entry_of(*by_id[rid], abstract_limit=abstract_limit,
+                             drop_abstract=_drops(rid))
                    for rid in selected]
         cost = sum(e.char_cost() for e in entries)
         if budget_chars > 0 and cost > budget_chars:
@@ -394,7 +457,8 @@ def build_bundle(
         for rec, _v, _c, _b in eligible:
             if rec.reference_id in selected:
                 continue
-            entry = _entry_of(*by_id[rec.reference_id], abstract_limit=abstract_limit)
+            entry = _entry_of(*by_id[rec.reference_id], abstract_limit=abstract_limit,
+                              drop_abstract=_drops(rec.reference_id))
             if budget_chars > 0 and cost + entry.char_cost() > budget_chars:
                 truncated += 1
                 continue
@@ -417,9 +481,42 @@ def build_bundle(
                 degradation, used_limit = "truncated_abstract", limit
                 break
 
+    # X-10 A：截断阶梯用尽仍装不下 → **按相关性退回题录**，而不是否决用户的要求。
+    #
+    # 为什么这一档必须存在：`build_bundle` 走到 INSUFFICIENT 就是在用预算否决用户
+    # 明确提出的引用数量，而预算是我们的实现约束、不是学术正确性约束。真机实测
+    # （2 relevant / 8 weakly）「relevant 全摘要 + weakly 只给题录」只需约 4000 字符，
+    # 即**连 8000 都够用** —— 撞墙的是"一律全摘要"这个一刀切，不是预算值。
+    #
+    # 为什么分级退而不是一律退题录：P-3a 三臂 A/B 已证明摘要里的量化结果正是学术
+    # 写作的核心价值（全摘要 12 个带出处的百分比 → 截断后 0 个）。所以摘要要优先
+    # 留给最可能被实质引用的那批 —— 排名用 `eligible` 已有的稳定排序，理由见
+    # `_DROP_ABSTRACT_LADDER`（按 verdict 分在默认 strict 档下恒等于没分）。
+    #
+    # 复用既有机制、不新建：退回题录后 `evidence_available=False`，Req 12.12 那条
+    # 「不得据标题推导具体结论」自动生效，模型不会拿题录编结论。
+    if not ok and drop_ladder:
+        for ratio in drop_ladder:
+            # 每一档退题录后，摘要档仍**从全摘要重试**：退掉靠后条目的摘要腾出的空间，
+            # 可能足以让留下的高相关条目拿回全摘要 —— 那正是我们想要的取舍
+            # （P-3a：全摘要少篇 > 截摘要多篇）。
+            for limit in (0, *abstract_ladder):
+                entries, cost, truncated, ok = _select(limit, ratio)
+                if ok:
+                    degradation = "bibliographic_only"
+                    used_limit = limit
+                    break
+            if ok:
+                break
+
     if not ok:
-        # 连最短一档都装不下 → 真无解，交上层决策。附**量化**缺口：
+        # 三档全试过仍装不下 → 真无解，交上层决策。附**量化**缺口：
         # 光说"装不下"无法判断是预算设小了还是摘要偏长。
+        #
+        # `cost` 取自**最后一次** `_select`，即最深的退题录档 + 最短摘要档 ——
+        # 阶梯每深一档都更省，故它就是我们能做到的**最省配置**的开销。
+        # 于是 `shortfall_chars()` 是"无论怎么降级都还差多少"，正是上层要的那个数
+        # （比按全摘要报缺口更有指导性：后者会让人以为提一点预算就够）。
         gaps = tuple(
             (d.value, _lower_bound(effective_constraints, d))
             for d in (CountDimension.TOTAL, CountDimension.LANGUAGE_ZH, CountDimension.LANGUAGE_EN)

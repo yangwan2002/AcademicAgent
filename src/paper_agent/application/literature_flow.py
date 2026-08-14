@@ -302,13 +302,14 @@ class WritingLiteratureOrchestrator:
             acceptance=acceptance,
         )
         if build.status is BundleStatus.CONTEXT_BUDGET_INSUFFICIENT:
-            # 上下文预算连**最短摘要档**都装不下 effective 下界 → 需决策，不进 Writer Loop。
-            # `build_bundle` 已先自动试过截断阶梯，走到这里说明降级也救不了。
+            # 预算连**最省的降级配置**都装不下 effective 下界 → 需决策，不进 Writer Loop。
+            # `build_bundle` 已自动试过全部三档（截短摘要 + 按相关性退回题录，X-10 A），
+            # 走到这里说明连"只留最相关的几条摘要、其余只给题录"都装不下，降级救不了。
             # 消息带上量化缺口：只说"装不下"，用户无法判断该提预算还是该减篇数。
             shortfall = build.shortfall_chars()
             detail = (
-                f"（最短摘要档 {build.min_abstract_limit} 字符下仍需 "
-                f"{build.required_chars} 字符，预算 {build.budget_chars}，"
+                f"（已试到最省档：摘要上限 {build.min_abstract_limit} 字符 + 多数条目"
+                f"只给题录，仍需 {build.required_chars} 字符，预算 {build.budget_chars}，"
                 f"差 {shortfall}）"
             ) if build.required_chars else ""
             return _pause(FlowState.NEEDS_GAP_DECISION, gaps=gaps, availability=availability,
@@ -327,6 +328,9 @@ class WritingLiteratureOrchestrator:
                  "degradation": build.bundle.degradation,
                  "abstract_limit": build.bundle.abstract_limit,
                  "truncated_entries": build.bundle.truncated_entry_count(),
+                 # 退回题录的条数单列：它比截断严重（一点摘要都没给），
+                 # 并进 truncated_entries 会掩盖掉。见 X-10 A。
+                 "bibliographic_only_entries": build.bundle.dropped_abstract_count(),
                  "entries": [(e.reference_id, e.title, e.language_bucket)
                              for e in build.bundle.entries]}
             )
