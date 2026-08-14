@@ -70,6 +70,23 @@ class Config:
     #: 需同时配 LANGFUSE_PUBLIC_KEY + LANGFUSE_SECRET_KEY，缺任一则静默不启用。
     langfuse_enabled: bool = False
 
+    # ---- 只读问答（P-4）----
+    #
+    # 只有 off | on 两档，**刻意不复用 intent_planning 的三档**：shadow 那一档的
+    # 价值是"不改行为地量误判率"，而 ask 判定是纯规则（`looks_like_question`），
+    # 行为由代码完全决定、可被测试穷举，没有未知分布要量。项目也尚未上线，
+    # 没有需要保守观察的线上流量。留 off 档是为了出问题能一键关掉。
+    #
+    # **默认 on（2026-08-12 翻档）**：关着时"只读提问被劫成写操作"这个缺陷对用户
+    # 依然存在 —— 而 P-4 的定位正是给只读提问一个不落到写路径的出口，关着这个出口
+    # 就不存在。翻档依据是已完成的验收：劫持表 5 条一条都不进写路径、7 条真写请求
+    # 一条都没被误判成 ask（`tests/test_fallback_routing.py`）。判定规则偏保守
+    # （疑问形态 **且** 无祈使写作标记），漏判只是回到 off 的现状。
+    # 出问题一键回退：`PAPER_AGENT_LOOP_MODE=off`。
+    agent_loop_mode: str = "on"                # off | on
+    agent_loop_max_iterations: int = 10        # 护栏：硬迭代上限
+    agent_loop_max_llm_calls: int = 12         # 护栏：LLM 调用上限
+
     # ---- intent-planning 理解层（默认 off → 完全走现有 Router，行为不变）----
     intent_planning_mode: str = "off"          # off | shadow | active
     planning_max_operations: int = 5           # 单 Turn 最多操作数
@@ -210,6 +227,14 @@ def load_config() -> Config:
         stream_enabled=_env_flag("PAPER_STREAM", False),
         langfuse_enabled=_env_flag("PAPER_LANGFUSE", False),
         runs_dir=os.environ.get("PAPER_RUNS_DIR", "runs"),
+        # 默认 on，理由见字段定义处；`PAPER_AGENT_LOOP_MODE=off` 一键回退。
+        agent_loop_mode=_env_toggle("PAPER_AGENT_LOOP_MODE", "on"),
+        agent_loop_max_iterations=_env_int(
+            "PAPER_AGENT_LOOP_MAX_ITERATIONS", 10, minimum=1
+        ),
+        agent_loop_max_llm_calls=_env_int(
+            "PAPER_AGENT_LOOP_MAX_LLM_CALLS", 12, minimum=1
+        ),
         intent_planning_mode=_env_mode("PAPER_INTENT_PLANNING_MODE", "off"),
         planning_max_operations=_env_int("PAPER_PLANNING_MAX_OPERATIONS", 5, minimum=1),
         planning_max_revisions=_env_int("PAPER_PLANNING_MAX_REVISIONS", 3, minimum=1),
@@ -285,6 +310,25 @@ def _env_mode(name: str, default: str) -> str:
     """理解层三态；非法值安全降级为 default。"""
     raw = (os.environ.get(name) or "").strip().lower()
     return raw if raw in ("off", "shadow", "active") else default
+
+
+def _env_toggle(name: str, default: str) -> str:
+    """两态开关（off | on）；非法值降级为 default。
+
+    额外接受 `active` 作为 `on` 的别名：spec 原本按 intent_planning 的三档写的，
+    留个别名省得配错了静默不生效。
+
+    同样接受 `_env_flag` 那套真假值（`1/true/yes` → on，`0/false/no` → off）。
+    默认翻成 `on` 之后这条是必要的：写 `PAPER_AGENT_LOOP_MODE=false` 想关掉，
+    按"非法值降级为 default"会解析成 `on` —— 与意图**相反**且静默。
+    关档的意图必须能被听懂，否则一键回退这条退路是假的。
+    """
+    raw = (os.environ.get(name) or "").strip().lower()
+    if raw in ("active", "1", "true", "yes"):
+        return "on"
+    if raw in ("0", "false", "no"):
+        return "off"
+    return raw if raw in ("off", "on") else default
 
 
 def _env_lang_policy(name: str, default: str) -> str:

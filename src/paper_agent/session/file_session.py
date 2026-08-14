@@ -318,6 +318,55 @@ class FileBackedSession:
         except OSError:
             pass
 
+    # ---- 只读历史（问答用）----
+    def history(self, limit: int = 20) -> list[dict]:
+        """按时间倒序返回本会话的编辑历史。**只读，不改任何状态。**
+
+        每条形如 ``{"message": "polish 3_2_xxx", "relative": "2 minutes ago",
+        "lines_added": 12, "lines_removed": 3}``（`--numstat` 给的是**行**数）。
+
+        数据源就是 `write_working` 每次打的那条 commit（`polish <id>`、
+        `rewrite <id>`、`add_section <title>` 等）—— 信息一直都在，之前只是没有
+        读取通路，问答遇到"我刚才改了什么"只能答"看不出来"。
+
+        `init` 那条空提交会被过滤：它不是用户的编辑。git 不可用（降级到内存快照栈）
+        时返回空列表 —— 调用方据此告知"当前会话没有历史记录"，而不是假装有。
+        """
+        if not self._git_ok:
+            return []
+        try:
+            res = self._git(
+                "log", f"-{max(1, int(limit))}", "--format=%H%x1f%s%x1f%ar",
+                "--numstat",
+            )
+        except (OSError, subprocess.SubprocessError):
+            return []
+        if res.returncode != 0:
+            return []
+
+        out: list[dict] = []
+        current: dict | None = None
+        for line in (res.stdout or "").splitlines():
+            if "\x1f" in line:
+                sha, subject, rel = (line.split("\x1f") + ["", ""])[:3]
+                if subject.strip() == "init":
+                    current = None       # 不是用户编辑，跳过它和它的 numstat
+                    continue
+                current = {
+                    "commit": sha[:8], "message": subject.strip(),
+                    "relative": rel.strip(), "lines_added": 0, "lines_removed": 0,
+                }
+                out.append(current)
+                continue
+            parts = line.split("\t")
+            if current is not None and len(parts) >= 2:
+                # numstat 对文本文件给行数；二进制（docx）给 "-"，此时保持 0。
+                for key, raw in (("lines_added", parts[0]),
+                                 ("lines_removed", parts[1])):
+                    if raw.isdigit():
+                        current[key] += int(raw)
+        return out
+
     def _git_head(self) -> str | None:
         try:
             res = self._git("rev-parse", "HEAD")
@@ -400,9 +449,19 @@ class FileBackedSession:
 
     # ---- git 内部实现（全部优雅降级）----
     def _git(self, *args: str) -> subprocess.CompletedProcess:
+        """跑一条 git 命令。
+
+        **显式指定 UTF-8 解码**，不用 `text=True` 的平台默认编码：git 输出
+        （commit message 等）是 UTF-8，而 Windows 默认按 GBK 解码，中文
+        message 会变乱码，遇到解不开的字节甚至直接抛 `UnicodeDecodeError`
+        —— 那是在 subprocess 的读取线程里抛，`returncode` 拿不到，调用方
+        看到的是 stdout=None。`errors="replace"` 保证再坏也只是字符不对，
+        不会炸掉整条调用链。
+        """
         return subprocess.run(
             ["git", "-C", self.session_dir, *args],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True, timeout=30,
+            encoding="utf-8", errors="replace",
         )
 
     def _git_init(self) -> bool:

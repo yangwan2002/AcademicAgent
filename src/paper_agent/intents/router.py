@@ -19,8 +19,72 @@ class Intent(str, Enum):
     ADD_SECTION_BATCH = "add_section_batch"
     CONVERT_FORMAT = "convert_format"
     FORMAT_DOCX = "format_docx"
-    FIX_BIBLIOGRAPHY = "fix_bibliography"
+    #: 兜底：写意图都不认领的请求，交给 ask_loop（ReAct 循环）回答。
+    #:
+    #: 叫 FALLBACK 而不是 ASK，因为它的定位是**架构位置**（兜底）而不是表层形态
+    #: （疑问句）—— 它实际接住两类：被写意图关键词劫持的只读提问，以及原本落
+    #: UNCLEAR 的请求。「帮我分析下还缺什么内容」不是疑问句，但归这里。
+    #:
+    #: 只读不是靠这个名字保证的，是结构保证的：`ask_context.capture()` 出来的
+    #: 是 frozen 快照，工具拿不到 session，因此没有 write_working 可调。
+    FALLBACK = "fallback"
     UNCLEAR = "unclear"
+
+
+# ---- 只读提问判定（P-4 第三步）----
+#
+# 为什么需要它：下面五个关键词表是纯子串匹配，只读提问会命中写意图。实测（本文件
+# 的 Router + 一份两章 md）：
+#
+#   这篇论文缺哪些章节    -> ADD_SECTION_BATCH   （弹访谈）
+#   帮我分析下还缺什么内容 -> ADD_SECTION_BATCH   （弹访谈）
+#   这段的参考文献够吗    -> FIX_BIBLIOGRAPHY    **静默写 working copy**
+#   引言的语言风格是怎样的 -> POLISH             （弹访谈）
+#   为什么方法章读起来别扭 -> POLISH             （弹访谈）
+#
+# 命中原因：`_ADD_BATCH_KW` 含「缺哪些」、`_BIB_KW` 含「参考文献」、`_POLISH_KW`
+# 含「语言」「读起来」。
+#
+# 上表第三行的 `FIX_BIBLIOGRAPHY` 与 `_BIB_KW` **已随意图一起删除**（B-2）——
+# 它是当时唯一会静默改文档的一条。删掉之后「参考文献」不再是路由关键词，所以
+# 「帮我在相关工作里多引几篇参考文献」这类**祈使句**也不再被劫持（兜底判定只
+# 管疑问句，管不到它）。保留这段记录是因为它是本判定的立项依据。
+#
+# 判定形态：**疑问形态 且 无祈使写作标记**，两个条件都要。
+# 偏向漏判是刻意的 —— 代价不对称：漏判只是回到现状（问句被当成写请求，用户看到
+# 访谈可以退出），误判会把用户的写请求答成一段话。所以「缺哪些章节，帮我补齐」
+# 必须继续走写路径。
+
+#: 疑问形态标记。
+_QUESTION_KW = [
+    "吗", "呢", "哪些", "哪几", "哪一", "哪个", "哪章", "为什么", "为何",
+    "怎么", "怎样", "如何", "是不是", "有没有", "多少", "几个", "几章",
+    "什么", "是否", "?", "？",
+]
+
+#: 祈使写作标记 —— 出现即视为写请求，**优先于疑问形态**。
+#:
+#: 只放"明确要求改动文档"的动词。刻意**不含**「帮我」：「帮我分析下还缺什么内容」
+#: 是只读请求，分析不改文档。
+_IMPERATIVE_WRITE_KW = [
+    "润色", "改写", "重写", "补齐", "补全", "补写", "新增", "加一章", "加一段",
+    "补一段", "补一句", "写一章", "写个", "改简洁", "改结构", "重新组织",
+    "换叙述", "详细写", "展开写", "转成", "转为", "换成", "变成", "转格式",
+    "导出为", "帮我改", "给我改", "修一下", "改一下", "调整为", "设置为",
+    "polish", "rewrite", "restructure", "add section", "convert",
+]
+
+
+def looks_like_question(message: str) -> bool:
+    """这条消息是不是只读提问。
+
+    纯规则、无 LLM：判定行为完全由代码决定，可被测试穷举，不需要靠真机流量摸
+    误判率（这也是本项目跳过 shadow 档的理由 —— 规则判定没有未知分布要量）。
+    """
+    low = (message or "").lower()
+    if any(kw in low for kw in _IMPERATIVE_WRITE_KW):
+        return False
+    return any(kw in low for kw in _QUESTION_KW)
 
 
 _POLISH_KW = [
@@ -39,7 +103,6 @@ _ADD_SECTION_KW = [
     "add section", "add a section", "write a new section", "new section",
 ]
 _ADD_BATCH_KW = ["补齐", "缺哪些", "缺失章节", "补全章节", "还缺"]
-_BIB_KW = ["bibliography", "参考文献", "文献列表", "缺条目", "bibitem"]
 
 _FORMAT_OP_KW = [
     "字体", "字号", "几号字", "号字", "行距", "首行缩进", "缩进", "对齐", "居中",
@@ -119,15 +182,20 @@ def _detect_presets(low: str) -> list[str]:
 
 
 class Router:
-    def __init__(self, index: SectionIndex) -> None:
+    def __init__(self, index: SectionIndex, *, fallback_enabled: bool = False) -> None:
         self.index = index
+        self.fallback_enabled = fallback_enabled
 
     def route(self, message: str) -> RouteResult:
         low = message.lower()
 
-        # fix_bibliography：显式提到 bibliography/参考文献
-        if any(kw in low for kw in _BIB_KW):
-            return RouteResult(intent=Intent.FIX_BIBLIOGRAPHY)
+        # 兜底判定前置（P-4 第三步）。必须**先于**下面所有关键词表 —— 它们是纯
+        # 子串匹配，会把只读提问吞进写意图（上面那张表）。
+        #
+        # `fallback_enabled=False` 时整个分支不存在，route() 输出与接入前逐字节
+        # 一致，现有全量测试因此不受影响。
+        if self.fallback_enabled and looks_like_question(message):
+            return RouteResult(intent=Intent.FALLBACK)
 
         target_ext = _detect_format(low)
         presets = _detect_presets(low)
@@ -190,8 +258,8 @@ class Router:
         return RouteResult(
             intent=Intent.UNCLEAR,
             note="支持：polish（润色）、rewrite（改写）、add_section（新增章节）、"
-            "convert_format（转格式）、format_docx（排版）、fix_bibliography（修引用）。",
+            "convert_format（转格式）、format_docx（排版）。",
         )
 
 
-__all__ = ["Intent", "RouteResult", "Router"]
+__all__ = ["Intent", "RouteResult", "Router", "looks_like_question"]

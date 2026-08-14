@@ -18,7 +18,6 @@ from paper_agent.intents.router import (
     Intent,
     _ADD_BATCH_KW,
     _ADD_SECTION_KW,
-    _BIB_KW,
     _CONVERT_KW,
     _FORMAT_KW,
     _FORMAT_OP_KW,
@@ -36,7 +35,6 @@ _SEQUENCE_SIGNALS = [
 
 # 意图 → 关键词列表（复用 router 的表；convert 额外看目标格式词）。
 _INTENT_KEYWORDS: list[tuple[Intent, list[str]]] = [
-    (Intent.FIX_BIBLIOGRAPHY, _BIB_KW),
     (Intent.ADD_SECTION_BATCH, _ADD_BATCH_KW),
     (Intent.ADD_SECTION, _ADD_SECTION_KW),
     (Intent.CONVERT_FORMAT, _CONVERT_KW + list(_FORMAT_KW.keys())),

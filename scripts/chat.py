@@ -22,6 +22,8 @@
                 可选路径：:export D:\\out.docx；默认在源文件旁加 _crossref 后缀
     :undo       撤销上一次修改
     :stats      本次会话的 Turn 归属统计（新栈 / shadow / 静默降级到旧栈）
+    :ask <问题>  只读问答：问文档的情况（有哪些章节、哪章还没写、某章写了什么）。
+                只读不改，不走写作意图；模型自己决定查什么，查完直接回答。
     :quit       退出（不自动保存源文件）
 其余输入按自然语言意图处理。
 """
@@ -48,7 +50,6 @@ from paper_agent.session.facts import SessionFacts, project_facts_path
 from paper_agent.session.file_session import FileBackedSession
 from paper_agent.session.section_index import SECTIONABLE_EXTS, SectionIndex
 from paper_agent.tools.citation import CitationVerifier
-from paper_agent.tools.bibliography import fix_bibliography
 from paper_agent.intents.router import Router, Intent
 from paper_agent.intents.interview import (
     interview_polish, interview_convert, interview_rewrite,
@@ -93,6 +94,53 @@ def _print_sections(index: SectionIndex) -> None:
     for i, s in enumerate(index.list(), start=1):
         indent = "  " * (s.level - 1)
         print(f"  {i}. {indent}{s.title}  [{s.id}]")
+
+
+def _run_ask_command(
+    question: str, session, llm, config=None, facts=None, coordinator=None
+) -> None:
+    """`:ask` —— 只读问答循环。
+
+    非 ANSWERED 终态一律带上"为什么停"，绝不把撞上限的半截推理当完整答案展示。
+
+    `facts` 供 `section_citations` 工具回答「哪章引了哪篇」；仍是只读 ——
+    `capture` 不写回 facts、不 save。
+
+    `coordinator`：给了就把这次问答跑成一次独立 run（同 `:save` 的做法），
+    这样 ASK_* 事件有 trace 可落。不给则不埋点，行为不变 —— 只读路径不能
+    因为观测装配缺失而失效。
+    """
+    from paper_agent.application.ask_context import capture
+    from paper_agent.application.ask_loop import run_ask
+
+    ctx = capture(session, facts)
+    kwargs = {}
+    if config is not None:      # 护栏上限走 config，不写死在调用点
+        kwargs = {
+            "max_iterations": config.agent_loop_max_iterations,
+            "max_llm_calls": config.agent_loop_max_llm_calls,
+        }
+    if coordinator is None:
+        result = run_ask(question, ctx, llm, **kwargs)
+    else:
+        # 不经 `_dispatch`：那层会发 ROUTE_DECISION 并把 KeyboardInterrupt 转成
+        # OperationCancelled，而问答的取消语义走 run_ask 自己的 CANCELLED 终态。
+        report = coordinator.run(
+            lambda bus, ct: run_ask(question, ctx, llm, bus=bus, cancel_token=ct, **kwargs)
+        )
+        result = report.value
+        if result is None:
+            # run 自身失败（观测装配异常等）。问答本身的失败走 PROVIDER_FAILED，
+            # 不会走到这里。
+            cat = report.error.get("category") if report.error else "未知"
+            print(f"\n这次没能给出回答（{cat}）。")
+            return
+    print("\n" + result.display())
+    if result.tool_calls:
+        print(
+            f"\n（查了 {len(result.tool_calls)} 次："
+            f"{'、'.join(result.tool_calls)}；{result.llm_calls} 次模型调用）"
+        )
 
 
 def _note_save_crossref(session, attempted: bool) -> None:
@@ -526,6 +574,12 @@ def main(argv: list[str]) -> int:
                  if config.intent_planning_mode == "active"
                  else "（只旁路记录，执行仍走原流程）"))
 
+    # 只读问答装配（PAPER_AGENT_LOOP_MODE=off|on）。`:ask` 命令不受这个开关影响，
+    # 始终可用；开关只控制**自然语言提问是否自动**走只读回答而不落到写路径上。
+    _fallback_enabled = config.agent_loop_mode == "on"
+    if _fallback_enabled:
+        print("只读问答：on（提问自动只读回答，不进写路径）")
+
     # B-4：Turn 归属计数。每轮落盘一次，使崩溃/强杀后仍能看到已发生的归属，
     # 且能回答「这次 E2E 的结论是否可直接采信」（attribution_is_clean）。
     metrics_path = os.path.join(config.runs_dir, "turn_metrics.json")
@@ -565,6 +619,15 @@ def main(argv: list[str]) -> int:
         if msg == ":sections":
             index = _build_index(session)
             _print_sections(index)
+            continue
+        if msg.startswith(":ask"):
+            # 只读问答（react 循环）。刻意用显式命令而不是接进 Router：
+            # 现有五个写作意图一行不动，零回归面、零新增 flag。
+            question = msg[len(":ask"):].strip()
+            if not question:
+                print("用法：:ask 你的问题（例如 :ask 哪几章还没写）")
+                continue
+            _run_ask_command(question, session, llm, config, facts, coordinator)
             continue
         if msg == ":refs":
             # 修复 provider 之前抓的记录著录字段为空，需要一次性回填；
@@ -617,7 +680,19 @@ def main(argv: list[str]) -> int:
         # 自然语言意图
         metrics.record_turn()
         index = _build_index(session)
-        route = Router(index).route(msg)
+        route = Router(index, fallback_enabled=_fallback_enabled).route(msg)
+
+        # 只读提问优先于 intent-planning 接管：planning 那条链路是为**写**设计的
+        # （规划 → 确认 → 执行），把提问送进去会重新落回写路径，等于绕过了兜底判定。
+        # 两个 flag 都开时以兜底为先 —— 只读是更保守的一侧。
+        if route.intent is Intent.FALLBACK:
+            metrics.record_served_by("fallback")
+            metrics.save(metrics_path)
+            # 判定结果常驻可见：误判时用户当场就能改口（改用祈使句），
+            # 不必等一轮访谈弹出来才发现走错了路。
+            print("（判定为提问，只读回答；要改文档请用祈使句，如「帮我润色引言」）")
+            _run_ask_command(msg, session, llm, config, facts, coordinator)
+            continue
 
         # intent-planning 理解层（默认 off，行为与既有逐字节一致）：
         # - active：接管整条自然语言链路（多操作规划 → 澄清 → 未映射处置 → 确认 → 有序执行）
@@ -636,15 +711,6 @@ def main(argv: list[str]) -> int:
 
         if route.intent is Intent.UNCLEAR:
             print(route.note)
-            continue
-
-        if route.intent is Intent.FIX_BIBLIOGRAPHY:
-            report = _dispatch(
-                coordinator, "fix_bibliography",
-                lambda bus, ct: fix_bibliography(session, facts),
-            )
-            if report.value is not None:
-                print("\n" + report.value.message)
             continue
 
         if route.intent is Intent.FORMAT_DOCX:

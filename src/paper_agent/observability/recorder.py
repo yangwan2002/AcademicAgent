@@ -278,6 +278,10 @@ class SimpleTraceRecorder:
             EventKind.PLAN_CANCELLED,
             EventKind.OPERATION_RESULT,
             EventKind.PLAN_RESULT,
+            # --- 只读问答循环（P-4）---
+            EventKind.ASK_TURN_START,
+            EventKind.ASK_TOOL_CALL,
+            EventKind.ASK_TURN_END,
         ):
             self._record_event(event)
 

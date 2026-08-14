@@ -1,4 +1,9 @@
-"""Week 4 验收：add_section + AddSectionGate + fix_bibliography + 跨 chat 复用。"""
+"""Week 4 验收：add_section + AddSectionGate + 跨 chat 复用。
+
+（原含 fix_bibliography 用例；该意图与 tools/bibliography.py 已删除，见 backlog B-2。
+文献区同步现由 literature/bibliography_sync.py 的 apply_bibliography 在 commit 时承担，
+覆盖它的测试在 tests/test_bibliography_sync*.py。）
+"""
 
 from __future__ import annotations
 
@@ -21,7 +26,6 @@ from paper_agent.gates.diff_gate import AddSectionGate
 from paper_agent.providers.llm.mock import MockLLMProvider
 from paper_agent.providers.retrieval.mock import MockRetrievalProvider
 from paper_agent.tools.citation import CitationVerifier
-from paper_agent.tools.bibliography import fix_bibliography
 from paper_agent.intents.router import Router, Intent
 from paper_agent.intents.interview import interview_add_section, InterviewError
 from paper_agent.intents.add_section import execute_add_section
@@ -81,10 +85,6 @@ def test_router_existing_section_rejected():
     assert r.intent is Intent.UNCLEAR
 
 
-def test_router_fix_bibliography():
-    assert _router().route("帮我补 bibliography 缺的条目").intent is Intent.FIX_BIBLIOGRAPHY
-
-
 # ---- AddSectionGate ----
 
 def _gate(f):
@@ -131,24 +131,6 @@ def test_interview_add_section_rejects_existing():
     idx = SectionIndex(SAMPLE_TEX, "tex")
     with pytest.raises(InterviewError):
         interview_add_section("Method", None, idx, _facts(), ask=lambda _p: "x")
-
-
-# ---- fix_bibliography ----
-
-def test_fix_bibliography_reports_and_fixes(tmp_path):
-    tex = (
-        "\\section{Intro}\nWe cite \\cite{key1} and \\cite{key2}.\n"
-        "\\begin{thebibliography}{9}\n\\bibitem{key1} Ref one.\n"
-        "\\end{thebibliography}\n\\end{document}\n"
-    )
-    src = tmp_path / "p.tex"
-    src.write_text(tex, encoding="utf-8")
-    session = FileBackedSession(str(src), workspace_root=str(tmp_path / "ws"))
-    facts = SessionFacts(path=str(tmp_path / "f.json"),
-                         known_refs=[KnownRef(id="2", bibkey="key2", title="Ref two")])
-    report = fix_bibliography(session, facts)
-    assert "key2" in report.fixed
-    assert "\\bibitem{key2}" in session.read_working()
 
 
 # ---- 端到端 add_section ----

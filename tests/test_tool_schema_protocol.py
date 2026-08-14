@@ -36,16 +36,22 @@ def _all_project_tool_schemas() -> dict[str, dict]:
     from paper_agent.literature.relevance import _TOOL as RELEVANCE
     from paper_agent.literature.relevance_batch import _BATCH_TOOL as RELEVANCE_BATCH
     from paper_agent.literature.retrieval.query_planner import _TOOL as QUERY_PLANNER
+    from paper_agent.application.ask_context import ASK_TOOLS
     from paper_agent.tasking.operation_analyzer import _ANALYZE_TOOL as ANALYZE
     from paper_agent.tasking.query_synthesizer import _TOOL as SYNTHESIZER
 
-    return {
+    out = {
         "relevance._TOOL": RELEVANCE,
         "relevance_batch._BATCH_TOOL": RELEVANCE_BATCH,
         "query_planner._TOOL": QUERY_PLANNER,
         "query_synthesizer._TOOL": SYNTHESIZER,
         "operation_analyzer._ANALYZE_TOOL": ANALYZE,
     }
+    # 只读问答的工具（P-4 第一步）。这批是**运行时**传给 provider 的，
+    # 漏 `type` 会被 _looks_unsupported() 误判成 capability 降级，真实错误被吞掉。
+    for tool in ASK_TOOLS:
+        out[f"ask_context.{tool['function']['name']}"] = tool
+    return out
 
 
 def _dynamic_extractor_schemas() -> dict[str, dict]:

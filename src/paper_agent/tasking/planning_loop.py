@@ -54,7 +54,8 @@ except Exception:  # noqa: BLE001
 #: **判据（两条都要满足）**：
 #: 1. 校验器已经知道正确做法 —— `section_exists` 的消息原文就是
 #:    「章节「引言」已存在，应改用 rewrite」。知道答案却把纠错推给用户，
-#:    与 backlog B-2 里 fix_bibliography 是同一性质的责任转移。
+#:    与 backlog B-2 里 fix_bibliography 是同一性质的责任转移（那个意图已按
+#:    此理由删除：系统自己写的引用，该在 commit 时自动对齐，不等用户来说）。
 #: 2. **修复只改变「怎么做」，不改变「做什么」** —— 这一条比第 1 条更关键。
 #:
 #: `convert_not_terminal` 满足第 1 条但**不满足第 2 条**，故刻意排除：

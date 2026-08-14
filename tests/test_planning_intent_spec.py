@@ -109,5 +109,9 @@ def test_defaults_are_independent_instances():
 
 
 def test_unknown_intent_returns_none():
-    assert spec_for(Intent.FIX_BIBLIOGRAPHY) is None
+    # 原来用 FIX_BIBLIOGRAPHY 当「无 spec 的意图」样本，该意图已删（B-2）。
+    # 换成 ADD_SECTION_BATCH —— 它同样在 Router 里存在、同样没有 spec（B-1 记的
+    # 「active 下不可达」剩下的那一个）。必须留一个**真实存在但无 spec** 的样本，
+    # 只测 UNCLEAR 会让这个测试退化：UNCLEAR 永远不该有 spec，测不出映射表漏项。
+    assert spec_for(Intent.ADD_SECTION_BATCH) is None
     assert spec_for(Intent.UNCLEAR) is None
