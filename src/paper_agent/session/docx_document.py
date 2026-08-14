@@ -237,16 +237,58 @@ def _insert_line(line: str, anchor, body, stats, *, before: bool = False):
     return para
 
 
+def _heading_levels_of(lines: list[str]) -> list[int]:
+    """投影行 → 标题层级序列。写回前后的结构比对就基于它。"""
+    return [lv for lv in (strip_heading_prefix(line)[1] for line in lines) if lv > 0]
+
+
+def _assert_no_heading_loss(old_lines: list[str], new_lines: list[str]) -> None:
+    """写回不得让既有标题消失。丢标题是损坏，新增标题与改名都是意图。
+
+    为什么放在写回层而不是 gate：损坏可能发生在 gate **之后** —— gate 只看单章
+    正文，`splice` 拼接造成的跨边界融合它结构上看不到。这里守的是真正落盘的那
+    一步，且对所有调用方生效（意图层、docx_crossref、格式化路径）。
+
+    判据是**层级序列的子序列**关系，不是逐项相等：
+
+    - `add_section` 新增标题 → 新序列更长，仍含旧序列 → 放行
+    - 改写改标题文字 → 层级不变 → 放行（故只比层级、不比文字）
+    - 标题被吞成正文 → 该层级从序列里消失 → 拦下
+    - 标题层级被改（`###` → `##`）→ 也算丢失，它同样会让章节树错位
+
+    **已知局限**：若标题行**保住了 `#` 前缀**却吞进了正文文字
+    （真机 4.2 那种「### 标题正文首句…」），层级序列不变，此断言看不出来。
+    那种融合的成因由 `SectionIndex.splice` 的换行规范化根治；这里只兜「标题
+    整个消失」这一类，不假装能覆盖全部形态。
+    """
+    old_levels = _heading_levels_of(old_lines)
+    new_levels = _heading_levels_of(new_lines)
+
+    it = iter(new_levels)
+    if all(lv in it for lv in old_levels):     # 子序列成立
+        return
+
+    raise DocxDocumentError(
+        f"拒绝写入：这次改动会让既有标题消失（写回前 {len(old_levels)} 个标题，"
+        f"新文本 {len(new_levels)} 个，且层级序列不再包含原有结构）。\n"
+        "常见成因是候选正文丢了首尾换行，导致标题与正文被拼成同一段。\n"
+        "文件未被修改。"
+    )
+
+
 def apply_text(path: str, new_text: str) -> dict[str, int]:
     """把整篇新文本写回 docx（就地）。返回 `{replaced, inserted, deleted}` 计数。
 
     上层给的是全文字符串（既有意图层的契约），这里按**行 diff** 还原成段落操作。
     倒序执行：先处理靠后的操作，前面的段落下标才不会被插入/删除移位。
+
+    写回前校验标题结构（见 `_assert_no_heading_loss`）：丢标题即抛错、不落盘。
     """
     docx = _docx_module()
     doc = docx.Document(path)
     old_lines, _spans = project_lines(doc)
     new_lines = new_text.split("\n")
+    _assert_no_heading_loss(old_lines, new_lines)
 
     stats = {"replaced": 0, "inserted": 0, "deleted": 0}
     matcher = difflib.SequenceMatcher(a=old_lines, b=new_lines, autojunk=False)

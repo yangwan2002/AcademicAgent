@@ -90,7 +90,10 @@ def _heading_levels(text: str, ext: str) -> list[int]:
         for m in _TEX_HEADING.finditer(text):
             cmd = re.match(r"\\(\w+)", m.group(0)).group(1)
             levels.append(order.get(cmd, 1))
-    elif ext in ("md", "markdown"):
+    elif ext in ("md", "markdown", "docx"):
+        # docx 与 md 同分支：docx 走**投影文本**，标题形态就是 `#` 前缀
+        # （见 `section_index._collect_headings`）。漏掉 docx 会让下面的标题结构
+        # 检查对 docx 静默变成空操作 —— 同一处「标题被吞」，.md 拦下、.docx 放行。
         for m in _MD_HEADING.finditer(text):
             levels.append(len(m.group(1)))
     return levels

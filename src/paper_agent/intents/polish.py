@@ -79,7 +79,9 @@ def execute_polish(
         )
 
     new_full = index.splice(section, outcome.text or "")
-    session.write_working(new_full, bus=bus)
+    # 带上章节 id：不传 message 时 git 只留默认的 "edit"，事后看不出润色了哪一章
+    # （add_section / rewrite 一直是带的，这里漏了）。
+    session.write_working(new_full, message=f"polish {section.id}", bus=bus)
     diff = unified_diff(original_body, outcome.text or "", section.title)
     return PolishResult(
         ok=True,

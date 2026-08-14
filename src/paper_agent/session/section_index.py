@@ -239,12 +239,32 @@ class SectionIndex:
         return self.text[section.body_start : section.body_end]
 
     def splice(self, section: Section, new_body: str) -> str:
-        """用 new_body 替换该章节正文区间，返回新的全文。其余部分逐字节不变。"""
-        return (
-            self.text[: section.body_start]
-            + new_body
-            + self.text[section.body_end :]
-        )
+        """用 new_body 替换该章节正文区间，返回新的全文。其余部分逐字节不变。
+
+        **边界换行由这里保障**，不能指望候选文本自带。`body_start` 紧贴标题文字
+        之后（heading 区不含尾随换行），故 `body_of` 返回的正文以 `\\n` 开头、
+        以 `\\n` 结尾；而 LLM 几乎必然返回 strip 过的文本。少了这层规范化，拼接
+        就会把标题与正文融成一行：
+
+            '### 4.2 标题' + '正文首句…'   → 标题吞正文（且该段仍是 Heading 样式）
+            '…共视内容。'  + '### 4.3 标题' → 正文吞标题，`###` 还漏成字面文字
+
+        真机曾因此让一节标题整个消失、其下段落并入上一节。补换行而非改
+        `body_start` 语义：偏移语义被 `extractor.py` 依赖，且 tex/md 共用同一套
+        边界计算，改定义的波及面远大于本缺陷。
+
+        只在原 body 确实带换行时补（空 body 不无端引入空行），且已带则不重复补。
+        """
+        head = self.text[: section.body_start]
+        tail = self.text[section.body_end :]
+        old_body = self.text[section.body_start : section.body_end]
+
+        if old_body.startswith("\n") and not new_body.startswith("\n"):
+            new_body = "\n" + new_body
+        if old_body.endswith("\n") and not new_body.endswith("\n"):
+            new_body = new_body + "\n"
+
+        return head + new_body + tail
 
     # ---- 插入（add_section 用）----
     def _doc_end_offset(self) -> int:
