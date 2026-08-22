@@ -18,8 +18,7 @@ from paper_agent.providers.llm.mock import MockLLMProvider
 from paper_agent.session.file_session import FileBackedSession
 from paper_agent.session.section_index import SectionIndex, slugify
 from paper_agent.session.extractor import extract_refs
-from paper_agent.intents.router import Router, Intent
-from paper_agent.intents.interview import interview_polish
+from paper_agent.intents.plans import PolishPlan
 from paper_agent.intents.polish import execute_polish
 
 
@@ -122,31 +121,14 @@ def test_run_polish_retries_then_fails_on_bad_output():
     assert not out.ok and out.attempts == 3
 
 
-# ---- Router + Interview + 端到端 ----
-
-def test_router_detects_polish_and_section():
-    idx = SectionIndex(SAMPLE_TEX, "tex")
-    r = Router(idx).route("帮我润色一下 Introduction")
-    assert r.intent is Intent.POLISH and r.section_id == "introduction"
-
-
-def test_router_unclear_for_unrelated_message():
-    idx = SectionIndex(SAMPLE_TEX, "tex")
-    assert Router(idx).route("今天天气怎么样").intent is Intent.UNCLEAR
-
+# ---- 端到端 ----
 
 def test_end_to_end_polish(tmp_path):
     src = tmp_path / "paper.tex"
     src.write_text(SAMPLE_TEX, encoding="utf-8")
     session = FileBackedSession(str(src), workspace_root=str(tmp_path / "ws"))
 
-    idx = SectionIndex(session.read_working(), session.ext)
-    route = Router(idx).route("润色 Introduction")
-    assert route.intent is Intent.POLISH
-
-    # 脚本化访谈答案：目标留空
-    answers = iter([""])
-    plan = interview_polish(route.section_id, idx, ask=lambda _p: next(answers))
+    plan = PolishPlan(section_id="introduction")
 
     # mock LLM 返回一个合法润色（保留数字/引用/公式）
     good_body = (

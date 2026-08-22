@@ -94,16 +94,17 @@ def test_unsupported_ext_still_empty(tmp_path):
 
 # ------------------------------- B. 系统撰写的修订文本不得产生弹窗
 
-def test_system_authored_reasons_cover_both_paths():
+def test_only_user_authored_revision_deltas_enter_provenance():
     from paper_agent.tasking.contracts import RevisionReason
-    from paper_agent.tasking.planning_loop import _SYSTEM_AUTHORED_REASONS
+    from paper_agent.tasking.planning_loop import _USER_AUTHORED_REVISION_REASONS
 
-    assert RevisionReason.VALIDATION_REPAIR in _SYSTEM_AUTHORED_REASONS
-    assert RevisionReason.NEEDS_REPLAN in _SYSTEM_AUTHORED_REASONS
-    # 用户原话必须仍然弹窗 —— 否则真丢用户要求
-    assert RevisionReason.SUPPLEMENT not in _SYSTEM_AUTHORED_REASONS
-    assert RevisionReason.USER_MODIFY not in _SYSTEM_AUTHORED_REASONS
-    assert RevisionReason.INITIAL not in _SYSTEM_AUTHORED_REASONS
+    # 用户提供的 delta 可以进入 requirement / unmapped 账本。
+    assert RevisionReason.SUPPLEMENT in _USER_AUTHORED_REVISION_REASONS
+    assert RevisionReason.USER_MODIFY in _USER_AUTHORED_REVISION_REASONS
+    # 系统修复/重规划提示和 initial 均不是“本次用户 delta”。
+    assert RevisionReason.VALIDATION_REPAIR not in _USER_AUTHORED_REVISION_REASONS
+    assert RevisionReason.NEEDS_REPLAN not in _USER_AUTHORED_REVISION_REASONS
+    assert RevisionReason.INITIAL not in _USER_AUTHORED_REVISION_REASONS
 
 
 def test_repair_hint_mentions_sections_when_available():

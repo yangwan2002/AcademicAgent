@@ -28,13 +28,17 @@ _SRC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
 if _SRC not in sys.path:
     sys.path.insert(0, _SRC)
 
-from paper_agent.intents.router import Intent
+from paper_agent.intents.intent import Intent
 from paper_agent.providers.llm.mock import MockLLMProvider
 from paper_agent.tasking.clarifier import ConfirmDecision, UnmappedDisposition
 from paper_agent.tasking.contracts import (
+    AnalyzeResult,
+    AtomicRequirement,
+    CallStatus,
     ConfirmedPlan,
     PlanningExit,
     PlanStatus,
+    RawOperation,
     RevisionReason,
     ValidationIssue,
     ValidationOutcome,
@@ -86,6 +90,15 @@ def _extract_json(slots):
         {"slots": {k: {"value": v, "status": "present"} for k, v in slots.items()}},
         ensure_ascii=False,
     )
+
+
+def _extract_json_with_consumed(slots, consumed):
+    return json.dumps({
+        "slots": {
+            k: {"value": v, "status": "present"} for k, v in slots.items()
+        },
+        "slot_consumed_requirements": consumed,
+    }, ensure_ascii=False)
 
 
 def _outcome(*codes):
@@ -225,6 +238,108 @@ def test_repair_is_bounded_and_reports_original_issue():
     assert out.status is PlanStatus.REJECTED
     assert SECTION_EXISTS in out.message
     assert "修订次数" not in out.message
+
+
+def test_empty_self_repair_does_not_route_original_write_request_to_readonly():
+    """校验修复失败仍属于 Planning，不能把原写作请求交给 AskLoop。"""
+    llm = MockLLMProvider(scripted=[
+        _analyze_json([("add_section", "完善我的引言")]),
+        _extract_json({"title": "引言"}),
+        _analyze_json([]),
+    ])
+    out = run_planning_loop(
+        "帮我完善我的引言",
+        llm=llm,
+        interactor=_It(),
+        current_sections=SECTIONS,
+        current_format="md",
+    )
+
+    assert isinstance(out, PlanningExit)
+    assert out.status is PlanStatus.NO_ACTION
+    assert out.route_to_readonly is False
+
+
+def test_self_repair_keeps_user_requirements_and_filters_system_scaffold():
+    """系统修复只删提示词噪声，不能把原请求里的要求整体清空。"""
+    original = "帮我完善我的引言，不要改动引用"
+    user_req = AtomicRequirement("r_user", "完善我的引言", category="action")
+    system_req = AtomicRequirement(
+        "r_system", "上一版计划未通过静态校验", category="constraint"
+    )
+    analyze_calls = 0
+
+    def analyze(text, _llm):
+        nonlocal analyze_calls
+        analyze_calls += 1
+        if analyze_calls == 1:
+            return AnalyzeResult(
+                call_status=CallStatus.SUCCESS,
+                operations=(RawOperation(
+                    Intent.ADD_SECTION, "完善我的引言", ("r_user",)
+                ),),
+                requirements=(user_req,),
+            )
+        assert "上一版计划未通过静态校验" in text
+        return AnalyzeResult(
+            call_status=CallStatus.SUCCESS,
+            operations=(RawOperation(
+                Intent.REWRITE,
+                "完善我的引言",
+                ("r_user", "r_system"),
+            ),),
+            requirements=(user_req, system_req),
+            unmapped_text=("不要改动引用", "请据以下事实重新规划"),
+            project_facts=(
+                ("research_topic", "完善我的引言", ("r_user",)),
+                ("research_gap", "上一版计划未通过静态校验", ("r_system",)),
+            ),
+        )
+
+    class RecordingInteractor(_It):
+        def __init__(self):
+            super().__init__(confirm=[ConfirmDecision("accept")])
+            self.unmapped_items = []
+
+        def resolve_unmapped(self, item):
+            self.unmapped_items.append(item)
+            return UnmappedDisposition("ignore")
+
+    class RecordingFacts:
+        def __init__(self):
+            self.claims = {}
+
+        def set_claim(self, key, value):
+            self.claims[key] = value
+
+        def save(self):
+            pass
+
+    it = RecordingInteractor()
+    facts = RecordingFacts()
+    llm = MockLLMProvider(scripted=[
+        _extract_json_with_consumed(
+            {"title": "引言"}, {"title": ["r_user"]}
+        ),
+        _extract_json_with_consumed(
+            {"section_id": "引言", "direction": "完善论证"},
+            {"direction": ["r_user"]},
+        ),
+    ])
+    out = run_planning_loop(
+        original,
+        llm=llm,
+        interactor=it,
+        current_sections=SECTIONS,
+        current_format="md",
+        analyze_fn=analyze,
+        facts=facts,
+    )
+
+    assert isinstance(out, ConfirmedPlan), getattr(out, "message", out)
+    assert [d.requirement_id for d in out.plan.dispositions] == ["r_user"]
+    assert it.unmapped_items == ["不要改动引用"]
+    assert facts.claims == {"research_topic": "完善我的引言"}
 
 
 def test_repair_budget_is_one():

@@ -14,7 +14,7 @@ _SRC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
 if _SRC not in sys.path:
     sys.path.insert(0, _SRC)
 
-from paper_agent.intents.router import Intent
+from paper_agent.intents.intent import Intent
 from paper_agent.tasking.intent_spec import (
     INTENT_SPECS,
     BindingKind,
@@ -108,10 +108,6 @@ def test_defaults_are_independent_instances():
     assert a == [] and b == [] and a is not b
 
 
-def test_unknown_intent_returns_none():
-    # 原来用 FIX_BIBLIOGRAPHY 当「无 spec 的意图」样本，该意图已删（B-2）。
-    # 换成 ADD_SECTION_BATCH —— 它同样在 Router 里存在、同样没有 spec（B-1 记的
-    # 「active 下不可达」剩下的那一个）。必须留一个**真实存在但无 spec** 的样本，
-    # 只测 UNCLEAR 会让这个测试退化：UNCLEAR 永远不该有 spec，测不出映射表漏项。
-    assert spec_for(Intent.ADD_SECTION_BATCH) is None
-    assert spec_for(Intent.UNCLEAR) is None
+def test_every_public_intent_has_a_spec():
+    assert set(INTENT_SPECS) == set(Intent)
+    assert all(spec_for(intent) is not None for intent in Intent)

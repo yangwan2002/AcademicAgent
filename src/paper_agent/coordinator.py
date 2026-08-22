@@ -11,8 +11,9 @@
   error，同样不外抛（不拖垮 REPL）。
 - 观测失败绝不拖垮业务：`trace_collection_status` 据 health 计算。
 
-业务函数签名：`fn(bus, cancel_token) -> value`。`value` 可选实现
-`run_status_hint()/working_copy_status/diff_summary` 供最终状态汇总。
+业务函数签名：`fn(bus, cancel_token) -> value`。需要声明 Working_Copy 终态时，
+业务函数显式返回 `RunOutcome(value, working_copy_status=...)`；普通返回值一律按
+只读/未改变处理。Coordinator 不再通过任意对象的 ``ok`` 属性猜测是否发生写入。
 """
 
 from __future__ import annotations
@@ -45,6 +46,28 @@ class RunReport:
     trace_collection_status: str = "not_requested"
     health: ObservabilityHealth = field(default_factory=ObservabilityHealth)
     recorder: SimpleTraceRecorder | None = None
+
+
+@dataclass(frozen=True)
+class RunOutcome:
+    """业务返回值及其显式的 Working_Copy 终态。
+
+    ``ok`` 在项目里既表示“问答成功”，也表示“生成成功”，无法推出文档是否改变。
+    这个信封只由真正拥有写入语义的应用编排层构造；Coordinator 只读取该类型，
+    不再对任意业务对象做鸭子类型推断。
+    """
+
+    value: Any = None
+    working_copy_status: str = "unchanged"
+    changed_lines: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.working_copy_status not in {"unchanged", "updated", "rolled_back"}:
+            raise ValueError(
+                "working_copy_status must be unchanged, updated, or rolled_back"
+            )
+        if self.changed_lines is not None and self.changed_lines < 0:
+            raise ValueError("changed_lines must be non-negative")
 
 
 class Coordinator:
@@ -97,10 +120,19 @@ class Coordinator:
         fn: Callable[[Any, Any], Any],
         *,
         cancel_token=None,
+        working_copy_probe: Callable[[], str] | None = None,
     ) -> RunReport:
+        """运行一次业务旅程。
+
+        ``working_copy_probe`` 是可选的只读、best-effort 终态探针。业务因取消或
+        异常而来不及返回显式 ``RunOutcome`` 时，Coordinator 会在 ``finally`` 中
+        调用它，避免已经发生的写入被误报为 ``unchanged``。显式 ``RunOutcome``
+        始终优先，探针不会覆盖 ``updated`` / ``rolled_back`` 等业务结论。
+        """
         run_id = uuid4().hex
         health = ObservabilityHealth()
         recorder: SimpleTraceRecorder | None = None
+        has_explicit_working_copy_status = False
 
         if self.observing:
             fan = FanOutSink(health=health)
@@ -120,8 +152,9 @@ class Coordinator:
             # `use_bus` 把 bus 登记为 run 作用域的 ambient bus，供显式传不到的深层
             # 埋点取用（`structured_call` 等）。退出必还原，生命周期严格等于本次 run。
             with use_bus(bus), bus.span("run"):
-                report.value = fn(bus, cancel_token)
-                self._absorb_value(report)
+                value = fn(bus, cancel_token)
+                has_explicit_working_copy_status = isinstance(value, RunOutcome)
+                self._absorb_value(report, value)
         except OperationCancelled:
             report.run_status = "cancelled"
             bus.publish(EventKind.RUN_CANCELLED)
@@ -132,6 +165,8 @@ class Coordinator:
                 "preview": sanitize_text(str(exc)).preview,
             }
         finally:
+            if working_copy_probe is not None and not has_explicit_working_copy_status:
+                self._absorb_working_copy_probe(report, working_copy_probe)
             report.trace_collection_status = (
                 "not_requested"
                 if recorder is None
@@ -154,19 +189,32 @@ class Coordinator:
         return report
 
     @staticmethod
-    def _absorb_value(report: RunReport) -> None:
-        """从业务返回值提炼最终状态（尽力而为，鸭子类型，绝不抛）。"""
-        value = report.value
+    def _absorb_value(report: RunReport, value: Any) -> None:
+        """吸收显式 ``RunOutcome``；普通值保持 ``unchanged``。
+
+        不能再把 ``value.ok is True`` 当写入证据：``AskResult.ok`` 只表示回答正常
+        收敛，曾因此把完全只读的 AskLoop 标成 ``working_copy_status=updated``。
+        """
+        if not isinstance(value, RunOutcome):
+            report.value = value
+            return
+        report.value = value.value
+        report.working_copy_status = value.working_copy_status
+        if value.changed_lines is not None:
+            report.diff_summary = f"{value.changed_lines} 行变更"
+
+    @staticmethod
+    def _absorb_working_copy_probe(
+        report: RunReport,
+        probe: Callable[[], str],
+    ) -> None:
+        """安全吸收只读终态探针；探针故障不得改变业务 run 的终态。"""
         try:
-            ok = getattr(value, "ok", None)
-            if ok is True:
-                report.working_copy_status = "updated"
-            diff = getattr(value, "diff", None)
-            if isinstance(diff, str) and diff:
-                # 只留摘要（行数），不落全文 diff。
-                report.diff_summary = f"{diff.count(chr(10)) + 1} 行变更"
-        except Exception:  # noqa: BLE001
-            pass
+            status = probe()
+        except Exception:  # noqa: BLE001 - 状态观测失败不能掩盖原始业务终态
+            return
+        if status in {"unchanged", "updated", "rolled_back"}:
+            report.working_copy_status = status
 
 
-__all__ = ["Coordinator", "RunReport"]
+__all__ = ["Coordinator", "RunOutcome", "RunReport"]

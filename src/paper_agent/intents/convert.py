@@ -11,7 +11,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 
-from paper_agent.intents.interview import ConvertPlan
+from paper_agent.intents.plans import ConvertPlan
 from paper_agent.session.file_session import FileBackedSession
 from paper_agent.tools.convert import ConvertError, convert_document
 from paper_agent.tools.doc_stats import stats_for, validate_conversion

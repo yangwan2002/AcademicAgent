@@ -16,7 +16,7 @@ _SRC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
 if _SRC not in sys.path:
     sys.path.insert(0, _SRC)
 
-from paper_agent.intents.router import Intent
+from paper_agent.intents.intent import Intent
 from paper_agent.providers.llm.base import LLMProvider
 from paper_agent.providers.llm.mock import MockLLMProvider
 from paper_agent.tasking.contracts import CallStatus
@@ -117,6 +117,24 @@ def test_schema_failed_on_bad_structure():
     assert out.call_status is CallStatus.SCHEMA_FAILED
 
 
+def test_schema_failed_on_empty_envelope():
+    """裸 `{}` 不是合法的「零操作」；合法零操作仍须显式给出三个数组。"""
+    out = analyze(TEXT, _mock({}))
+    assert out.call_status is CallStatus.SCHEMA_FAILED
+    assert out.error_category == "KeyError"
+
+
+def test_explicit_empty_operations_remains_valid():
+    out = analyze("查一下论文有几章", _mock({
+        "operations": [],
+        "requirements": [],
+        "unmapped_text": ["查一下论文有几章"],
+    }))
+    assert out.call_status is CallStatus.SUCCESS
+    assert out.operations == ()
+    assert out.unmapped_text == ("查一下论文有几章",)
+
+
 def test_schema_failed_on_missing_intent_key():
     out = analyze(TEXT, _mock({"operations": [{"verbatim": "缺 intent 键"}]}))
     assert out.call_status is CallStatus.SCHEMA_FAILED
@@ -130,3 +148,12 @@ def test_json_in_code_fence_parsed():
     out = analyze("润色", MockLLMProvider(scripted=[fenced]))
     assert out.call_status is CallStatus.SUCCESS
     assert out.operations[0].intent is Intent.POLISH
+
+
+def test_analyzer_schema_declares_complete_envelope_and_intent_enum():
+    from paper_agent.tasking.operation_analyzer import _ANALYZE_TOOL
+
+    params = _ANALYZE_TOOL["function"]["parameters"]
+    assert params["required"] == ["operations", "requirements", "unmapped_text"]
+    intent = params["properties"]["operations"]["items"]["properties"]["intent"]
+    assert set(intent["enum"]) == {i.value for i in Intent}

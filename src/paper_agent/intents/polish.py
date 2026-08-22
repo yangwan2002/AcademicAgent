@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 from paper_agent.gates.diff_gate import PolishGate
 from paper_agent.generate.generator import run_polish
-from paper_agent.intents.interview import PolishPlan
+from paper_agent.intents.plans import PolishPlan
 from paper_agent.providers.llm.base import LLMProvider
 from paper_agent.session.file_session import FileBackedSession
 from paper_agent.session.section_index import SectionIndex

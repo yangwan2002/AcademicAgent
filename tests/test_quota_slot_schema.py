@@ -6,7 +6,7 @@ A2d-5 起该槽已挂入 REWRITE/ADD_SECTION（与 Handler 消费同批原子激
 
 from __future__ import annotations
 
-from paper_agent.intents.router import Intent
+from paper_agent.intents.intent import Intent
 from paper_agent.tasking.extractors.base import build_tool_schema, _slot_property
 from paper_agent.tasking.intent_spec import (
     CITATION_QUOTA_SLOT_SPEC,

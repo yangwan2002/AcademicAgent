@@ -40,9 +40,7 @@ class EventKind(str, Enum):
     SPAN_START = "span_start"
     SPAN_END = "span_end"
 
-    # --- 路由 / 访谈 / 检索 ---
-    ROUTE_DECISION = "route_decision"
-    INTERVIEW_QA = "interview_qa"
+    # --- 检索 ---
     RETRIEVAL_START = "retrieval_start"
     RETRIEVAL_END = "retrieval_end"
     #: 单次 provider 检索调用的查询策略（如 OpenAlex 短语优先 / 回退裸词）。
@@ -96,7 +94,7 @@ class EventKind(str, Enum):
     # --- 只读问答循环（P-4 / agent-loop）---
     # 这三个是 react 通路唯一的观测面。写作意图靠 GENERATION_ATTEMPT_*/GATE_* 就能
     # 还原发生了什么；react 的形状是"模型自己决定调哪个工具、什么时候停"，不埋点则
-    # trace 里只剩一次 ROUTE_DECISION，查不出它查了什么、迭代几轮、为什么停。
+    # 查不出它查了什么、迭代几轮、为什么停。
     ASK_TURN_START = "ask_turn_start"   # 一次问答开始（问题只出 hash 与长度）
     ASK_TOOL_CALL = "ask_tool_call"     # 单次工具调用（含 dispatch 失败）
     ASK_TURN_END = "ask_turn_end"       # 一次问答终态（stop_reason / 迭代 / 调用数）

@@ -21,7 +21,7 @@ for _p in (_SRC, _EVAL):
 import scorer
 from runner import run_clarification_case
 
-from paper_agent.intents.router import Intent
+from paper_agent.intents.intent import Intent
 from paper_agent.providers.llm.mock import MockLLMProvider
 from paper_agent.tasking.clarifier import (
     ConfirmDecision,

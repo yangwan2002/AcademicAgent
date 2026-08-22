@@ -29,7 +29,7 @@ _SRC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
 if _SRC not in sys.path:
     sys.path.insert(0, _SRC)
 
-from paper_agent.intents.router import Intent
+from paper_agent.intents.intent import Intent
 from paper_agent.providers.llm.mock import MockLLMProvider
 from paper_agent.tasking.contracts import (
     AtomicRequirement,

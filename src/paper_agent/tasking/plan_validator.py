@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from paper_agent.intents.router import Intent
+from paper_agent.intents.intent import Intent
 from paper_agent.session.section_index import (
     match_key,
     slugify,

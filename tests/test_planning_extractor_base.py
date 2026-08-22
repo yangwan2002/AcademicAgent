@@ -20,7 +20,7 @@ _SRC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
 if _SRC not in sys.path:
     sys.path.insert(0, _SRC)
 
-from paper_agent.intents.router import Intent
+from paper_agent.intents.intent import Intent
 from paper_agent.providers.llm.base import LLMProvider, Message, ToolCall
 from paper_agent.providers.llm.mock import MockLLMProvider
 from paper_agent.tasking.contracts import (
@@ -358,7 +358,9 @@ def test_omitted_required_slot_stays_user_absent_for_clarifier():
 
 
 def test_analyzer_schema_allows_empty_operations():
-    """请求整体不属于五意图时 operations 应可为空，不该被 required 逼着硬凑。"""
+    """required 约束信封存在，不约束数组非空；不支持请求仍可明确返回空操作。"""
     from paper_agent.tasking.operation_analyzer import _ANALYZE_TOOL
 
-    assert _ANALYZE_TOOL["function"]["parameters"]["required"] == []
+    params = _ANALYZE_TOOL["function"]["parameters"]
+    assert params["required"] == ["operations", "requirements", "unmapped_text"]
+    assert params["properties"]["operations"].get("minItems") is None

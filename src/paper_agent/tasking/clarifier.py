@@ -22,7 +22,7 @@ import re
 from dataclasses import dataclass, replace
 from typing import Protocol
 
-from paper_agent.intents.router import Intent
+from paper_agent.intents.intent import Intent
 from paper_agent.tasking.contracts import (
     DispositionStatus,
     FieldStatus,

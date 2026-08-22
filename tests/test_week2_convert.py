@@ -16,10 +16,8 @@ from paper_agent.tools.convert import check_pandoc
 from paper_agent.tools.doc_stats import (
     DocStats, stats_from_text, validate_conversion,
 )
-from paper_agent.session.section_index import SectionIndex
 from paper_agent.session.file_session import FileBackedSession
-from paper_agent.intents.router import Router, Intent
-from paper_agent.intents.interview import interview_convert, InterviewError
+from paper_agent.intents.plans import ConvertPlan
 from paper_agent.intents.convert import execute_convert
 
 pandoc_required = pytest.mark.skipif(
@@ -65,45 +63,6 @@ def test_validate_critical_fail():
     assert not validate_conversion(src, tgt).ok
 
 
-# ---- Router ----
-
-def _router():
-    return Router(SectionIndex(SAMPLE_TEX, "tex"))
-
-
-def test_router_convert_to_docx():
-    r = _router().route("把这份论文转成 docx")
-    assert r.intent is Intent.CONVERT_FORMAT and r.target_ext == "docx"
-
-
-def test_router_convert_with_two_column_preset():
-    r = _router().route("转成 word，加双栏")
-    assert r.intent is Intent.CONVERT_FORMAT
-    assert r.target_ext == "docx" and "two_column" in r.presets
-
-
-def test_router_rejects_same_format():
-    r = _router().route("转成 latex")  # 源就是 tex
-    assert r.intent is Intent.UNCLEAR
-
-
-# ---- Interview ----
-
-def test_interview_convert_asks_when_missing():
-    plan = interview_convert(None, [], ask=lambda _p: "markdown")
-    assert plan.target_ext == "md"
-
-
-def test_interview_convert_alias_word():
-    plan = interview_convert(None, [], ask=lambda _p: "word")
-    assert plan.target_ext == "docx"
-
-
-def test_interview_convert_unknown_format_raises():
-    with pytest.raises(InterviewError):
-        interview_convert(None, [], ask=lambda _p: "pdf???")
-
-
 # ---- git undo ----
 
 def test_git_undo_reverts_last_write(tmp_path):
@@ -145,7 +104,7 @@ def test_end_to_end_convert_tex_to_docx(tmp_path):
     src.write_text(SAMPLE_TEX, encoding="utf-8")
     session = FileBackedSession(str(src), workspace_root=str(tmp_path / "ws"))
 
-    plan = interview_convert("docx", [], ask=lambda _p: "")
+    plan = ConvertPlan(target_ext="docx")
     result = execute_convert(session, plan, output_dir=str(tmp_path / "out"))
 
     assert result.ok, result.message
@@ -161,7 +120,7 @@ def test_two_column_preset_writes_cols(tmp_path):
     src.write_text(SAMPLE_TEX, encoding="utf-8")
     session = FileBackedSession(str(src), workspace_root=str(tmp_path / "ws"))
 
-    plan = interview_convert("docx", ["two_column"], ask=lambda _p: "")
+    plan = ConvertPlan(target_ext="docx", presets=["two_column"])
     result = execute_convert(session, plan, output_dir=str(tmp_path / "out"))
     assert result.ok
 

@@ -482,20 +482,18 @@ def test_turn_metrics_roundtrip(tmp_path):
     path = str(tmp_path / "turn_metrics.json")
     m = TurnMetrics()
     m.record_turn()
-    m.record_served_by("active")
     m.record_plan_status("failed")
-    m.record_fallback("TimeoutError")
+    m.record_planning_failed("TimeoutError")
+    m.record_readonly_fallback()
     m.record_cancelled()
     assert m.save(path)
 
     back = TurnMetrics.load(path)
     assert back.turns == 1
-    assert back.served_by == {"active": 1}
     assert back.plan_status == {"failed": 1}
-    assert back.fallback_to_legacy == {"TimeoutError": 1}
+    assert back.planning_failed == {"TimeoutError": 1}
+    assert back.readonly_fallbacks == 1
     assert back.cancelled == 1
-    assert back.fallback_count == 1
-    assert back.attribution_is_clean is False
 
 
 def test_turn_metrics_load_accumulates_across_sessions(tmp_path):
@@ -503,16 +501,16 @@ def test_turn_metrics_load_accumulates_across_sessions(tmp_path):
     path = str(tmp_path / "turn_metrics.json")
     first = TurnMetrics()
     first.record_turn()
-    first.record_served_by("active")
+    first.record_plan_status("done")
     first.save(path)
 
     second = TurnMetrics.load(path)
     second.record_turn()
-    second.record_served_by("active")
+    second.record_plan_status("done")
     second.save(path)
 
     assert TurnMetrics.load(path).turns == 2
-    assert TurnMetrics.load(path).served_by == {"active": 2}
+    assert TurnMetrics.load(path).plan_status == {"done": 2}
 
 
 def test_turn_metrics_load_missing_and_corrupt(tmp_path):
@@ -529,13 +527,12 @@ def test_turn_metrics_load_missing_and_corrupt(tmp_path):
 
     weird = tmp_path / "weird.json"
     weird.write_text(
-        json.dumps({"turns": "many", "served_by": {"active": "lots"}, "shadow": 5}),
+        json.dumps({"turns": "many", "planning_failed": {"x": "lots"}}),
         encoding="utf-8",
     )
     loaded = TurnMetrics.load(str(weird))
     assert loaded.turns == 0
-    assert loaded.served_by == {}
-    assert loaded.shadow_matches_legacy == 0
+    assert loaded.planning_failed == {}
 
 
 def test_turn_metrics_load_rejects_bool_counts(tmp_path):

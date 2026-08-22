@@ -12,7 +12,7 @@ from typing import Callable
 
 from paper_agent.gates.diff_gate import RewriteGate, _count_paragraphs, data_numbers
 from paper_agent.generate.context_builder import build_rewrite_messages
-from paper_agent.intents.interview import RewritePlan
+from paper_agent.intents.plans import RewritePlan
 from paper_agent.intents.polish import unified_diff
 from paper_agent.literature.bibliography_sync import apply_bibliography
 from paper_agent.intents.retry_feedback import (

@@ -58,7 +58,7 @@ try:  # 脱敏（可选，None-safe）：`OperationResult.message` 是业务文�
 except Exception:  # noqa: BLE001
     sanitize_text = None  # type: ignore
 
-from paper_agent.intents.router import Intent
+from paper_agent.intents.intent import Intent
 
 # 视为「该步没成」的终态：触发停后续
 _NOT_OK = (

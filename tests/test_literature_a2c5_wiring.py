@@ -69,7 +69,7 @@ def test_no_fake_success_discovery_provider():
 
 def test_citation_quota_slot_activated_with_handler_consumption():
     """按 A2d-5 预期变更更新：槽已激活，且**同批**有 Handler 真实消费（原子激活）。"""
-    from paper_agent.intents.router import Intent
+    from paper_agent.intents.intent import Intent
     from paper_agent.tasking.intent_spec import spec_for
 
     for intent in (Intent.REWRITE, Intent.ADD_SECTION):

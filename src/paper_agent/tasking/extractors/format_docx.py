@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from paper_agent.intents.router import Intent
+from paper_agent.intents.intent import Intent
 from paper_agent.tasking.contracts import FieldStatus, SlotSource, SlotValue
 from paper_agent.tasking.extractors.base import PreExtractor, _merge_ids
 from paper_agent.tasking.intent_spec import FORMAT_DOCX_SPEC, IntentSpec, SlotSpec

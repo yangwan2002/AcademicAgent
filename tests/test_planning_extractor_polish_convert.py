@@ -16,7 +16,7 @@ _SRC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
 if _SRC not in sys.path:
     sys.path.insert(0, _SRC)
 
-from paper_agent.intents.router import Intent
+from paper_agent.intents.intent import Intent
 from paper_agent.providers.llm.mock import MockLLMProvider
 from paper_agent.tasking.contracts import (
     AtomicRequirement,
@@ -46,9 +46,8 @@ def test_registry_returns_polish_and_convert():
     assert isinstance(build_extractor(Intent.CONVERT_FORMAT, llm), ConvertExtractor)
 
 
-def test_registry_unregistered_intent_returns_none():
-    # 非规划五意图（如 UNCLEAR）不注册抽取器
-    assert build_extractor(Intent.UNCLEAR, MockLLMProvider()) is None
+def test_registry_covers_every_public_intent():
+    assert all(build_extractor(intent, MockLLMProvider()) is not None for intent in Intent)
 
 
 # --- polish 字段状态/来源 ---

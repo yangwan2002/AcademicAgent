@@ -9,6 +9,11 @@
 - 建立背景：一次完整代码评审 + active 模式装配冒烟
 - 当时状态：228 个 py 文件 / ~3.7 万行 / 1057 测试全绿（170s）/ 十个 feature flag 默认全关
 
+> **2026-08-20 架构收敛说明**：本文后续关于 Router、Interview、
+> `off/shadow/active` 模式矩阵、`add_section_batch` 与 legacy fallback 的内容均为历史决策留痕，
+> 不再描述当前运行时。当前自然语言只有一条 Planning 管线；OperationAnalyzer 成功但零写作
+> 操作时转只读 AskLoop。旧 Router/Interview/rule_analysis 及模式开关已删除。
+
 ---
 
 ## 一、阻塞项（翻 `intent_planning_mode=active` 之前必须处理）

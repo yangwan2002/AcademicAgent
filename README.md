@@ -8,9 +8,9 @@
 
 ## 现状
 
-- 297 个 Python 文件 / 约 6.7 万行 / **1941 个测试**（不含 `tests/eval`，本机约 3 分钟）
+- 293 个 Python 文件 / 约 5.2 万行 / **1816 个测试**（不含 `tests/eval`）
 - CI：ruff + pytest（3.10 / 3.12）+ 无可选依赖时的可导入性检查
-- **尚未发布**：见下方「已知限制」。真机链路跑通了，但部分能力仍在 flag 后面
+- **尚未发布**：见下方「已知限制」。自然语言入口已收敛为单一 Planning 管线
 
 ## 装
 
@@ -57,7 +57,6 @@ OPENAI_API_KEY=sk-...         # 变量名由 provider 决定，见下表
 常用可选项（完整清单见 `src/paper_agent/config.py`，共 60+ 个）：
 
 ```bash
-PAPER_INTENT_PLANNING_MODE=off   # off | shadow | active（默认 off，走关键词路由）
 PAPER_TRACE=true                 # 落 runs/<run_id>/trace.json
 PAPER_LANGFUSE=true              # 额外上传 Langfuse，需 PAPER_TRACE 同开
                                  # 另需 LANGFUSE_PUBLIC_KEY + LANGFUSE_SECRET_KEY
@@ -80,7 +79,7 @@ python scripts/chat.py 你的论文.docx
 | `:sections` | 列出章节 |
 | `:ask <问题>` | 只读问答，模型自己决定查什么，不改文档 |
 | `:refs` | 按 DOI 查 Crossref，回填参考文献的刊名/卷/期/页（会改文档） |
-| `:stats` | 本次会话的 Turn 归属统计（新栈 / shadow / 静默降级） |
+| `:stats` | 跨会话累积的 Planning 终态与只读交接统计 |
 | `:undo` | 撤销上一次修改 |
 | `:save` | 落盘到源文件（**不 save 就不动原文件**）。docx 的引用存成 Word 交叉引用域，编号可在 Word 里 F9 更新；`--plain` 则存纯文本 `[n]` |
 | `:export [路径]` | 另存一份交叉引用版到别的路径，源文件不动（如投稿版） |
@@ -96,9 +95,11 @@ python scripts/chat.py 你的论文.docx
 
 ```
 scripts/chat.py            REPL 入口
-  └─ coordinator.py        一轮对话的编排
-      ├─ intents/router    请求 → 意图（polish / rewrite / add_section / …）
-      ├─ tasking/          意图 → 操作计划（planning_loop 可多轮自修）
+  ├─ application/          TurnService：自然语言统一进入 Planning
+  ├─ tasking/              分析 → 抽槽 → 校验 → 操作计划（可多轮修订）
+  │   └─ intents/intent.py 唯一写作能力枚举
+  ├─ agent_loop/           未命中写作操作时的只读 AskLoop
+  └─ coordinator.py        已确认计划的执行编排
       ├─ generate/         组装上下文 → 调模型产出候选文本
       ├─ gates/            写回前校验：diff / 格式 / 引用配额
       ├─ session/          文档投影（docx/md/tex → 带 # 标题的统一文本）
@@ -118,25 +119,19 @@ scripts/chat.py            REPL 入口
 
 ## 意图
 
-`polish`（只改语言）、`rewrite`（可改内容与论证）、`add_section`、`add_section_batch`、
-`convert_format`、`format_docx`，加一个 `FALLBACK` 兜底 —— 写意图都不认领的请求交给
-只读 ReAct 循环回答，而不是硬塞进某个写操作。
+写作能力只有五个：`polish`（只改语言）、`rewrite`（可改内容与论证）、
+`add_section`、`convert_format`、`format_docx`。自然语言先由 OperationAnalyzer 分析；
+分析成功但没有命中任何写作能力时，原问题交给只读 AskLoop，而不是硬塞进某个写操作。
 
 ## 已知限制
 
-- **`add_section_batch` 在 `active` 规划模式下不可达**（`operation_analyzer` 未支持），
-  见 `docs/backlog.md` B-1 / B-3
-- **默认 flag 与开发配置不一致**：代码默认 `PAPER_INTENT_PLANNING_MODE=off`，
-  开发机 `.env` 用的是 `active`。发布态该用哪个尚未定
 - **文献检索的中文配额常填不满**（`zh>=5` 一类约束），这是数据源覆盖问题而非 bug
-- **发布门槛自锁**：原定 ≥200 条人工标注才允许默认开启 flag，实际标注 0/40，
-  门槛需重定，见 `docs/backlog.md` D-7
 - 锁文件无哈希校验（本机无 `uv` / `pip-compile`），防版本漂移但不防上游重打包
 
 ## 开发
 
 ```bash
-pytest tests/ -q --ignore=tests/eval   # 1941 个，约 3 分钟
+pytest tests/ -q --ignore=tests/eval   # 1816 个
 ruff check .                           # CI 同一套规则
 ```
 

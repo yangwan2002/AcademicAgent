@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import pytest
 
-from paper_agent.intents.router import Intent
+from paper_agent.intents.intent import Intent
 from paper_agent.session.section_index import (
     SECTIONABLE_EXTS,
     SectionIndex,

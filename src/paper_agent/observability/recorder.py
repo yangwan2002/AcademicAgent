@@ -255,8 +255,6 @@ class SimpleTraceRecorder:
                     },
                 )
         elif kind in (
-            EventKind.ROUTE_DECISION,
-            EventKind.INTERVIEW_QA,
             EventKind.RETRIEVAL_START,
             EventKind.RETRIEVAL_END,
             EventKind.PROVIDER_SEARCH,

@@ -14,12 +14,10 @@ if _SRC not in sys.path:
 docx = pytest.importorskip("docx")
 from docx.shared import Pt
 
-from paper_agent.session.section_index import SectionIndex
 from paper_agent.session.file_session import FileBackedSession
 from paper_agent.gates.format_gate import FormatGate, snapshot_docx
 from paper_agent.tools.docx_format import apply_ops, FormatOp
 from paper_agent.tools.sandbox import run_python_script
-from paper_agent.intents.router import Router, Intent
 from paper_agent.intents.format_parser import parse_format_ops
 from paper_agent.intents.format_docx import execute_format
 
@@ -52,26 +50,6 @@ def test_parse_format_ops_acceptance():
 
 def test_parse_empty_when_no_format():
     assert parse_format_ops("帮我润色引言") == []
-
-
-# ---- Router ----
-
-def _router():
-    return Router(SectionIndex("", "docx"))
-
-
-def test_router_format_docx():
-    assert _router().route("把全文字体改成宋体").intent is Intent.FORMAT_DOCX
-
-
-def test_router_convert_beats_format():
-    # 明确“转成 docx”应走 convert，即使带排版预设
-    r = Router(SectionIndex("", "tex")).route("转成 docx 加双栏")
-    assert r.intent is Intent.CONVERT_FORMAT
-
-
-def test_router_md_format_rejected():
-    assert Router(SectionIndex("", "md")).route("改字体").intent is Intent.UNCLEAR
 
 
 # ---- docx_format + FormatGate ----

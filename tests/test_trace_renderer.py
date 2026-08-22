@@ -137,15 +137,8 @@ def test_run_cancelled_shows_notice():
 
 # --- 非 LLM 步骤状态 ---
 
-def test_route_and_retrieval_status_lines():
-    out = _render(
-        [
-            _ev(EventKind.ROUTE_DECISION, intent="polish", section_id="introduction"),
-            _ev(EventKind.RETRIEVAL_END, count=5),
-        ]
-    )
-    assert "polish" in out
-    assert "introduction" in out
+def test_retrieval_status_line():
+    out = _render([_ev(EventKind.RETRIEVAL_END, count=5)])
     assert "5" in out
 
 

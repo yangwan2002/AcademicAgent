@@ -27,7 +27,7 @@ for p in (str(_ROOT / "src"), str(_ROOT / "tests" / "eval" / "intent_planning"))
 
 import scorer
 
-from paper_agent.intents.router import Intent
+from paper_agent.intents.intent import Intent
 from paper_agent.tasking.contracts import (
     AnalyzeResult, AtomicRequirement, CallStatus, ExtractionResult,
     FieldStatus, RawOperation, SlotSource, SlotValue,

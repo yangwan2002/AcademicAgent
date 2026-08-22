@@ -1,8 +1,8 @@
-"""chat.py 接线验收：ConsolePlanningInteractor + 三态分派。
+"""chat.py 接线验收：ConsolePlanningInteractor + 唯一 Planning 管线。
 
 - 交互器：确认/否决/修改、未映射三种处置、baseline 保留/回滚、澄清读行
-- 分派：off 不接管；shadow 旁路后仍走旧链路（返回 False）；active 接管（返回 True）
-- 理解层异常不拖垮 REPL（退回旧流程）
+- 所有自然语言由 Planning 接管
+- 理解层异常不拖垮 REPL，也不再降级旧流程
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ if _SRC not in sys.path:
     sys.path.insert(0, _SRC)
 
 from paper_agent.application.console_interactor import ConsolePlanningInteractor
-from paper_agent.application.turn_service import PlanningShadowResult, TurnResult
+from paper_agent.application.turn_service import TurnResult
 from paper_agent.runtime.plan_executor import KEEP, ROLLBACK
 from paper_agent.tasking.contracts import (
     OperationResult,
@@ -113,8 +113,7 @@ def _chat_module():
 
 
 class _FakeTS:
-    def __init__(self, mode, result=None, exc=None):
-        self.mode = mode
+    def __init__(self, result=None, exc=None):
         self._result = result
         self._exc = exc
         self.calls = 0
@@ -128,24 +127,11 @@ class _FakeTS:
 
 def test_chat_module_imports():
     mod = _chat_module()
-    assert hasattr(mod, "_handle_planned_turn")
+    assert hasattr(mod, "_run_planning_turn")
     assert hasattr(mod, "main")
 
 
-def test_shadow_does_not_take_over(capsys):
-    mod = _chat_module()
-    shadow = PlanningShadowResult(
-        turn_id="t", ok=True, operation_intents=("polish", "convert_format"),
-        validation_result="ready", matches_legacy=False, added_latency_ms=12.0,
-    )
-    ts = _FakeTS("shadow", TurnResult(mode="shadow", turn_id="t", shadow=shadow))
-    handled = mod._handle_planned_turn(ts, "先润色再转docx", session=None, facts=None,
-                                       legacy_intent="convert_format")
-    assert handled is False            # 旧链路仍要跑
-    assert "[shadow]" in capsys.readouterr().out
-
-
-def test_active_takes_over_and_prints_report(capsys):
+def test_planning_returns_report():
     mod = _chat_module()
     report = PlanExecutionReport(
         plan_status=PlanStatus.DONE,
@@ -156,45 +142,38 @@ def test_active_takes_over_and_prints_report(capsys):
                             generated_outputs=("output/paper.docx",)),
         ),
     )
-    ts = _FakeTS("active", TurnResult(mode="active", turn_id="t", report=report))
-    handled = mod._handle_planned_turn(ts, "先润色再转docx", session=None, facts=None,
-                                       legacy_intent="polish")
-    assert handled is True             # 接管，不再走旧链路
-    out = capsys.readouterr().out
-    assert "done" in out
-    assert "output/paper.docx" in out
+    ts = _FakeTS(TurnResult(turn_id="t", report=report))
+    out = mod._run_planning_turn(ts, "先润色再转docx", session=None, facts=None)
+    assert out.report is report
 
 
-def test_active_planning_exit_printed(capsys):
+def test_planning_exit_is_returned():
     mod = _chat_module()
-    ts = _FakeTS("active", TurnResult(
-        mode="active", turn_id="t",
+    ts = _FakeTS(TurnResult(
+        turn_id="t",
         planning_exit=PlanningExit(status=PlanStatus.REJECTED, message="用户否决"),
     ))
-    handled = mod._handle_planned_turn(ts, "润色", session=None, facts=None,
-                                       legacy_intent="polish")
-    assert handled is True
-    out = capsys.readouterr().out
-    assert "rejected" in out and "用户否决" in out
+    out = mod._run_planning_turn(ts, "润色", session=None, facts=None)
+    assert out.planning_exit.status is PlanStatus.REJECTED
 
 
-def test_planning_exception_falls_back_to_legacy(capsys):
+def test_planning_exception_stops_without_legacy_fallback(capsys):
     mod = _chat_module()
-    ts = _FakeTS("active", exc=RuntimeError("boom"))
-    handled = mod._handle_planned_turn(ts, "润色", session=None, facts=None,
-                                       legacy_intent="polish")
-    assert handled is False            # 退回旧流程，不炸退 REPL
-    assert "改用原有流程" in capsys.readouterr().out
+    ts = _FakeTS(exc=RuntimeError("boom"))
+    out = mod._run_planning_turn(ts, "润色", session=None, facts=None)
+    assert out is None
+    text = capsys.readouterr().out
+    assert "本轮未执行" in text
+    assert "旧" not in text
 
 
-def test_cancel_is_handled_as_taken_over(capsys):
+def test_cancel_is_handled_without_fallback(capsys):
     from paper_agent.errors import OperationCancelled
 
     mod = _chat_module()
-    ts = _FakeTS("active", exc=OperationCancelled())
-    handled = mod._handle_planned_turn(ts, "润色", session=None, facts=None,
-                                       legacy_intent="polish")
-    assert handled is True             # 取消是明确终态，不重跑旧链路
+    ts = _FakeTS(exc=OperationCancelled())
+    out = mod._run_planning_turn(ts, "润色", session=None, facts=None)
+    assert out is None
     assert "已取消" in capsys.readouterr().out
 
 

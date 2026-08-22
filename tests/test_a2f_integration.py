@@ -130,7 +130,7 @@ from paper_agent.application.literature_ports import (
     FinalGateDecision,
 )
 from paper_agent.runtime.handlers import HandlerContext, handler_for
-from paper_agent.intents.router import Intent
+from paper_agent.intents.intent import Intent
 from paper_agent.tasking.contracts import (
     FieldStatus,
     Operation,

@@ -17,7 +17,7 @@ _SRC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
 if _SRC not in sys.path:
     sys.path.insert(0, _SRC)
 
-from paper_agent.intents.router import Intent
+from paper_agent.intents.intent import Intent
 from paper_agent.providers.llm.mock import MockLLMProvider
 from paper_agent.tasking.clarifier import (
     ConfirmDecision,
@@ -27,6 +27,8 @@ from paper_agent.tasking.clarifier import (
     resolve_unmapped,
 )
 from paper_agent.tasking.contracts import (
+    AnalyzeResult,
+    AtomicRequirement,
     CallStatus,
     ConfirmedPlan,
     ExtractionResult,
@@ -186,6 +188,15 @@ def _extract_json(slots):
                       ensure_ascii=False)
 
 
+def _extract_json_with_consumed(slots, consumed):
+    return json.dumps({
+        "slots": {
+            k: {"value": v, "status": "present"} for k, v in slots.items()
+        },
+        "slot_consumed_requirements": consumed,
+    }, ensure_ascii=False)
+
+
 def test_loop_happy_path_returns_confirmed_plan():
     llm = MockLLMProvider(scripted=[
         _analyze_json([("polish", "润色引言")]),
@@ -215,6 +226,217 @@ def test_loop_modify_rebuilds_without_losing_original():
     assert isinstance(out, ConfirmedPlan)
     assert [op.intent for op in out.plan.operations] == [Intent.POLISH, Intent.CONVERT_FORMAT]
     assert out.plan.plan_version == 2      # 修订重建版本+1
+
+
+def test_loop_user_modify_reanalysis_gets_original_and_previous_plan():
+    """真实 revision_drop："只做前一步"不能被当成一条独立新请求。"""
+    original = "先润色引言，再把整篇转换成 docx"
+    amendment = "只做前一步，后面不要了"
+    seen: list[str] = []
+
+    def context_sensitive_analyze(text, _llm):
+        seen.append(text)
+        if len(seen) == 1:
+            return AnalyzeResult(
+                call_status=CallStatus.SUCCESS,
+                operations=(
+                    RawOperation(Intent.POLISH, "润色引言"),
+                    RawOperation(Intent.CONVERT_FORMAT, "转换成 docx"),
+                ),
+            )
+        if (
+            original in text
+            and amendment in text
+            and "上一版计划摘要" in text
+            and "convert_format" in text
+        ):
+            return AnalyzeResult(
+                call_status=CallStatus.SUCCESS,
+                operations=(RawOperation(Intent.POLISH, "润色引言"),),
+            )
+        return AnalyzeResult(call_status=CallStatus.SUCCESS)
+
+    llm = MockLLMProvider(scripted=[
+        _extract_json({"section_id": "introduction"}),
+        _extract_json({"target_ext": "docx"}),
+        _extract_json({"section_id": "introduction"}),
+    ])
+    it = FakeInteractor(confirm=[
+        ConfirmDecision("modify", amendment),
+        ConfirmDecision("accept"),
+    ])
+    out = run_planning_loop(
+        original,
+        llm=llm,
+        interactor=it,
+        current_sections=["introduction"],
+        current_format="tex",
+        analyze_fn=context_sensitive_analyze,
+    )
+
+    assert isinstance(out, ConfirmedPlan), getattr(out, "message", out)
+    assert [op.intent for op in out.plan.operations] == [Intent.POLISH]
+    assert out.plan.plan_version == 2
+    assert len(seen) == 2
+
+
+def test_user_modify_filters_composite_labels_but_keeps_real_delta():
+    """USER_MODIFY 也做 provenance 过滤，不能把摘要标签弹给用户处置。"""
+    original = "润色引言"
+    amendment = "不要改数字，保留引用"
+    real_req = AtomicRequirement("r_real", "不要改数字", category="constraint")
+    label_req = AtomicRequirement(
+        "r_label", "计划包含 1 个操作（按执行序）", category="constraint"
+    )
+    analyze_calls = 0
+
+    def analyze(text, _llm):
+        nonlocal analyze_calls
+        analyze_calls += 1
+        if analyze_calls == 1:
+            return AnalyzeResult(
+                call_status=CallStatus.SUCCESS,
+                operations=(RawOperation(Intent.POLISH, "润色引言"),),
+            )
+        assert amendment in text
+        assert "计划包含 1 个操作（按执行序）" in text
+        assert "目标=introduction" in text
+        return AnalyzeResult(
+            call_status=CallStatus.SUCCESS,
+            operations=(RawOperation(
+                Intent.POLISH,
+                "润色引言，不要改数字",
+                ("r_real", "r_label"),
+            ),),
+            requirements=(real_req, label_req),
+            unmapped_text=(
+                "保留引用",
+                "目标=introduction",
+                "未被本次修订明确删除或替换的操作与约束应继续保留。",
+            ),
+            project_facts=(
+                ("research_gap", "目标=introduction", ("r_label",)),
+            ),
+        )
+
+    class RecordingInteractor(FakeInteractor):
+        def __init__(self):
+            super().__init__(confirm=[
+                ConfirmDecision("modify", amendment),
+                ConfirmDecision("accept"),
+            ])
+            self.unmapped_items = []
+
+        def resolve_unmapped(self, item):
+            self.unmapped_items.append(item)
+            return UnmappedDisposition("ignore")
+
+    class RecordingFacts:
+        def __init__(self):
+            self.claims = {}
+
+        def set_claim(self, key, value):
+            self.claims[key] = value
+
+        def save(self):
+            pass
+
+    it = RecordingInteractor()
+    facts = RecordingFacts()
+    llm = MockLLMProvider(scripted=[
+        _extract_json({"section_id": "introduction"}),
+        _extract_json_with_consumed(
+            {
+                "section_id": "introduction",
+                "constraints": ["不要改数字"],
+            },
+            {"constraints": ["r_real"]},
+        ),
+    ])
+    out = run_planning_loop(
+        original,
+        llm=llm,
+        interactor=it,
+        current_sections=["introduction"],
+        current_format="tex",
+        analyze_fn=analyze,
+        facts=facts,
+    )
+
+    assert isinstance(out, ConfirmedPlan), getattr(out, "message", out)
+    assert [d.requirement_id for d in out.plan.dispositions] == ["r_real"]
+    assert out.plan.operations[0].slots["constraints"].value == ["不要改数字"]
+    assert it.unmapped_items == ["保留引用"]
+    assert facts.claims == {}
+
+
+def test_loop_unmapped_supplement_reanalysis_keeps_original_operation():
+    """补充说明要解释旧计划，不能让已识别的 polish 凭空消失。"""
+    original = "润色引言，顺便处理一下票务"
+    supplement = "票务不用处理，只保留原来的润色"
+    seen: list[str] = []
+
+    def context_sensitive_analyze(text, _llm):
+        seen.append(text)
+        if len(seen) == 1:
+            return AnalyzeResult(
+                call_status=CallStatus.SUCCESS,
+                operations=(RawOperation(Intent.POLISH, "润色引言"),),
+                unmapped_text=("处理一下票务",),
+            )
+        if (
+            original in text
+            and supplement in text
+            and "上一版计划摘要" in text
+            and "polish" in text
+        ):
+            return AnalyzeResult(
+                call_status=CallStatus.SUCCESS,
+                operations=(RawOperation(Intent.POLISH, "润色引言"),),
+            )
+        return AnalyzeResult(call_status=CallStatus.SUCCESS)
+
+    llm = MockLLMProvider(scripted=[
+        _extract_json({"section_id": "introduction"}),
+        _extract_json({"section_id": "introduction"}),
+    ])
+    it = FakeInteractor(
+        unmapped=[UnmappedDisposition("supplement", supplement)],
+        confirm=[ConfirmDecision("accept")],
+    )
+    out = run_planning_loop(
+        original,
+        llm=llm,
+        interactor=it,
+        current_sections=["introduction"],
+        current_format="tex",
+        analyze_fn=context_sensitive_analyze,
+    )
+
+    assert isinstance(out, ConfirmedPlan), getattr(out, "message", out)
+    assert [op.intent for op in out.plan.operations] == [Intent.POLISH]
+    assert out.plan.plan_version == 2
+    assert len(seen) == 2
+
+
+def test_empty_user_revision_does_not_route_original_write_request_to_readonly():
+    llm = MockLLMProvider(scripted=[
+        _analyze_json([("polish", "润色引言")]),
+        _extract_json({"section_id": "introduction"}),
+        _analyze_json([]),
+    ])
+    it = FakeInteractor(confirm=[ConfirmDecision("modify", "取消现有计划")])
+    out = run_planning_loop(
+        "润色引言",
+        llm=llm,
+        interactor=it,
+        current_sections=["introduction"],
+        current_format="tex",
+    )
+
+    assert isinstance(out, PlanningExit)
+    assert out.status is PlanStatus.NO_ACTION
+    assert out.route_to_readonly is False
 
 
 def test_loop_reject_returns_exit_no_write():
@@ -397,6 +619,7 @@ def test_loop_returns_no_action_when_nothing_executable():
                             current_sections=["introduction"], current_format="tex")
     assert isinstance(out, PlanningExit)
     assert out.status is PlanStatus.NO_ACTION
+    assert out.route_to_readonly is True
     assert "重复率" in out.message          # 说清为什么做不了
     assert it.confirm_calls == 0            # 不该请求确认
 
@@ -408,6 +631,8 @@ def test_no_action_message_without_unmapped():
     out = run_planning_loop("???", llm=llm, interactor=FakeInteractor(),
                             current_sections=[], current_format="tex")
     assert out.status is PlanStatus.NO_ACTION
+    # 没有任何语义证据的空包不等于明确的只读/不支持请求。
+    assert out.route_to_readonly is False
     assert "未做任何改动" in out.message
 
 
@@ -440,3 +665,106 @@ def test_replan_context_carries_original_request():
     assert "先润色引言，再加 Discussion" in prompt
     assert "章节「Discussion」已不存在" in prompt
     assert out.plan.plan_version == 2         # 基于旧计划的新版本
+
+
+def test_execution_replan_keeps_value_supplied_during_clarification():
+    """澄清答案只在旧计划里；重规划过滤系统提示时仍必须保留它。"""
+    from paper_agent.tasking.contracts import ExecutionReplanContext
+
+    clarified_section = SlotValue(
+        value="introduction",
+        field_status=FieldStatus.PRESENT,
+        source=SlotSource.USER_CONFIRMED,
+    )
+    plan0 = build_plan(
+        "t",
+        [RawOperation(Intent.POLISH, "帮我润色一下")],
+        [_ext({"section_id": clarified_section})],
+        canonical_requirements=(),
+        source_text="帮我润色一下",
+    )
+    replan = ExecutionReplanContext(
+        original_request="帮我润色一下",
+        previous_plan=plan0,
+        remaining_operations=plan0.operations,
+        completed_operation_ids=(),
+        replan_reason="章节索引已变化",
+    )
+    clarified_req = AtomicRequirement(
+        "r_clarified", "introduction", category="target"
+    )
+    system_req = AtomicRequirement(
+        "r_system", "章节索引已变化", category="constraint"
+    )
+
+    def analyze(text, _llm):
+        assert "目标=introduction" in text
+        return AnalyzeResult(
+            call_status=CallStatus.SUCCESS,
+            operations=(RawOperation(
+                Intent.POLISH,
+                "润色 introduction",
+                ("r_clarified", "r_system"),
+            ),),
+            requirements=(clarified_req, system_req),
+            unmapped_text=("目标=introduction", "章节索引已变化"),
+            project_facts=(
+                ("research_gap", "章节索引已变化", ("r_system",)),
+            ),
+        )
+
+    class NoUnmappedInteractor(FakeInteractor):
+        def resolve_unmapped(self, item):
+            raise AssertionError(f"system scaffold leaked into unmapped: {item}")
+
+    llm = MockLLMProvider(scripted=[
+        _extract_json_with_consumed(
+            {"section_id": "introduction"},
+            {"section_id": ["r_clarified"]},
+        ),
+    ])
+    out = run_planning_loop(
+        "帮我润色一下",
+        llm=llm,
+        interactor=NoUnmappedInteractor(confirm=[ConfirmDecision("accept")]),
+        current_sections=["introduction"],
+        current_format="tex",
+        replan=replan,
+        analyze_fn=analyze,
+    )
+
+    assert isinstance(out, ConfirmedPlan), getattr(out, "message", out)
+    assert [d.requirement_id for d in out.plan.dispositions] == ["r_clarified"]
+    retained = out.plan.dispositions[0]
+    assert retained.slot_names == ("section_id",)
+
+
+def test_empty_execution_replan_does_not_route_to_readonly():
+    from paper_agent.tasking.contracts import ExecutionReplanContext
+
+    plan0 = build_plan(
+        "t",
+        [RawOperation(Intent.POLISH, "润色引言")],
+        [_ext({"section_id": _present("introduction")})],
+        canonical_requirements=(),
+    )
+    replan = ExecutionReplanContext(
+        original_request="润色引言",
+        previous_plan=plan0,
+        remaining_operations=plan0.operations,
+        completed_operation_ids=(),
+        replan_reason="章节索引已变化",
+    )
+    llm = MockLLMProvider(scripted=[_analyze_json([])])
+    out = run_planning_loop(
+        "润色引言",
+        llm=llm,
+        interactor=FakeInteractor(),
+        current_sections=["introduction"],
+        current_format="tex",
+        replan=replan,
+    )
+
+    assert isinstance(out, PlanningExit)
+    assert out.status is PlanStatus.NO_ACTION
+    assert out.route_to_readonly is False

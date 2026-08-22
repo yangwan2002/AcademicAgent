@@ -81,10 +81,6 @@ class ConsoleRenderer:
             self._on_gate_retry(event)
         elif kind is EventKind.RUN_CANCELLED:
             self._line("⚠ 本次运行已取消")
-        elif kind is EventKind.ROUTE_DECISION:
-            self._on_route(event)
-        elif kind is EventKind.INTERVIEW_QA:
-            self._line("· 访谈：已记录你的回答")
         elif kind is EventKind.RETRIEVAL_START:
             self._line("· 检索中…")
         elif kind is EventKind.RETRIEVAL_END:
@@ -136,12 +132,6 @@ class ConsoleRenderer:
     def _on_gate_retry(self, event: Event) -> None:
         attempt = self._get(event, "attempt", event.attempt)
         self._line(f"↻ 校验未过，重新生成（第 {attempt} 次尝试）")
-
-    def _on_route(self, event: Event) -> None:
-        intent = self._get(event, "intent", "?")
-        section = self._get(event, "section_id", None)
-        suffix = f"（章节：{section}）" if section else ""
-        self._line(f"· 路由：{intent}{suffix}")
 
     # --- 输出原语 ---
 

@@ -11,8 +11,9 @@ revision_limit_exceeded / cancelled / needs_input）。执行本身不在此—�
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from dataclasses import replace
+from collections.abc import Mapping, Sequence
+from dataclasses import asdict, is_dataclass, replace
+from enum import Enum
 
 from paper_agent.providers.llm.base import LLMProvider
 from paper_agent.tasking.budget import BudgetExceeded, PlanningBudget
@@ -21,6 +22,7 @@ from paper_agent.tasking.clarifier import (
     clarify,
     confirm_plan,
     resolve_unmapped,
+    summarize_plan,
 )
 from paper_agent.tasking.contracts import (
     AnalyzeResult,
@@ -31,6 +33,7 @@ from paper_agent.tasking.contracts import (
     PlanRevisionRequest,
     PlanStatus,
     RevisionReason,
+    SlotSource,
 )
 from paper_agent.tasking.extractors import build_extractor
 from paper_agent.tasking.operation_analyzer import ATTRIBUTION_FALLBACK_ALL
@@ -42,6 +45,7 @@ from paper_agent.tasking.plan_validator import (
     SECTION_NOT_FOUND,
     validate_plan,
 )
+from paper_agent.tasking.spans import locate_requirement
 
 try:  # 观测事件（可选，None-safe）
     from paper_agent.observability.events import EventKind
@@ -76,13 +80,117 @@ _REPAIRABLE_ISSUES = frozenset({
 #: 自修复次数上限。给了明确指令还改不对，再试也不会对，只是多花钱。
 _MAX_VALIDATION_REPAIRS = 1
 
-#: 修订文本由**系统**撰写的原因码 —— 这些文本不是用户原话，抽出的 requirement
-#: 不得进未认领账本（否则系统自己的指令会被当成用户要求弹窗追问）。
-#: `SUPPLEMENT` / `USER_MODIFY` 不在此列：那两者确实是用户输入。
-_SYSTEM_AUTHORED_REASONS = frozenset({
-    RevisionReason.VALIDATION_REPAIR,
-    RevisionReason.NEEDS_REPLAN,
+#: 修订文本确实来自用户的原因码。只有这两类 delta 可进入 provenance 允许集合；
+#: VALIDATION_REPAIR / NEEDS_REPLAN 的 revision_text 是系统提示，必须排除。
+_USER_AUTHORED_REVISION_REASONS = frozenset({
+    RevisionReason.SUPPLEMENT,
+    RevisionReason.USER_MODIFY,
 })
+
+
+def _revision_analysis_text(
+    original_request: str,
+    revision: PlanRevisionRequest,
+) -> str:
+    """Build the complete input used to re-analyze a plan revision.
+
+    A supplement such as ``"只做前一步"`` is not a standalone request. Feeding
+    only that sentence to OperationAnalyzer drops the already-understood
+    operations and can turn the revision into an empty plan. Every non-initial
+    pass therefore carries three pieces of context: the original request, the
+    previous plan summary, and the delta that caused this revision.
+
+    Keep ``PlanRevisionRequest.revision_text`` as the raw delta. Besides making
+    the contract truthful, this prevents nested revisions from repeatedly
+    wrapping an already-composed prompt.
+    """
+    if revision.revision_reason is RevisionReason.INITIAL:
+        return revision.revision_text
+
+    previous = revision.previous_plan
+    previous_summary = summarize_plan(previous) if previous is not None else "（无上一版计划）"
+    labels = {
+        RevisionReason.SUPPLEMENT: "用户补充说明",
+        RevisionReason.USER_MODIFY: "用户修改意见",
+        RevisionReason.VALIDATION_REPAIR: "静态校验修复信息",
+        RevisionReason.NEEDS_REPLAN: "执行期重规划信息",
+    }
+    label = labels.get(revision.revision_reason, "本次修订信息")
+    return "\n".join((
+        "这是同一条用户请求的计划修订，请输出修订后的完整操作列表。",
+        f"原始请求：{original_request}",
+        "上一版计划摘要：",
+        previous_summary,
+        f"{label}：",
+        revision.revision_text,
+        "未被本次修订明确删除或替换的操作与约束应继续保留。",
+    ))
+
+
+def _slot_value_evidence(value) -> tuple[str, ...]:
+    """Flatten a user-sourced slot value into label-free provenance fragments."""
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        text = value.strip()
+        return (text,) if text else ()
+    if isinstance(value, Enum):
+        return _slot_value_evidence(value.value)
+    if is_dataclass(value) and not isinstance(value, type):
+        return _slot_value_evidence(asdict(value))
+    if isinstance(value, Mapping):
+        return tuple(
+            fragment
+            for nested in value.values()
+            for fragment in _slot_value_evidence(nested)
+        )
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return tuple(
+            fragment
+            for nested in value
+            for fragment in _slot_value_evidence(nested)
+        )
+    text = str(value).strip()
+    return (text,) if text else ()
+
+
+def _revision_user_evidence(
+    original_request: str,
+    revision: PlanRevisionRequest,
+) -> tuple[str, ...]:
+    """Return only user-derived text allowed to survive revision analysis.
+
+    ``summarize_plan`` is intentionally not an evidence source: strings such as
+    ``计划包含`` and ``目标=`` are UI labels authored by the system.  Prior-plan
+    evidence instead comes from requirement verbatims and slots explicitly
+    supplied or confirmed by the user.  User revision text is admitted only for
+    SUPPLEMENT / USER_MODIFY; repair and replan deltas are system-authored.
+    """
+    fragments: list[str] = []
+
+    def add(value: str | None) -> None:
+        text = str(value or "").strip()
+        if text and text not in fragments:
+            fragments.append(text)
+
+    add(original_request)
+    previous = revision.previous_plan
+    if previous is not None:
+        for disposition in previous.dispositions:
+            add(disposition.verbatim)
+        for operation in previous.operations:
+            for slot in operation.slots.values():
+                if slot.source not in (
+                    SlotSource.USER_EXPLICIT,
+                    SlotSource.USER_CONFIRMED,
+                ):
+                    continue
+                add(slot.verbatim)
+                for value_fragment in _slot_value_evidence(slot.value):
+                    add(value_fragment)
+    if revision.revision_reason in _USER_AUTHORED_REVISION_REASONS:
+        add(revision.revision_text)
+    return tuple(fragments)
 
 
 def _section_menu(current_sections: Sequence[str], limit: int = 30) -> str:
@@ -141,26 +249,126 @@ def _publish(bus, kind_name: str, **payload) -> None:
         pass
 
 
+def _is_semantically_empty(ar: AnalyzeResult) -> bool:
+    """A successful envelope that contains no interpretation of the input."""
+    return (
+        ar.call_status is CallStatus.SUCCESS
+        and not ar.operations
+        and not ar.unmapped_text
+        and not ar.project_facts
+    )
+
+
+def _keep_user_authored_parts(
+    ar: AnalyzeResult,
+    allowed_user_evidence: Sequence[str],
+    original_request: str,
+) -> AnalyzeResult:
+    """Drop system-scaffold noise without dropping the user's own constraints.
+
+    Every composite revision prompt contains system-authored labels.  Analyzer is
+    required to return verbatim spans, so exact presence inside one provenance
+    fragment is the boundary.  Fragments come only from the original request,
+    prior user requirements/slots, and (for user revisions) the raw delta.
+
+    Re-locate retained requirements against the real user request as well.  Their
+    offsets were originally calculated against the composite replan prompt and
+    would otherwise point at the wrong source text in the rebuilt plan.
+    """
+    if ar.call_status is not CallStatus.SUCCESS:
+        return ar
+
+    def is_user_evidence(value: str) -> bool:
+        return bool(value) and any(value in source for source in allowed_user_evidence)
+
+    kept_requirements = tuple(
+        (
+            locate_requirement(original_request, requirement)
+            if requirement.verbatim in original_request
+            else replace(
+                requirement,
+                source_start=-1,
+                source_end=-1,
+                ambiguous_span=True,
+            )
+        )
+        for requirement in ar.requirements
+        if is_user_evidence(requirement.verbatim)
+    )
+    kept_requirement_ids = {
+        requirement.requirement_id for requirement in kept_requirements
+    }
+    kept_unmapped = tuple(
+        item for item in ar.unmapped_text
+        if is_user_evidence(item)
+    )
+    kept_project_facts = tuple(
+        (
+            key,
+            value,
+            tuple(rid for rid in requirement_ids if rid in kept_requirement_ids),
+        )
+        for key, value, requirement_ids in ar.project_facts
+        if is_user_evidence(value)
+    )
+    return replace(
+        ar,
+        requirements=kept_requirements,
+        unmapped_text=kept_unmapped,
+        project_facts=kept_project_facts,
+    )
+
+
 def _understand(
     text: str, llm: LLMProvider, analyze_fn, bus=None,
     budget: PlanningBudget | None = None,
+    revision_user_evidence: Sequence[str] | None = None,
+    revision_original_request: str | None = None,
 ) -> tuple[AnalyzeResult, list]:
     """analyze → 各操作 pre_extract；返回 (AnalyzeResult, extractions)。
 
     在调用边界发 `OPERATION_ANALYSIS` / `PRE_EXTRACT`（纯函数本身不依赖 bus）——
-    否则 active 的 trace 看不到理解阶段，解析失败时无从下手（#10）。
+    否则 Planning trace 看不到理解阶段，解析失败时无从下手（#10）。
     """
+    semantic_empty_retries = 0
     if budget is not None:
         with budget.measured("analyzer"):
             ar = analyze_fn(text, llm)
     else:
         ar = analyze_fn(text, llm)
+    if revision_user_evidence is not None:
+        ar = _keep_user_authored_parts(
+            ar,
+            revision_user_evidence,
+            revision_original_request or "",
+        )
+
+    # Production Planning always carries a budget.  A structurally valid but
+    # semantically empty answer gives us no positive evidence that the user had
+    # a read-only request; retry it once inside the same Turn budget.  Two such
+    # answers are an analyzer protocol failure, not an AskLoop routing signal.
+    if budget is not None and _is_semantically_empty(ar):
+        semantic_empty_retries = 1
+        with budget.measured("analyzer_semantic_empty_retry"):
+            ar = analyze_fn(text, llm)
+        if revision_user_evidence is not None:
+            ar = _keep_user_authored_parts(
+                ar,
+                revision_user_evidence,
+                revision_original_request or "",
+            )
+        if _is_semantically_empty(ar):
+            ar = AnalyzeResult(
+                call_status=CallStatus.SCHEMA_FAILED,
+                error_category="SemanticEmpty",
+            )
     _publish(bus, "OPERATION_ANALYSIS",
              call_status=ar.call_status.value,
              n_operations=len(ar.operations),
              n_requirements=len(ar.requirements),
              n_unmapped=len(ar.unmapped_text),
-             error_category=ar.error_category)
+             error_category=ar.error_category,
+             semantic_empty_retries=semantic_empty_retries)
     extractions = []
     if ar.call_status is CallStatus.SUCCESS:
         # 操作数上限：在开始抽槽（每个操作一次 LLM 调用）之前就拦住
@@ -259,6 +467,7 @@ def run_planning_loop(
         except BudgetExceeded as exc:
             return PlanningExit(status=PlanStatus.REJECTED, message=str(exc))
 
+    original_request = replan.original_request if replan is not None else text
     if replan is not None:
         # 重规划：原始请求 + 失效原因一并交给理解层，previous_plan 用于版本血缘
         revision = PlanRevisionRequest(
@@ -275,9 +484,21 @@ def run_planning_loop(
     repairs_used = 0
 
     for _ in range(max_plan_revisions):
+        analysis_text = _revision_analysis_text(original_request, revision)
+        revision_user_evidence = (
+            _revision_user_evidence(original_request, revision)
+            if revision.revision_reason is not RevisionReason.INITIAL
+            else None
+        )
         try:
             ar, extractions = _understand(
-                revision.revision_text, llm, analyze_fn, bus, budget
+                analysis_text,
+                llm,
+                analyze_fn,
+                bus,
+                budget,
+                revision_user_evidence=revision_user_evidence,
+                revision_original_request=original_request,
             )
         except BudgetExceeded as exc:
             # 受控终止：不写任何文件，如实告知原因（#9）
@@ -288,15 +509,6 @@ def run_planning_loop(
             # 理解失败：本循环聚焦编排，provider/解析失败 → 不写、要求澄清（D3）。
             return PlanningExit(status=PlanStatus.NEEDS_INPUT,
                                 message=f"理解失败（{ar.call_status.value}）")
-
-        # 系统生成的修订文本（校验修复提示 / 执行期重规划原因）**不是用户原话**。
-        # LLM 会把它当用户需求抽成 requirement，这些 requirement 没有槽位认领，
-        # 于是被逐条弹窗问「这条要求我没能安排进任何操作」。真机实录：用户看到
-        # 「上一版计划未通过静态校验…」「文档当前没有任何章节。请从上述章节中选择，或」
-        # 「。」三次追问 —— 全是系统自己的话回旋镖打到用户脸上。
-        # 与 X-11（项目级事实误弹窗）同一类缺陷，此处是另一个入口。
-        if revision.revision_reason in _SYSTEM_AUTHORED_REASONS:
-            ar = replace(ar, requirements=(), unmapped_text=())
 
         # X-11：项目级事实的 requirement 无槽位可落，需显式告知 PlanBuilder，
         # 否则会被记 UNMAPPED 并弹窗（真机上「课题是…」就是这样被丢的）。
@@ -323,9 +535,20 @@ def run_planning_loop(
         # P0：没有任何可执行操作 → 如实退出，绝不进入执行（否则会被报成 done）。
         # 典型场景：请求整体落在五意图之外（查重/翻译），或全部要求被忽略。
         if not plan.operations:
+            # 只允许「首轮 Analyzer 成功、确实为零写操作，且明确给出 unmapped
+            # 作为语义证据」交给 AskLoop。全空包不是只读意图的正面证据。
+            # 修订 / 自修复 / needs_replan 的空结果表示重建失败或用户删空了计划，
+            # 绝不等价于原始消息是只读问题，否则同一写作请求会在修订途中走错系统。
+            initial_zero_supported_operations = (
+                revision.revision_reason is RevisionReason.INITIAL
+                and revision.previous_plan is None
+                and not ar.operations
+                and bool(ar.unmapped_text)
+            )
             return PlanningExit(
                 status=PlanStatus.NO_ACTION,
                 message=_no_action_message(plan),
+                route_to_readonly=initial_zero_supported_operations,
             )
 
         # 静态校验（硬问题直接拒绝）

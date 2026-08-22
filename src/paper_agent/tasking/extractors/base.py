@@ -31,7 +31,7 @@ from dataclasses import fields as dc_fields
 from dataclasses import is_dataclass, replace
 from typing import Any
 
-from paper_agent.intents.router import Intent
+from paper_agent.intents.intent import Intent
 from paper_agent.providers.llm.base import LLMProvider, Message
 from paper_agent.providers.llm.structured import (
     CallStatus,

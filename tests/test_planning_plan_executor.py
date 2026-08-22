@@ -17,7 +17,7 @@ _SRC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
 if _SRC not in sys.path:
     sys.path.insert(0, _SRC)
 
-from paper_agent.intents.router import Intent
+from paper_agent.intents.intent import Intent
 from paper_agent.runtime import plan_executor as PE
 from paper_agent.runtime.handlers import HandlerContext
 from paper_agent.runtime.plan_executor import aggregate_plan_status, execute_plan

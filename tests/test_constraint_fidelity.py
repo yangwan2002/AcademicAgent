@@ -1,6 +1,6 @@
 """约束保真度：用户表达的修饰语必须到达抽取器（spec `constraint-fidelity`）。
 
-真机缺陷（2026-08-01，active 模式）：
+真机缺陷（2026-08-01，Planning 管线）：
 
     用户：我目前小论文只写了一个框架，我现在需要去写我的引言部分，
           你能帮我完善我的引言部分吗，要求参考文献10，英文8，中文2
@@ -36,7 +36,7 @@ if _SRC not in sys.path:
 
 import pytest
 
-from paper_agent.intents.router import Intent
+from paper_agent.intents.intent import Intent
 from paper_agent.providers.llm.mock import MockLLMProvider
 from paper_agent.tasking.contracts import (
     AtomicRequirement,

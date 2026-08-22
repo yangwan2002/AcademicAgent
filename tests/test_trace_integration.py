@@ -2,7 +2,7 @@
 
 对应 tasks.md Task 10：
 - stream off/on × trace off/on 四种模式
-- 端到端事件序列（WORKFLOW_START→span(run)→ROUTE→attempt(llm_call/gate)→
+- 端到端事件序列（WORKFLOW_START→span(run)→OPERATION_ANALYSIS→attempt(llm_call/gate)→
   WORKING_COPY_UPDATE→WORKSPACE_COMMIT→span(run)END→WORKFLOW_END）
 - trace.json 结构 + 隐私
 - 既有行为不变（不注入 bus / stream=False）
@@ -18,13 +18,12 @@ _SRC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
 if _SRC not in sys.path:
     sys.path.insert(0, _SRC)
 
-from paper_agent.coordinator import Coordinator
+from paper_agent.coordinator import Coordinator, RunOutcome
 from paper_agent.observability.events import Event, EventKind
-from paper_agent.intents.interview import interview_polish
+from paper_agent.intents.plans import PolishPlan
 from paper_agent.intents.polish import execute_polish
 from paper_agent.providers.llm.mock import MockLLMProvider
 from paper_agent.session.file_session import FileBackedSession
-from paper_agent.session.section_index import SectionIndex
 
 
 SAMPLE_TEX = r"""\documentclass{article}
@@ -61,14 +60,18 @@ def _make_session(tmp_path):
 
 
 def _polish_fn(session, llm):
-    idx = SectionIndex(session.read_working(), session.ext)
-    answers = iter([""])
-    plan = interview_polish("introduction", idx, ask=lambda _p: next(answers))
+    plan = PolishPlan(section_id="introduction")
 
     def fn(bus, ct):
-        bus.publish(EventKind.ROUTE_DECISION, intent="polish", section_id="introduction")
-        return execute_polish(session, plan, llm, bus=bus, cancel_token=ct,
-                              stream=(bus.as_sink_or_none() is not None and _STREAM[0]))
+        bus.publish(EventKind.OPERATION_ANALYSIS, call_status="success", operation_count=1)
+        result = execute_polish(
+            session, plan, llm, bus=bus, cancel_token=ct,
+            stream=(bus.as_sink_or_none() is not None and _STREAM[0]),
+        )
+        return RunOutcome(
+            value=result,
+            working_copy_status="updated" if result.ok else "unchanged",
+        )
     return fn
 
 
@@ -143,8 +146,8 @@ def test_end_to_end_event_sequence(tmp_path):
         return kinds.index(k)
 
     # 关键里程碑按序出现
-    assert order(EventKind.WORKFLOW_START) < order(EventKind.ROUTE_DECISION)
-    assert order(EventKind.ROUTE_DECISION) < order(EventKind.GENERATION_ATTEMPT_START)
+    assert order(EventKind.WORKFLOW_START) < order(EventKind.OPERATION_ANALYSIS)
+    assert order(EventKind.OPERATION_ANALYSIS) < order(EventKind.GENERATION_ATTEMPT_START)
     assert order(EventKind.LLM_CALL_START) < order(EventKind.LLM_CALL_END)
     assert order(EventKind.LLM_CALL_END) < order(EventKind.GATE_RESULT)
     assert order(EventKind.GATE_RESULT) < order(EventKind.WORKING_COPY_UPDATE)

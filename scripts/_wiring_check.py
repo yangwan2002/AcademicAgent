@@ -1,4 +1,4 @@
-"""Active 模式装配冒烟：复刻 chat.py 的接线，全 mock，零网络。
+"""Planning 管线装配冒烟：复刻 chat.py 的接线，全 mock，零网络。
 
 只验证「装得起来 + 该注入的都注入了」，不跑 LLM 业务逻辑。
 """
@@ -13,11 +13,10 @@ _SRC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
 if _SRC not in sys.path:
     sys.path.insert(0, _SRC)
 
-# 全开新栈，全 mock provider
+# 全 mock provider
 os.environ.update(
     PAPER_LLM="mock",
     PAPER_RETRIEVAL="mock",
-    PAPER_INTENT_PLANNING_MODE="active",
     PAPER_LIT_WRITING_INTEGRATION="true",
     PAPER_LIT_SEARCH_SYNTHESIS="true",
     PAPER_TRACE="true",
@@ -57,8 +56,6 @@ def main() -> int:
         )
 
     config = load_config()
-    check("config.intent_planning_mode==active", config.intent_planning_mode == "active",
-          config.intent_planning_mode)
     check("config.literature_writing_integration", config.literature_writing_integration is True)
     check("config.literature_search_synthesis", config.literature_search_synthesis is True)
 
@@ -134,17 +131,15 @@ def main() -> int:
 
     ts = TurnService(
         config=config, llm=llm, coordinator=coordinator,
-        shadow_coordinator=Coordinator(enable_trace=True, runs_dir=os.path.join(tmp, "runs")),
         handler_context=ctx, interactor=interactor,
     )
-    check("TurnService.mode==active", ts.mode == "active", ts.mode)
 
     # --- 真跑一个 Turn（mock LLM 会让 analyze 走 parse/schema 失败路径）---
-    out = ts.handle_turn("润色一下引言", session=session, facts=facts, legacy=lambda: None)
+    out = ts.handle_turn("润色一下引言", session=session, facts=facts)
     check("handle_turn 未抛异常", True)
     exit_status = getattr(getattr(out, "planning_exit", None), "status", None)
     report_status = getattr(getattr(out, "report", None), "plan_status", None)
-    print(f"\n[turn] mode={out.mode} planning_exit={exit_status} report={report_status}")
+    print(f"\n[turn] planning_exit={exit_status} report={report_status}")
     if out.run_report is not None:
         print(f"[turn] run_status={out.run_report.run_status} error={out.run_report.error}")
     check("mock LLM 下诚实出口（未伪装成功）",
@@ -152,15 +147,15 @@ def main() -> int:
           f"report={report_status}")
 
     # --- 意图覆盖面 ---
-    from paper_agent.intents.router import Intent
+    from paper_agent.intents.intent import Intent
     from paper_agent.runtime.handlers import _HANDLERS
     from paper_agent.tasking.operation_analyzer import _SUPPORTED
 
-    all_intents = {i for i in Intent if i is not Intent.UNCLEAR}
-    print(f"\n[intents] Router 全集: {sorted(i.value for i in all_intents)}")
+    all_intents = set(Intent)
+    print(f"\n[intents] 公开写操作: {sorted(i.value for i in all_intents)}")
     print(f"[intents] analyzer 支持: {sorted(i.value for i in _SUPPORTED)}")
     print(f"[intents] handler 注册: {sorted(i.value for i in _HANDLERS)}")
-    print(f"[intents] active 模式下不可达: {sorted(i.value for i in all_intents - _SUPPORTED)}")
+    print(f"[intents] Planning 下不可达: {sorted(i.value for i in all_intents - _SUPPORTED)}")
 
     print("\n=== PASS ===")
     for line in OK:

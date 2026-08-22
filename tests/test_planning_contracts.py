@@ -18,7 +18,7 @@ _SRC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
 if _SRC not in sys.path:
     sys.path.insert(0, _SRC)
 
-from paper_agent.intents.router import Intent
+from paper_agent.intents.intent import Intent
 from paper_agent.tasking.contracts import (
     AnalyzeResult,
     AtomicRequirement,
@@ -39,7 +39,6 @@ from paper_agent.tasking.contracts import (
     Plan_Execution_State,
     RawOperation,
     RevisionReason,
-    Rule_Analysis,
     SectionSummary,
     SessionBaseline,
     SlotSource,
@@ -188,9 +187,3 @@ def test_cross_module_models_present():
 
     assert ConfirmedPlan(plan=Task_Plan(plan_id="p", source_turn_id="t")).plan.plan_id == "p"
     assert PlanningExit(status=PlanStatus.REJECTED).status is PlanStatus.REJECTED
-
-
-def test_rule_analysis_defaults():
-    ra = Rule_Analysis(candidates=(Intent.POLISH,), unambiguous=True)
-    assert ra.candidates == (Intent.POLISH,)
-    assert ra.has_sequence_signal is False

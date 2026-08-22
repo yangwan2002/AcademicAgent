@@ -91,8 +91,6 @@ def test_new_kinds_present():
     for name in (
         "SPAN_START",
         "SPAN_END",
-        "ROUTE_DECISION",
-        "INTERVIEW_QA",
         "RETRIEVAL_START",
         "RETRIEVAL_END",
         "GENERATION_ATTEMPT_START",

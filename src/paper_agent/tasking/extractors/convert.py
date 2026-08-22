@@ -10,7 +10,7 @@ convert 是**终止操作**（其后不应再有编辑操作），但那是 Stat
 
 from __future__ import annotations
 
-from paper_agent.intents.router import Intent
+from paper_agent.intents.intent import Intent
 from paper_agent.tasking.extractors.base import PreExtractor
 from paper_agent.tasking.intent_spec import CONVERT_SPEC, IntentSpec
 

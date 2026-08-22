@@ -7,7 +7,6 @@
     PAPER_LLM=mock                      # 无 API key 时用 mock provider 走通流程
     PAPER_LLM=deepseek                  # 或任意预设厂商
     PAPER_LLM_MODEL=...
-    PAPER_INTENT_PLANNING_MODE=active   # off | shadow | active（默认 off，走关键词路由）
     PAPER_TRACE=true                    # 落 runs/<run_id>/trace.json
     PAPER_LANGFUSE=true                 # 额外上传 Langfuse（需 PAPER_TRACE 同开）
                                         # 另需 LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY
@@ -21,7 +20,7 @@
     :export     另存一份交叉引用版到**别的路径**（源文件不动），如投稿版
                 可选路径：:export D:\\out.docx；默认在源文件旁加 _crossref 后缀
     :undo       撤销上一次修改
-    :stats      本次会话的 Turn 归属统计（新栈 / shadow / 静默降级到旧栈）
+    :stats      本次会话的 Planning 结果统计
     :ask <问题>  只读问答：问文档的情况（有哪些章节、哪章还没写、某章写了什么）。
                 只读不改，不走写作意图；模型自己决定查什么，查完直接回答。
     :quit       退出（不自动保存源文件）
@@ -50,30 +49,13 @@ from paper_agent.session.facts import SessionFacts, project_facts_path
 from paper_agent.session.file_session import FileBackedSession
 from paper_agent.session.section_index import SECTIONABLE_EXTS, SectionIndex
 from paper_agent.tools.citation import CitationVerifier
-from paper_agent.intents.router import Router, Intent
-from paper_agent.intents.interview import (
-    interview_polish, interview_convert, interview_rewrite,
-    interview_add_section, InterviewError,
-)
-from paper_agent.intents.polish import execute_polish
-from paper_agent.intents.convert import execute_convert
-from paper_agent.intents.rewrite import execute_rewrite
-from paper_agent.intents.add_section import execute_add_section
-from paper_agent.intents.format_docx import execute_format
 from paper_agent.coordinator import Coordinator
 from paper_agent.errors import OperationCancelled
 from paper_agent.application.console_interactor import ConsolePlanningInteractor
 from paper_agent.application.turn_service import TurnService
 from paper_agent.runtime.handlers import HandlerContext
-from paper_agent.observability.events import EventKind
 from paper_agent.observability.renderer import ConsoleRenderer
 from paper_agent.observability.turn_metrics import TurnMetrics
-from paper_agent.providers.llm.base import CancellationToken
-
-_COMMON_SECTIONS = [
-    "Introduction", "Related Work", "Method", "Experiments",
-    "Discussion", "Conclusion",
-]
 #: 复用 section_index 的唯一真相源（此前这里硬编码了同一份集合 = 第二真相源）。
 #: 语义一致：能解析章节 ⇔ 能按 utf-8 当文本读。docx 两者皆不成立。
 _TEXT_EXT = SECTIONABLE_EXTS
@@ -123,8 +105,7 @@ def _run_ask_command(
     if coordinator is None:
         result = run_ask(question, ctx, llm, **kwargs)
     else:
-        # 不经 `_dispatch`：那层会发 ROUTE_DECISION 并把 KeyboardInterrupt 转成
-        # OperationCancelled，而问答的取消语义走 run_ask 自己的 CANCELLED 终态。
+        # 问答的取消语义走 run_ask 自己的 CANCELLED 终态。
         report = coordinator.run(
             lambda bus, ct: run_ask(question, ctx, llm, bus=bus, cancel_token=ct, **kwargs)
         )
@@ -135,6 +116,11 @@ def _run_ask_command(
             cat = report.error.get("category") if report.error else "未知"
             print(f"\n这次没能给出回答（{cat}）。")
             return
+    _print_ask_result(result)
+
+
+def _print_ask_result(result) -> None:
+    """统一呈现显式 ``:ask`` 与自然语言自动只读交接的结果。"""
     print("\n" + result.display())
     if result.tool_calls:
         print(
@@ -362,10 +348,6 @@ def _note_docx_scope(session) -> None:
     print("\n".join(lines))
 
 
-def _ask(prompt: str) -> str:
-    return input(prompt)
-
-
 def _confirm_number(value: str, ctx: str) -> bool:
     ans = input(
         f"\n出现新数字 {value}（{ctx}）。\n"
@@ -374,81 +356,31 @@ def _confirm_number(value: str, ctx: str) -> bool:
     return ans in ("y", "yes", "是")
 
 
-def _run_add_section(session, facts, llm, retrieval, verifier, title_hint, position_hint, *, bus=None):
-    """执行一次 add_section（供单章与批处理复用）。返回 result。"""
-    index = _build_index(session)
-    plan = interview_add_section(title_hint, position_hint, index, facts, ask=_ask)
-    return execute_add_section(
-        session, plan, facts, llm,
-        retrieval_provider=retrieval, verifier=verifier, confirm=_confirm_number,
-        bus=bus,
-    )
-
-
-def _handle_planned_turn(turn_service, msg, *, session, facts, legacy_intent,
-                        metrics=None) -> bool:
-    """走 intent-planning 理解层。返回 True 表示本轮已接管（跳过旧链路）。
-
-    - shadow：只读旁路（`legacy` 传 no-op，真正的旧链路仍由调用方在其后执行），
-      打印一行差异对比，返回 False。
-    - active：规划层接管并执行，打印计划结果，返回 True。
-
-    `metrics`（可选 `TurnMetrics`，backlog B-4）：记录本轮**实际由谁服务**。
-    返回 False 时旧链路会接手 —— 这条降级路径以前只印一行提示、不留痕，导致
-    E2E 数据无法区分「新栈处理了」与「新栈挂了、旧栈兜的」。
-    """
+def _run_planning_turn(turn_service, msg, *, session, facts, metrics=None):
+    """运行唯一的 Planning 管线；失败时不再降级到旧写作管线。"""
     try:
-        out = turn_service.handle_turn(
-            msg, session=session, facts=facts,
-            legacy=lambda: None, legacy_intent=legacy_intent,
-        )
+        out = turn_service.handle_turn(msg, session=session, facts=facts)
     except OperationCancelled:
         print("\n已取消。")
         if metrics is not None:
             metrics.record_cancelled()
-            metrics.record_served_by("cancelled")
-        return True
-    except Exception as exc:  # noqa: BLE001 - 理解层异常绝不拖垮 REPL
+        return None
+    except Exception as exc:  # noqa: BLE001 - 单个 Turn 异常不炸退 REPL
         category = type(exc).__name__
-        print(f"\n理解层出错（{category}），本轮改用原有流程。")
+        print(f"\nPlanning 出错（{category}），本轮未执行。")
         if metrics is not None:
-            # B-4：静默降级必须留痕 —— 否则这一轮会被误算成「新栈处理成功」
-            metrics.record_fallback(category)
-            metrics.record_served_by("legacy_fallback")
-        return False
+            metrics.record_planning_failed(category)
+        return None
 
-    if out.mode == "shadow":
-        s = out.shadow
-        if s is None:
-            if metrics is not None:
-                metrics.record_served_by("legacy_fallback")
-                metrics.record_fallback("shadow_result_missing")
-            return False
-        if s.ok:
-            same = "一致" if s.matches_legacy else "不同"
-            print(
-                f"[shadow] 理解为 {list(s.operation_intents)}（与原路由{same}）；"
-                f"校验={s.validation_result}；耗时 {s.added_latency_ms:.0f}ms"
-            )
-        else:
-            print(f"[shadow] 未完成（{s.analyze_status or s.error}），不影响本次执行")
-        if metrics is not None:
-            metrics.record_served_by("shadow")
-            metrics.record_shadow(ok=s.ok, matches_legacy=s.matches_legacy)
-        return False   # 旧链路照常继续
-
-    # active
     if metrics is not None:
-        metrics.record_served_by("active")
-        _absorb_active_metrics(out, metrics)
-    _print_plan_outcome(out)
-    return True
+        _absorb_planning_metrics(out, metrics)
+    return out
 
 
-def _absorb_active_metrics(out, metrics) -> None:
-    """把 active 结果的终态归入计数（结构化字段，不解析人类可读文本）。"""
+def _absorb_planning_metrics(out, metrics) -> None:
+    """把 Planning 结果的终态归入计数（结构化字段，不解析展示文本）。"""
     if getattr(out, "run_error_category", ""):
-        metrics.record_active_failed(out.run_error_category)
+        metrics.record_planning_failed(out.run_error_category)
     if out.planning_exit is not None:
         metrics.record_planning_exit(out.planning_exit.status.value)
     elif out.report is not None:
@@ -456,7 +388,7 @@ def _absorb_active_metrics(out, metrics) -> None:
 
 
 def _print_plan_outcome(out) -> None:
-    """打印 active 模式的结果（计划出口 或 执行报告）。"""
+    """打印 Planning 结果（计划出口或执行报告）。"""
     if out.planning_exit is not None:
         print(f"\n未执行：{out.planning_exit.status.value}"
               + (f"（{out.planning_exit.message}）" if out.planning_exit.message else ""))
@@ -483,30 +415,6 @@ def _print_plan_outcome(out) -> None:
         print("（如需回滚已完成的改动，可用 :undo 逐步撤销）")
     if any(r.changed_working_copy for r in report.operations):
         print("（:save 落盘到源文件，:undo 撤销）")
-
-
-def _dispatch(coordinator, intent_name, work, **route_data):
-    """在一次 run 内执行 work(bus, cancel_token)：发 ROUTE_DECISION、统一取消/失败收尾。
-
-    任何意图都经此包裹 → 每条消息都是一次有始有终、有 trace、异常不炸退 REPL 的 run。
-    返回 RunReport；业务结果在 report.value（取消/失败时为 None）。
-    """
-    def fn(bus, ct):
-        bus.publish(EventKind.ROUTE_DECISION, intent=intent_name, **route_data)
-        try:
-            return work(bus, ct)
-        except KeyboardInterrupt:  # Ctrl-C → 统一取消模型
-            # from None：用户主动中断不是"错误的根因"，链上挂个 KeyboardInterrupt
-            # 只会让 traceback 更吵。
-            raise OperationCancelled() from None
-
-    report = coordinator.run(fn, cancel_token=CancellationToken())
-    if report.run_status == "cancelled":
-        print("\n已取消，本次操作未改动文档。")
-    elif report.run_status == "failed":
-        cat = report.error.get("category") if report.error else "未知"
-        print(f"\n执行失败（{cat}）。")
-    return report
 
 
 def _force_utf8_output() -> None:
@@ -615,54 +523,36 @@ def main(argv: list[str]) -> int:
                     f"（约 {'—' if _bc <= 0 else _bc // 1500} 篇全摘要，"
                     f"PAPER_LIT_BUNDLE_BUDGET_CHARS 可调）")
         except CompositionUnavailable as exc:
-            print(f"引用配额写作未能启用：{exc} 将按旧路径处理带配额请求。")
+            print(f"引用配额写作未能启用：{exc} 带配额请求将由 Planning 明确拒绝或澄清。")
 
-    # intent-planning 理解层装配（PAPER_INTENT_PLANNING_MODE=off|shadow|active）
-    turn_service = None
-    if config.intent_planning_mode != "off":
-        handler_ctx = HandlerContext(
-            session=session, llm=llm, facts=facts,
-            retrieval_provider=retrieval, verifier=verifier,
-            confirm_number=_confirm_number,
-            max_retry=config.polish_max_retry,
-            max_char_change_ratio=config.polish_max_char_change_ratio,
-            stream=config.stream_enabled,
-            writing_integration_enabled=config.literature_writing_integration,
-            literature_orchestrator=lit_orchestrator,
-            literature_port=lit_port,
-            classifier=lit_classifier,
-            language_policy=config.literature_lang_policy,
-            search_synthesis_enabled=config.literature_search_synthesis,
-            search_synthesizer=lit_synthesizer,
-            max_search_intent_revisions=config.literature_max_search_intent_revisions,
-            retrieval_limits=(lit_orchestrator._limits if lit_orchestrator is not None else None),
-        )
-        turn_service = TurnService(
-            config=config, llm=llm,
-            coordinator=coordinator,
-            # 影子 run 刻意不接 Langfuse：它是对照用的第二次执行，上传会让
-            # UI 里每个操作出现两条 trace，聚合统计直接翻倍失真。
-            shadow_coordinator=Coordinator(
-                enable_trace=config.trace_enabled, runs_dir=config.runs_dir
-            ),
-            handler_context=handler_ctx,
-            interactor=ConsolePlanningInteractor(),
-        )
-        print(f"理解层模式：{config.intent_planning_mode}"
-              + ("（接管自然语言请求，支持多操作规划）"
-                 if config.intent_planning_mode == "active"
-                 else "（只旁路记录，执行仍走原流程）"))
+    # Planning 是自然语言的唯一入口；无受支持写作操作时固定交给 AskLoop。
+    handler_ctx = HandlerContext(
+        session=session, llm=llm, facts=facts,
+        retrieval_provider=retrieval, verifier=verifier,
+        confirm_number=_confirm_number,
+        max_retry=config.polish_max_retry,
+        max_char_change_ratio=config.polish_max_char_change_ratio,
+        stream=config.stream_enabled,
+        writing_integration_enabled=config.literature_writing_integration,
+        literature_orchestrator=lit_orchestrator,
+        literature_port=lit_port,
+        classifier=lit_classifier,
+        language_policy=config.literature_lang_policy,
+        search_synthesis_enabled=config.literature_search_synthesis,
+        search_synthesizer=lit_synthesizer,
+        max_search_intent_revisions=config.literature_max_search_intent_revisions,
+        retrieval_limits=(lit_orchestrator._limits if lit_orchestrator is not None else None),
+    )
+    turn_service = TurnService(
+        config=config, llm=llm, coordinator=coordinator,
+        handler_context=handler_ctx,
+        interactor=ConsolePlanningInteractor(),
+    )
+    print("自然语言管线：Planning（未命中写作操作时转只读 AskLoop）")
 
-    # 只读问答装配（PAPER_AGENT_LOOP_MODE=off|on）。`:ask` 命令不受这个开关影响，
-    # 始终可用；开关只控制**自然语言提问是否自动**走只读回答而不落到写路径上。
-    _fallback_enabled = config.agent_loop_mode == "on"
-    if _fallback_enabled:
-        print("只读问答：on（提问自动只读回答，不进写路径）")
-
-    # B-4：Turn 归属计数。每轮落盘一次，使崩溃/强杀后仍能看到已发生的归属，
-    # 且能回答「这次 E2E 的结论是否可直接采信」（attribution_is_clean）。
+    # 每轮落盘一次，使崩溃/强杀后仍能看到已发生的 Planning 终态。
     metrics_path = os.path.join(config.runs_dir, "turn_metrics.json")
-    # 读回既有累积值：计数要跨会话累积才能回答「新栈这周降级了几次」。
+    # 读回既有累积值：计数跨会话累积。
     # 文件不存在/损坏 → 全零，不阻塞启动。
     metrics = TurnMetrics.load(metrics_path)
 
@@ -760,200 +650,29 @@ def main(argv: list[str]) -> int:
                 print("没有可撤销的修改。")
             continue
 
-        # 自然语言意图
+        # 所有自然语言先经 OperationAnalyzer；零个受支持写作操作时转 AskLoop。
         metrics.record_turn()
-        index = _build_index(session)
-        route = Router(index, fallback_enabled=_fallback_enabled).route(msg)
-
-        # 只读提问优先于 intent-planning 接管：planning 那条链路是为**写**设计的
-        # （规划 → 确认 → 执行），把提问送进去会重新落回写路径，等于绕过了兜底判定。
-        # 两个 flag 都开时以兜底为先 —— 只读是更保守的一侧。
-        if route.intent is Intent.FALLBACK:
-            metrics.record_served_by("fallback")
+        out = _run_planning_turn(
+            turn_service, msg, session=session, facts=facts, metrics=metrics,
+        )
+        metrics.save(metrics_path)
+        if out is None:
+            continue
+        if (
+            out.planning_exit is not None
+            and out.planning_exit.route_to_readonly
+            and out.readonly_result is not None
+        ):
+            metrics.record_readonly_fallback()
             metrics.save(metrics_path)
-            # 判定结果常驻可见：误判时用户当场就能改口（改用祈使句），
-            # 不必等一轮访谈弹出来才发现走错了路。
-            print("（判定为提问，只读回答；要改文档请用祈使句，如「帮我润色引言」）")
-            _run_ask_command(msg, session, llm, config, facts, coordinator)
+            print("（未识别到受支持的写作操作，转为只读回答）")
+            # AskLoop 已由 TurnService 在同一个 Coordinator run 内完成；这里只呈现，
+            # 不能再调用 `_run_ask_command`，否则一条消息会生成第二份 trace。
+            _print_ask_result(out.readonly_result)
             continue
+        _print_plan_outcome(out)
 
-        # intent-planning 理解层（默认 off，行为与既有逐字节一致）：
-        # - active：接管整条自然语言链路（多操作规划 → 澄清 → 未映射处置 → 确认 → 有序执行）
-        # - shadow：只旁路分析并记录差异，随后仍走下面的旧链路（旧行为不变）
-        if turn_service is not None and turn_service.mode != "off":
-            taken_over = _handle_planned_turn(
-                turn_service, msg, session=session, facts=facts,
-                legacy_intent=route.intent.value, metrics=metrics,
-            )
-            metrics.save(metrics_path)
-            if taken_over:
-                continue
-        else:
-            metrics.record_served_by("off")
-            metrics.save(metrics_path)
-
-        if route.intent is Intent.UNCLEAR:
-            print(route.note)
-            continue
-
-        if route.intent is Intent.FORMAT_DOCX:
-            report = _dispatch(
-                coordinator, "format_docx",
-                lambda bus, ct: execute_format(session, msg),
-            )
-            fresult = report.value
-            if fresult is not None:
-                print("\n" + fresult.message)
-                if fresult.ok and fresult.applied:
-                    print("操作清单：" + "；".join(fresult.applied))
-                    print("（:save 落盘到源文件，:undo 撤销）")
-            continue
-
-        if route.intent is Intent.ADD_SECTION:
-            # 访谈在 run 外（InterviewError 是用户流程控制，不应被当作 run 失败）
-            try:
-                as_index = _build_index(session)
-                as_plan = interview_add_section(route.title, None, as_index, facts, ask=_ask)
-            except InterviewError as exc:
-                print(f"访谈中止：{exc}")
-                continue
-            report = _dispatch(
-                coordinator, "add_section",
-                lambda bus, ct: execute_add_section(
-                    session, as_plan, facts, llm,
-                    retrieval_provider=retrieval, verifier=verifier,
-                    confirm=_confirm_number, bus=bus,
-                ),
-                title=route.title or "",
-            )
-            ares = report.value
-            if ares is not None:
-                if ares.search_note:
-                    print("\n" + ares.search_note)
-                print("\n" + ares.message)
-                if ares.ok:
-                    print("\n--- 预览 ---\n" + ares.preview)
-                    print("\n（:save 落盘到源文件，:undo 撤销）")
-            continue
-
-        if route.intent is Intent.ADD_SECTION_BATCH:
-            index = _build_index(session)
-            present = {s.title.lower() for s in index.list()}
-            missing = [s for s in _COMMON_SECTIONS if s.lower() not in present]
-            print("\n常见学术章节（仅供参考，不是必须）：")
-            for s in _COMMON_SECTIONS:
-                mark = "✓已有" if s.lower() in present else "—缺"
-                print(f"  [{mark}] {s}")
-            if not missing:
-                print("常见章节都已具备。也可补自定义章节。")
-            pick = input(
-                "想补哪些？（逗号分隔标题 / 回车跳过）\n> "
-            ).strip()
-            titles = [t.strip() for t in pick.split(",") if t.strip()]
-            for t in titles:
-                try:
-                    ares = _run_add_section(
-                        session, facts, llm, retrieval, verifier, t, None
-                    )
-                except InterviewError as exc:
-                    print(f"「{t}」访谈中止：{exc}")
-                    continue
-                print("\n" + ares.message)
-                if ares.ok and input("继续下一章？(y/其他=停) > ").strip().lower() not in ("y", "yes", "是"):
-                    break
-            continue
-
-        if route.intent is Intent.CONVERT_FORMAT:
-            try:
-                cplan = interview_convert(
-                    route.target_ext, route.presets, ask=lambda p: input(p)
-                )
-            except InterviewError as exc:
-                print(f"访谈中止：{exc}")
-                continue
-            report = _dispatch(
-                coordinator, "convert_format",
-                lambda bus, ct: execute_convert(session, cplan),
-                target_ext=route.target_ext or "",
-            )
-            cresult = report.value
-            if cresult is not None:
-                print("\n" + cresult.message)
-                if cresult.report_lines:
-                    print("转换后校验：")
-                    print("\n".join(cresult.report_lines))
-            continue
-
-        if route.intent is Intent.REWRITE:
-            try:
-                rplan = interview_rewrite(route.section_id, index, ask=lambda p: input(p))
-            except InterviewError as exc:
-                print(f"访谈中止：{exc}")
-                continue
-
-            def _confirm(value: str, ctx: str) -> bool:
-                ans = input(
-                    f"\n出现新数字 {value}（{ctx}）。\n"
-                    "它是真实来源的吗？(y=确认可用 / 其他=视为编造) > "
-                ).strip().lower()
-                return ans in ("y", "yes", "是")
-
-            report = _dispatch(
-                coordinator, "rewrite",
-                lambda bus, ct: execute_rewrite(
-                    session, rplan, facts, llm,
-                    retrieval_provider=retrieval, verifier=verifier,
-                    confirm=_confirm, max_retry=config.polish_max_retry, bus=bus,
-                ),
-                section_id=route.section_id or "",
-            )
-            rresult = report.value
-            if rresult is not None:
-                if rresult.search_note:
-                    print("\n" + rresult.search_note)
-                print("\n" + rresult.message)
-                if rresult.ok and rresult.diff:
-                    print("\n--- diff ---")
-                    print(rresult.diff)
-                    print("（:save 落盘到源文件，:undo 撤销）")
-            continue
-
-        # polish
-        try:
-            plan = interview_polish(route.section_id, index, ask=lambda p: input(p))
-        except InterviewError as exc:
-            print(f"访谈中止：{exc}")
-            continue
-
-        section_id = route.section_id
-
-        def _do_polish(bus, ct):
-            bus.publish(EventKind.ROUTE_DECISION, intent="polish", section_id=section_id)
-            try:
-                return execute_polish(
-                    session, plan, llm,
-                    max_char_change_ratio=config.polish_max_char_change_ratio,
-                    max_retry=config.polish_max_retry,
-                    bus=bus, cancel_token=ct, stream=config.stream_enabled,
-                )
-            except KeyboardInterrupt:  # Ctrl-C → 统一取消模型
-                raise OperationCancelled() from None
-
-        report = coordinator.run(_do_polish, cancel_token=CancellationToken())
-        result = report.value
-        if result is None:
-            if report.run_status == "cancelled":
-                print("\n已取消本次润色，文档未改动。")
-            elif report.error:
-                print(f"\n生成失败（{report.error.get('category')}）。")
-            continue
-        print("\n" + result.message)
-        if result.ok and result.diff:
-            print("\n--- diff ---")
-            print(result.diff)
-            print("（:save 落盘到源文件，:undo 撤销）")
-
-    # 退出时给出归属摘要：静默降级过就显式警告，别让读者自己去推
+    # 退出时给出 Planning 终态与只读交接摘要。
     if metrics.turns:
         metrics.save(metrics_path)
         print("\n" + metrics.summary())

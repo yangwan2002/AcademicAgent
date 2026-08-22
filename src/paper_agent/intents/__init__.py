@@ -1,1 +1,5 @@
-"""意图层：Router / Interview / 各意图 SOP。"""
+"""写作操作类型与各操作的领域执行实现。"""
+
+from paper_agent.intents.intent import Intent
+
+__all__ = ["Intent"]

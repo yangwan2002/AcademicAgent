@@ -11,7 +11,7 @@ Fast_Path 产 requirement、整体失败兜底。
 
 from __future__ import annotations
 
-from paper_agent.intents.router import Intent
+from paper_agent.intents.intent import Intent
 from paper_agent.providers.llm.base import LLMProvider
 from paper_agent.tasking.extractors.add_section import AddSectionExtractor
 from paper_agent.tasking.extractors.base import (

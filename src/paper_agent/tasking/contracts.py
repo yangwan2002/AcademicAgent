@@ -2,7 +2,7 @@
 
 只定义结构，不含逻辑。三类可变性（design D3/D7 / tasks Task 1）：
 - **值对象 frozen**：AtomicRequirement / SlotValue / RawOperation / Operation /
-  Rule_Analysis / PlanRevisionRequest / ExecutionOutcome / SessionBaseline /
+  PlanRevisionRequest / ExecutionOutcome / SessionBaseline /
   ValidationIssue / ReorderSuggestion / SectionSummary / PlanningSnapshot 等。
 - **可变运行态**：Plan_Execution_State（执行中持续更新）。
 - **生成后不可变**：PlanExecutionReport / Task_Plan（frozen；改动=产新版本）。
@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-from paper_agent.intents.router import Intent
+from paper_agent.intents.intent import Intent
 
 # CallStatus 已迁至中立模块 providers/llm/structured.py（A2a）；此处 re-export，
 # 使 `from paper_agent.tasking.contracts import CallStatus` 的既有调用点零改动。
@@ -196,19 +196,6 @@ class ExtractionResult:
     error_category: str | None = None
 
 
-# --- 规则分析（值对象，frozen）---
-
-@dataclass(frozen=True)
-class Rule_Analysis:
-    """规则层对一条消息的分析，用于 Fast_Path 判定与 Analyzer 失败降级。"""
-
-    candidates: tuple[Intent, ...] = ()
-    matched_signals: dict[str, tuple[str, ...]] = field(default_factory=dict)
-    has_sequence_signal: bool = False
-    uncovered_text: tuple[str, ...] = ()
-    unambiguous: bool = False
-
-
 # --- 校验（值对象，frozen）---
 
 class DispositionStatus(str, Enum):
@@ -270,7 +257,7 @@ class SectionSummary:
 
 @dataclass(frozen=True)
 class PlanningSnapshot:
-    """Shadow 用的执行前只读快照（不在 legacy 改动后重读文件）。"""
+    """Planning 分析与校验使用的执行前只读快照。"""
 
     working_hash: str
     file_type: str
@@ -300,7 +287,11 @@ class Task_Plan:
 
 @dataclass(frozen=True)
 class PlanRevisionRequest:
-    """计划修订：旧计划 + 修订文本 + 原因（不把修订当全新请求丢原计划）。"""
+    """计划修订：旧计划 + 原始修订增量 + 原因。
+
+    ``revision_text`` 只保存用户补充/修改或系统修复信息本身；调用方在重新分析前
+    必须把它与原请求、旧计划摘要组合，不能把这段增量当成一条全新请求。
+    """
 
     previous_plan: Task_Plan | None
     revision_text: str
@@ -373,6 +364,10 @@ class PlanningExit:
 
     status: PlanStatus
     message: str = ""
+    # 首轮 OperationAnalyzer 成功完成、没有受支持写操作，且明确给出了 unmapped
+    # 内容作为语义证据。应用层据此把原始消息交给只读 AskLoop；provider/解析失败、
+    # 无语义空包、计划修订、静态自修复及执行期重规划均不能设置此标志。
+    route_to_readonly: bool = False
 
 
 # --- 可变运行态（不 frozen）---

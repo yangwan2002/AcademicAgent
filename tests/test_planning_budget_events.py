@@ -71,7 +71,7 @@ def _extract(slots):
         {k: v for k, v in slots.items()}, ensure_ascii=False)
 
 
-# ============ #10：active 的 trace 必须能看到理解阶段 ============
+# ============ #10：Planning trace 必须能看到理解阶段 ============
 
 def test_planning_loop_publishes_understanding_events():
     llm = MockLLMProvider(scripted=[
@@ -97,6 +97,7 @@ def test_analysis_failure_is_visible_in_events():
                             current_sections=["introduction"], current_format="tex",
                             bus=bus)
     assert isinstance(out, PlanningExit)
+    assert out.route_to_readonly is False
     analysis = [p for k, p in bus.events if k == "operation_analysis"][0]
     assert analysis["call_status"] == "parse_failed"
     assert analysis["error_category"]          # 能看到失败原因类别
@@ -113,6 +114,73 @@ def test_pre_extract_event_reports_call_status():
     pre = [p for k, p in bus.events if k == "pre_extract"][0]
     assert pre["intent"] == "polish"
     assert pre["call_status"] == "success"
+
+
+# ============ Analyzer semantic-empty：预算内只重试一次 ============
+
+def test_semantic_empty_analyzer_retries_once_and_recovers_with_budget():
+    llm = MockLLMProvider(scripted=[
+        _analyze([]),
+        _analyze([("polish", "润色引言")]),
+        _extract({"section_id": "introduction"}),
+    ])
+    budget = PlanningBudget(max_llm_calls=4)
+    bus = _RecordingBus()
+    out = run_planning_loop(
+        "润色引言",
+        llm=llm,
+        interactor=_It(),
+        current_sections=["introduction"],
+        current_format="tex",
+        budget=budget,
+        bus=bus,
+    )
+
+    assert isinstance(out, ConfirmedPlan)
+    assert budget.llm_calls == 3       # analyzer + semantic retry + extractor
+    analysis = [p for k, p in bus.events if k == "operation_analysis"][0]
+    assert analysis["call_status"] == "success"
+    assert analysis["semantic_empty_retries"] == 1
+
+
+def test_repeated_semantic_empty_becomes_needs_input_not_readonly():
+    llm = MockLLMProvider(scripted=[_analyze([]), _analyze([])])
+    budget = PlanningBudget(max_llm_calls=3)
+    bus = _RecordingBus()
+    out = run_planning_loop(
+        "润色引言",
+        llm=llm,
+        interactor=_It(),
+        current_sections=["introduction"],
+        current_format="tex",
+        budget=budget,
+        bus=bus,
+    )
+
+    assert isinstance(out, PlanningExit)
+    assert out.status is PlanStatus.NEEDS_INPUT
+    assert out.route_to_readonly is False
+    assert budget.llm_calls == 2
+    analysis = [p for k, p in bus.events if k == "operation_analysis"][0]
+    assert analysis["call_status"] == "schema_failed"
+    assert analysis["error_category"] == "SemanticEmpty"
+    assert analysis["semantic_empty_retries"] == 1
+
+
+def test_semantic_empty_without_budget_does_not_claim_readonly_evidence():
+    llm = MockLLMProvider(scripted=[_analyze([])])
+    out = run_planning_loop(
+        "???",
+        llm=llm,
+        interactor=_It(),
+        current_sections=[],
+        current_format="tex",
+    )
+
+    assert isinstance(out, PlanningExit)
+    assert out.status is PlanStatus.NO_ACTION
+    assert out.route_to_readonly is False
+    assert len(llm.calls) == 1
 
 
 # ============ #8：tool_choice 由 provider 适配；重试只针对参数不支持 ============
@@ -269,10 +337,10 @@ def test_budget_shared_across_revisions_in_active(tmp_path):
         _analyze([("polish", "润色引言")]),
         _extract({"section_id": "introduction"}),
     ])
-    cfg = Config(intent_planning_mode="active", planning_max_llm_calls=1)
+    cfg = Config(planning_max_llm_calls=1)
     svc = TurnService(config=cfg, llm=llm,
                       handler_context=HandlerContext(session=session, llm=llm),
                       interactor=_It())
-    out = svc.handle_turn("润色引言", session=session, facts=None, legacy=lambda: None)
+    out = svc.handle_turn("润色引言", session=session, facts=None)
     assert out.planning_exit is not None
     assert "上限" in out.planning_exit.message

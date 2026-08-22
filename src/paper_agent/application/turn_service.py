@@ -1,42 +1,17 @@
-"""TurnService（Task 16）：intent-planning 三态编排 + Shadow Mode。
-
-设计（design D9 / Component§1 / Property 9）：
-- **三个互斥入口**，避免嵌套 Coordinator：off 完全旧路径；shadow 旧路径照跑 + 独立
-  shadow run 只记录；active 由 Task 24 接管。
-- **执行前只读快照（PlanningSnapshot）**：在 legacy 执行**之前**捕获工作副本 hash /
-  文件类型 / 章节 / facts 摘要。shadow 只基于该快照分析，**不重新读取已被 legacy
-  改动的 Working_Copy**，保证与旧 Router 当时决策公平比较。
-- **不阻塞、不污染、不塌陷**：v1 采「捕获快照 → legacy 先执行拿到结果 → 之后跑
-  shadow」，故 shadow 延迟不影响 legacy 的写入与结果；shadow 全程 try/except 兜底，
-  任何失败/超预算都只记录、绝不上抛、绝不碰 Working_Copy；记录 `added_latency_ms`。
-- **可比差异**：记录 shadow 的操作意图序列、静态校验结果，以及（可选）与 legacy
-  Router 意图是否一致，供离线对比。
-
-本模块只依赖 tasking 理解链路与观测脊柱，不改任何 `execute_*`/Gate/写入路径。
-"""
+"""自然语言 Turn 的唯一编排入口：Planning → AskLoop / PlanExecutor。"""
 
 from __future__ import annotations
 
 import hashlib
-import time
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 from uuid import uuid4
 
-from paper_agent.observability.events import EventKind
 from paper_agent.session.section_index import SectionIndex, supports_sections
 from paper_agent.tasking.contracts import (
-    CallStatus,
     PlanningSnapshot,
     SectionSummary,
-    Task_Plan,
-    ValidationOutcome,
 )
-from paper_agent.tasking.extractors import build_extractor
-from paper_agent.tasking.operation_analyzer import analyze, requirements_for
-from paper_agent.tasking.plan_builder import build_plan
-from paper_agent.tasking.plan_validator import validate_plan
 
 _TEXT_EXT = ("tex", "md", "markdown")
 
@@ -111,7 +86,7 @@ def _failed_report(state, run_report):
 
 
 def capture_snapshot(session, facts=None) -> PlanningSnapshot:
-    """在 legacy 执行**之前**捕获只读快照（不改任何状态）。"""
+    """在 Planning 执行前捕获只读快照（不改任何状态）。"""
     return PlanningSnapshot(
         working_hash=_working_hash(session),
         file_type=session.ext,
@@ -120,62 +95,33 @@ def capture_snapshot(session, facts=None) -> PlanningSnapshot:
     )
 
 
-# --- Shadow 结果 ------------------------------------------------------------
-
-@dataclass
-class PlanningShadowResult:
-    """一次 shadow 分析的记录（只读、可离线对比，绝不影响 legacy）。"""
-
-    turn_id: str
-    ok: bool = False
-    analyze_status: str = ""
-    operation_intents: tuple[str, ...] = ()
-    validation_result: str | None = None
-    added_latency_ms: float = 0.0
-    error: str | None = None
-    snapshot_working_hash: str = ""
-    legacy_intent: str | None = None
-    matches_legacy: bool | None = None
-    plan: Task_Plan | None = None
-    validation: ValidationOutcome | None = None
-
-
 # --- Turn 结果 --------------------------------------------------------------
 
 @dataclass
 class TurnResult:
-    mode: str
     turn_id: str
-    legacy_result: Any = None
-    shadow: PlanningShadowResult | None = None
     warnings: list[str] = field(default_factory=list)
-    # --- active 专用 ---
     report: Any = None                  # PlanExecutionReport（执行了才有）
     planning_exit: Any = None           # PlanningExit（未进执行时的出口）
+    readonly_result: Any = None         # AskResult（零写作操作时，同 run 内只读回答）
     state: Any = None                   # Plan_Execution_State（run 外持有）
     run_report: Any = None              # coordinator.RunReport
-    # 新栈**内部**异常的类别（Coordinator 已捕获，未降级到旧栈）。空 = 无异常。
-    # 结构化暴露，供 TurnMetrics 归属计数使用——不让调用方去解析 warnings 里的中文。
+    # 内部异常类别（Coordinator 已捕获）。空 = 无异常。
     run_error_category: str = ""
 
 
 class TurnService:
-    """按 intent_planning_mode 分派：off 旧路径 / shadow 只读旁路 / active 接管。"""
+    """所有自然语言请求统一进入 Planning。"""
 
     def __init__(
-        self, *, config, llm, shadow_coordinator=None, coordinator=None,
+        self, *, config, llm, coordinator=None,
         handler_context=None, interactor=None,
     ) -> None:
         self._config = config
         self._llm = llm
-        self._shadow_coordinator = shadow_coordinator
         self._coordinator = coordinator
         self._handler_context = handler_context
         self._interactor = interactor
-
-    @property
-    def mode(self) -> str:
-        return getattr(self._config, "intent_planning_mode", "off")
 
     def handle_turn(
         self,
@@ -183,49 +129,23 @@ class TurnService:
         *,
         session,
         facts=None,
-        legacy: Callable[[], Any],
-        legacy_intent: str | None = None,
     ) -> TurnResult:
-        """处理一个自然语言 Turn。
-
-        `legacy`：零参回调，跑既有旧路径并返回其结果。TurnService 只在其**前后**做
-        只读旁路，绝不改变 legacy 的行为与返回值。
-        """
+        """分析、确认并执行一个自然语言 Turn。"""
         turn_id = uuid4().hex
-        mode = self.mode
+        return self._handle_planning(text, session=session, facts=facts, turn_id=turn_id)
 
-        if mode == "off":
-            return TurnResult(mode="off", turn_id=turn_id, legacy_result=legacy())
-
-        if mode == "shadow":
-            # 1) legacy 执行前捕获只读快照
-            snapshot = capture_snapshot(session, facts)
-            # 2) legacy 照常执行、拿到结果（shadow 尚未运行，不影响其写入/延迟）
-            legacy_result = legacy()
-            # 3) 之后基于快照跑 shadow：只记录、全兜底、绝不碰 Working_Copy
-            shadow = self._run_shadow_safely(text, snapshot, turn_id, legacy_intent)
-            return TurnResult(
-                mode="shadow", turn_id=turn_id,
-                legacy_result=legacy_result, shadow=shadow,
-            )
-
-        if mode == "active":
-            return self._handle_active(text, session=session, facts=facts,
-                                      turn_id=turn_id)
-
-        # 非法模式（config 已降级，理论到不了）→ 退回 off 语义
-        return TurnResult(mode="off", turn_id=turn_id, legacy_result=legacy())
-
-    # -- active 通路（Task 24）--
-
-    def _handle_active(self, text: str, *, session, facts, turn_id: str) -> TurnResult:
+    def _handle_planning(self, text: str, *, session, facts, turn_id: str) -> TurnResult:
         """**一个 Turn 一个 coordinator.run**，包住整段旅程（D2）。
 
-        run 内：rule_analyze → 规划循环（理解/校验/澄清/未映射/确认）→ execute_plan。
+        run 内：理解/校验/澄清/未映射/确认 → execute_plan，或零写作操作时
+        → AskLoop。两个出口共享同一 bus 与 cancel token。
         `Plan_Execution_State` 在 run **之外**持有，使取消/异常后仍能出报告（D7）。
         needs_replan 由规划循环消费（此处按 D2 回顶重规划未执行步骤）。
         """
         from paper_agent.runtime.plan_executor import execute_plan
+        from paper_agent.application.ask_context import capture as capture_ask_context
+        from paper_agent.application.ask_loop import run_ask
+        from paper_agent.coordinator import RunOutcome
         from paper_agent.tasking.contracts import (
             ConfirmedPlan,
             ExecutionReplanContext,
@@ -241,7 +161,7 @@ class TurnService:
         sections += [s.title for s in snapshot.sections]
         state = Plan_Execution_State()
         ctx = self._handler_context
-        result = TurnResult(mode="active", turn_id=turn_id, state=state)
+        result = TurnResult(turn_id=turn_id, state=state)
         max_revisions = max(1, getattr(self._config, "planning_max_revisions", 3))
         # **一个 Turn 一份预算**：跨修订累计调用数与 provider 耗时（#9）——
         # 只限"单次"挡不住 3 次修订 × N 个抽取器的总量。
@@ -260,6 +180,34 @@ class TurnService:
                     replan=replan, budget=budget, bus=bus, facts=facts,
                 )
                 if not isinstance(outcome, ConfirmedPlan):
+                    if getattr(outcome, "route_to_readonly", False):
+                        # 自动只读交接仍属于这一条用户消息：复用当前 run 的 bus 与
+                        # cancel_token。此前 chat.py 在 TurnService 返回后另开 run，
+                        # 导致一条消息两份无法关联的 trace。
+                        ask_result = run_ask(
+                            text,
+                            capture_ask_context(session, facts),
+                            self._llm,
+                            max_iterations=max(
+                                1,
+                                getattr(
+                                    self._config,
+                                    "agent_loop_max_iterations",
+                                    10,
+                                ),
+                            ),
+                            max_llm_calls=max(
+                                1,
+                                getattr(
+                                    self._config,
+                                    "agent_loop_max_llm_calls",
+                                    12,
+                                ),
+                            ),
+                            cancel_token=cancel_token,
+                            bus=bus,
+                        )
+                        return ("readonly", (outcome, ask_result))
                     return ("exit", outcome)
                 exec_outcome = execute_plan(
                     outcome.plan, state, ctx, bus=bus, cancel_token=cancel_token,
@@ -284,7 +232,28 @@ class TurnService:
         if self._coordinator is None:
             kind, payload = _journey(None, None)
         else:
-            run_report = self._coordinator.run(_journey)
+            def _probe_working_copy_status() -> str:
+                return (
+                    "updated"
+                    if _working_hash(session) != snapshot.working_hash
+                    else "unchanged"
+                )
+
+            def _coordinated_journey(bus, cancel_token):
+                value = _journey(bus, cancel_token)
+                # 由拥有 session 的应用层显式声明最终状态。比较最终工作副本与
+                # Turn 起点快照，避免把 AskResult.ok / 业务 Result.ok 误当写入证据。
+                return RunOutcome(
+                    value=value,
+                    working_copy_status=_probe_working_copy_status(),
+                )
+
+            run_report = self._coordinator.run(
+                _coordinated_journey,
+                # 正常返回由 RunOutcome 显式声明；取消/异常没有返回值时，finally
+                # 仍能只读比较起止 hash，保留已发生的部分写入事实。
+                working_copy_probe=_probe_working_copy_status,
+            )
             result.run_report = run_report
             if run_report.value is None:
                 # P0：Coordinator 已区分 cancelled / failed，此处必须分流——
@@ -301,115 +270,10 @@ class TurnService:
 
         if kind == "report":
             result.report = payload
+        elif kind == "readonly":
+            result.planning_exit, result.readonly_result = payload
         else:
             result.planning_exit = payload
         return result
 
-    # -- shadow 内部 --
-
-    def _run_shadow_safely(
-        self, text: str, snapshot: PlanningSnapshot, turn_id: str,
-        legacy_intent: str | None,
-    ) -> PlanningShadowResult:
-        """在独立 run 里跑 shadow；任何异常都被吸收为 error，绝不上抛。"""
-        def _fn(bus, _ct):
-            return self._compute_shadow(text, snapshot, turn_id, legacy_intent, bus)
-
-        try:
-            if self._shadow_coordinator is not None:
-                report = self._shadow_coordinator.run(_fn)
-                result = report.value
-                if isinstance(result, PlanningShadowResult):
-                    return result
-                # coordinator 捕获了异常（value=None）→ 兜底
-                return PlanningShadowResult(
-                    turn_id=turn_id, ok=False,
-                    error=(report.error or {}).get("category", "shadow_run_failed"),
-                    snapshot_working_hash=snapshot.working_hash,
-                    legacy_intent=legacy_intent,
-                )
-            return _fn(None, None)
-        except Exception as exc:  # noqa: BLE001 - shadow 绝不影响 legacy
-            return PlanningShadowResult(
-                turn_id=turn_id, ok=False, error=type(exc).__name__,
-                snapshot_working_hash=snapshot.working_hash,
-                legacy_intent=legacy_intent,
-            )
-
-    def _compute_shadow(
-        self, text: str, snapshot: PlanningSnapshot, turn_id: str,
-        legacy_intent: str | None, bus,
-    ) -> PlanningShadowResult:
-        """analyze → pre_extract → build → static_validate（只读，基于快照）。"""
-        started = time.monotonic()
-        result = PlanningShadowResult(
-            turn_id=turn_id, snapshot_working_hash=snapshot.working_hash,
-            legacy_intent=legacy_intent,
-        )
-        try:
-            ar = analyze(text, self._llm)
-            result.analyze_status = ar.call_status.value
-            self._publish(bus, EventKind.OPERATION_ANALYSIS,
-                          turn_id=turn_id, call_status=ar.call_status.value,
-                          n_operations=len(ar.operations))
-            if ar.call_status is not CallStatus.SUCCESS:
-                result.ok = False
-                result.added_latency_ms = (time.monotonic() - started) * 1000
-                return result
-
-            extractions = []
-            n_ops = len(ar.operations)
-            for op in ar.operations:
-                ex = build_extractor(op.intent, self._llm)
-                if ex is None:
-                    continue
-                # 与 active 走同一路由，否则 shadow 的差异统计会失真
-                owned, _attr = requirements_for(op, ar.requirements, n_ops)
-                er = ex.pre_extract(op, owned)
-                extractions.append(er)
-                self._publish(bus, EventKind.PRE_EXTRACT,
-                              turn_id=turn_id, intent=op.intent.value,
-                              call_status=er.call_status.value)
-
-            # extractions 与 operations 对齐（build_extractor 恒非 None：analyze 已滤意图）
-            plan = build_plan(
-                turn_id, ar.operations, extractions, ar.requirements,
-                unmapped_text=ar.unmapped_text,
-                source_text=text,
-            )
-            current_sections = [s.section_id for s in snapshot.sections]
-            current_sections += [s.title for s in snapshot.sections]
-            validation = validate_plan(
-                plan, current_sections=current_sections,
-                current_format=snapshot.file_type,
-            )
-            self._publish(bus, EventKind.PLAN_VALIDATION,
-                          turn_id=turn_id, result=validation.result,
-                          n_issues=len(validation.issues))
-
-            intents = tuple(op.intent.value for op in plan.operations)
-            result.ok = True
-            result.operation_intents = intents
-            result.validation_result = validation.result
-            result.plan = plan
-            result.validation = validation
-            if legacy_intent is not None:
-                result.matches_legacy = (len(intents) == 1 and intents[0] == legacy_intent)
-        except Exception as exc:  # noqa: BLE001
-            result.ok = False
-            result.error = type(exc).__name__
-        finally:
-            result.added_latency_ms = (time.monotonic() - started) * 1000
-        return result
-
-    @staticmethod
-    def _publish(bus, kind, **payload) -> None:
-        if bus is None:
-            return
-        try:
-            bus.publish(kind, **payload)
-        except Exception:  # noqa: BLE001 - 观测失败不拖垮 shadow
-            pass
-
-
-__all__ = ["TurnService", "PlanningShadowResult", "TurnResult", "capture_snapshot"]
+__all__ = ["TurnService", "TurnResult", "capture_snapshot"]

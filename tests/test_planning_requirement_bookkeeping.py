@@ -19,7 +19,7 @@ _SRC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
 if _SRC not in sys.path:
     sys.path.insert(0, _SRC)
 
-from paper_agent.intents.router import Intent
+from paper_agent.intents.intent import Intent
 from paper_agent.tasking.clarifier import summarize_plan
 from paper_agent.tasking.contracts import (
     AtomicRequirement,
@@ -92,6 +92,7 @@ def test_analyzer_extracts_project_facts_with_key_whitelist():
     raw = {
         "operations": [{"intent": "rewrite", "verbatim": "改写引言"}],
         "requirements": [{"requirement_id": "r1", "verbatim": "课题是空地协同SLAM"}],
+        "unmapped_text": [],
         "project_facts": [
             {"key": "research_topic", "value": "空地协同SLAM图像匹配",
              "requirement_ids": ["r1"]},

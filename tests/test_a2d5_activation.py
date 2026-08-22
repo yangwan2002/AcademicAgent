@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 
@@ -18,7 +19,7 @@ from paper_agent.generate.context_builder import (
     build_rewrite_messages,
 )
 from paper_agent.intents.add_section import execute_add_section
-from paper_agent.intents.interview import AddSectionPlan, RewritePlan
+from paper_agent.intents.plans import AddSectionPlan, RewritePlan
 from paper_agent.intents.rewrite import execute_rewrite
 from paper_agent.literature.citation_context import CitationContext
 from paper_agent.literature.evidence import BundleEntry, EvidenceBundle, make_span
@@ -246,14 +247,19 @@ def test_add_section_with_ctx_skips_search_and_verify(tmp_path, monkeypatch):
                           structure_desc="按主题分组", subsections=[],
                           want_search=True, search_query="dl", search_limit=3)
     body = (
-        r"Prior work studies this problem extensively \cite{keyA}. "
-        "Early approaches focused on hand-crafted features, while later methods "
-        "adopted representation learning to capture richer structure. "
-        "We summarize the main threads of this literature and their respective "
-        "limitations, highlighting the gap that motivates our study and the way "
-        "our contribution differs from these earlier efforts in scope and method."
+        r"The verified evidence states that this work studies deep learning for "
+        r"medical imaging \cite{keyA}. This section records that evidence without "
+        "inferring a dataset, evaluation result, comparison, or limitation that is "
+        "not present in the supplied abstract. The current manuscript also reports "
+        "its existing result in the Introduction; no additional empirical claim is "
+        "introduced here beyond those two supplied sources."
     )
-    res = execute_add_section(session, plan, facts, _LLM([body]),
+    grounded = json.dumps({
+        "supported": True,
+        "reason_code": "supported",
+        "unsupported_claims": [],
+    })
+    res = execute_add_section(session, plan, facts, _LLM([body, grounded]),
                               retrieval_provider=None, verifier=None,
                               confirm=lambda _v, _c: False, max_retry=1,
                               citation_context=_ctx([rec]))
@@ -395,7 +401,7 @@ def test_writer_loop_never_retrieves(tmp_path, monkeypatch):
 # ================================================================ Task 3：Handler 路由
 
 from paper_agent.application.literature_flow import FlowOutcome, FlowState
-from paper_agent.intents.router import Intent
+from paper_agent.intents.intent import Intent
 from paper_agent.literature.quota import RawCountClause, RawQuotaSpec
 from paper_agent.runtime.handlers import HandlerContext, handler_for
 from paper_agent.tasking.contracts import (

@@ -16,11 +16,11 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Callable
 
-from paper_agent.intents.interview import _FORMAT_ALIASES
-from paper_agent.intents.router import Intent
+from paper_agent.intents.plans import FORMAT_ALIASES
+from paper_agent.intents.intent import Intent
 
 # convert 目标格式的规范化与校验（复用 interview 的别名表，避免双份真相源）。
-_CANONICAL_EXTS = set(_FORMAT_ALIASES.values())  # {"docx", "tex", "md"}
+_CANONICAL_EXTS = set(FORMAT_ALIASES.values())  # {"docx", "tex", "md"}
 
 
 def _normalize_target_ext(value: object) -> object:
@@ -29,7 +29,7 @@ def _normalize_target_ext(value: object) -> object:
     无法识别时原样返回，交给 validator 标 invalid（不静默丢弃）。
     """
     key = str(value).strip().lower().lstrip(".")
-    return _FORMAT_ALIASES.get(key, value)
+    return FORMAT_ALIASES.get(key, value)
 
 
 def _valid_target_ext(value: object) -> bool:

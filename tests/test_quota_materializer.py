@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from paper_agent.config import Config, load_config
-from paper_agent.intents.interview import AddSectionPlan, RewritePlan
+from paper_agent.intents.plans import AddSectionPlan, RewritePlan
 from paper_agent.literature.quota import (
     QuotaKind,
     QuotaScope,
@@ -20,7 +20,7 @@ from paper_agent.tasking.intent_spec import (
     SlotSpec,
     spec_for,
 )
-from paper_agent.intents.router import Intent
+from paper_agent.intents.intent import Intent
 from paper_agent.tasking.quota_materializer import materialize_citation_quota
 
 

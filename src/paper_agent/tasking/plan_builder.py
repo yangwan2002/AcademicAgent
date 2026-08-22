@@ -27,7 +27,7 @@ import uuid
 from collections.abc import Sequence
 from dataclasses import replace
 
-from paper_agent.intents.router import Intent
+from paper_agent.intents.intent import Intent
 from paper_agent.session.section_index import slugify
 from paper_agent.tasking.contracts import (
     AtomicRequirement,

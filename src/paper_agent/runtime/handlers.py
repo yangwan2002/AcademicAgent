@@ -23,7 +23,7 @@ from paper_agent.errors import OperationCancelled
 from paper_agent.intents.add_section import execute_add_section
 from paper_agent.intents.convert import execute_convert
 from paper_agent.intents.format_docx import execute_format
-from paper_agent.intents.interview import (
+from paper_agent.intents.plans import (
     AddSectionPlan,
     ConvertPlan,
     PolishPlan,
@@ -31,7 +31,7 @@ from paper_agent.intents.interview import (
 )
 from paper_agent.intents.polish import execute_polish
 from paper_agent.intents.rewrite import execute_rewrite
-from paper_agent.intents.router import Intent
+from paper_agent.intents.intent import Intent
 from paper_agent.session.section_index import slugify
 from paper_agent.tasking.contracts import (
     FieldStatus,
@@ -430,6 +430,7 @@ class AddSectionHandler:
             ctx.session, plan, ctx.facts, ctx.llm,
             retrieval_provider=ctx.retrieval_provider, verifier=ctx.verifier,
             confirm=_confirm_of(ctx), max_retry=ctx.max_retry, bus=bus,
+            cancel_token=cancel_token,
             citation_context=prep.context,
         )
         return _ok_result(op, res, changed=True)

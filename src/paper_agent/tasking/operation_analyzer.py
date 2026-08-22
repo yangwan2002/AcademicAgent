@@ -17,7 +17,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Sequence
 
-from paper_agent.intents.router import Intent
+from paper_agent.intents.intent import Intent
 from paper_agent.providers.llm.base import LLMProvider, Message
 from paper_agent.tasking.contracts import (
     AnalyzeResult,
@@ -41,8 +41,11 @@ _PROJECT_FACT_KEYS = {"research_topic", "novelty", "gap"}
 _INTENT_RULE = (
     "该操作的意图，只能取五者之一：\n"
     "- polish：只改语言表达（更通顺/简洁/学术），不动事实与结构。\n"
-    "- rewrite：改内容或组织（补充论证、调整结构、更换叙述角度）。\n"
-    "- add_section：新增一个当前不存在的章节。\n"
+    "- rewrite：改内容或组织（补充论证、调整结构、更换叙述角度）。"
+    "用户说「完善/补充/扩写/改进」引言、方法、结论等**已有章节**时，一律是 "
+    "rewrite；即使没有提供章节清单，也不要判成 polish 或 add_section。\n"
+    "- add_section：只有用户明确要求创建一个当前不存在的新章节时才用。"
+    "「完善我的引言」不是新增章节。\n"
     "- convert_format：**换文件格式**（转成/转换为/导出为 Word、docx、PDF、"
     "LaTeX、Markdown 等）。\n"
     "- format_docx：**只调排版属性**，不换文件格式（字体、字号、行距、对齐、"
@@ -77,7 +80,14 @@ _ANALYZE_TOOL = {
                     "items": {
                         "type": "object",
                         "properties": {
-                            "intent": {"type": "string", "description": _INTENT_RULE},
+                            "intent": {
+                                "type": "string",
+                                "enum": [
+                                    "polish", "rewrite", "add_section",
+                                    "convert_format", "format_docx",
+                                ],
+                                "description": _INTENT_RULE,
+                            },
                             "verbatim": {
                                 "type": "string",
                                 "description": (
@@ -115,6 +125,10 @@ _ANALYZE_TOOL = {
                         "消息中各条**原子要求**。一条要求 = 一个独立、可判定是否被满足的"
                         "诉求；把复合句拆成多条，但每条要**语义完整**"
                         "（如「别改里面的实验数字」，不要碎成「数字」）。"
+                        "**每个 operation 的核心动作+目标也必须登记为一条 requirement**"
+                        "（如「润色引言」「整篇转成 Word」「完善我的引言部分」）；"
+                        "不能因为同一句已经出现在 operations.verbatim 就省略。约束、数量、"
+                        "语言和年份等修饰要求再分别登记，形成可逐项核对的完整账本。"
                         "不要计算字符位置。"
                     ),
                     "items": {
@@ -184,9 +198,12 @@ _ANALYZE_TOOL = {
                     ),
                 },
             },
-            # 不设顶层 required：请求可能整体落在五意图之外，此时 operations 应为空
-            # 而全部原话进 unmapped_text；强制 operations 会逼模型硬凑一个操作。
-            "required": [],
+            # 信封字段必须存在，**数组内容仍可为空**。`required=["operations"]`
+            # 只要求模型明确回答「操作列表是什么」，并不会要求至少生成一个操作；
+            # 整体不属于五意图时合法形状仍是 operations=[] + unmapped_text=[原话]。
+            # 此前 required=[] 让裸 `{}` 也成为协议成功，`_coerce_result` 又把缺失字段
+            # 默认成空数组，最终把残缺响应冒充成「合法只读请求」。
+            "required": ["operations", "requirements", "unmapped_text"],
         },
     },
 }
@@ -195,15 +212,34 @@ _ANALYZE_TOOL = {
 _TOOL_SYSTEM = (
     "调用工具 decompose_request 拆解用户消息，不要输出正文。"
     "只拆解用户确实表达过的内容；不属于五种意图的部分放进 unmapped_text，不要硬凑。"
+    "特别注意：完善/补充/扩写一个已有章节属于 rewrite；polish 仅限明确的语言表达优化；"
+    "add_section 仅限明确新增不存在的章节。数量、语言、年份和禁止修改项必须分别保留为"
+    "原子 requirement，并挂到对应 operation。每个 operation 的核心动作与目标也必须"
+    "各有一条 requirement；operations 和 requirements 是操作分解与审计账本两种视图，"
+    "前者存在不能作为省略后者的理由。"
 )
 
 
 def _coerce_result(raw: dict, text: str) -> AnalyzeResult:
     """把解析出的 dict 组装为 AnalyzeResult；结构不符抛 KeyError/TypeError。"""
-    unmapped = list(raw.get("unmapped_text", []) or [])
+    if not isinstance(raw, dict):
+        raise TypeError("analyzer payload must be an object")
+
+    def _required_array(name: str) -> list:
+        value = raw[name]  # 缺字段必须大声失败，不能把残缺信封默认成合法空计划。
+        if not isinstance(value, list):
+            raise TypeError(f"{name} must be a list")
+        return value
+
+    unmapped_in = _required_array("unmapped_text")
+    if any(not isinstance(item, str) for item in unmapped_in):
+        raise TypeError("unmapped_text items must be strings")
+    unmapped = list(unmapped_in)
 
     # requirements：offset 由程序定位
-    reqs_in = raw.get("requirements", []) or []
+    reqs_in = _required_array("requirements")
+    if any(not isinstance(item, dict) for item in reqs_in):
+        raise TypeError("requirements items must be objects")
     requirements = tuple(
         AtomicRequirement(
             requirement_id=str(r["requirement_id"]),
@@ -214,9 +250,9 @@ def _coerce_result(raw: dict, text: str) -> AnalyzeResult:
     )
     requirements = locate_requirements(text, requirements)
 
-    ops_in = raw.get("operations", [])
-    if not isinstance(ops_in, list):
-        raise TypeError("operations must be a list")
+    ops_in = _required_array("operations")
+    if any(not isinstance(item, dict) for item in ops_in):
+        raise TypeError("operations items must be objects")
     operations: list[RawOperation] = []
     for op in ops_in:
         intent_str = str(op["intent"])
@@ -239,7 +275,12 @@ def _coerce_result(raw: dict, text: str) -> AnalyzeResult:
 
     # 项目级事实：key 白名单外的丢弃（防模型自造 key 污染 claims）
     facts_out: list[tuple[str, str, tuple[str, ...]]] = []
-    for pf in raw.get("project_facts", []) or []:
+    facts_in = raw.get("project_facts", [])
+    if facts_in is None:
+        facts_in = []
+    if not isinstance(facts_in, list):
+        raise TypeError("project_facts must be a list")
+    for pf in facts_in:
         if not isinstance(pf, dict):
             continue
         key = str(pf.get("key", "")).strip()

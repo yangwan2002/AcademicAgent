@@ -19,7 +19,7 @@ _SRC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
 if _SRC not in sys.path:
     sys.path.insert(0, _SRC)
 
-from paper_agent.intents.router import Intent
+from paper_agent.intents.intent import Intent
 from paper_agent.providers.llm.base import LLMProvider
 from paper_agent.providers.llm.mock import MockLLMProvider
 from paper_agent.runtime.handlers import HandlerContext, handler_for
@@ -63,8 +63,8 @@ def test_handlers_registered_for_five_intents():
         assert h is not None and h.intent is intent
 
 
-def test_unregistered_intent_returns_none():
-    assert handler_for(Intent.UNCLEAR) is None
+def test_handler_registry_covers_every_public_intent():
+    assert all(handler_for(intent) is not None for intent in Intent)
 
 
 # ============ polish：constraints 真进 prompt（执行效果）============

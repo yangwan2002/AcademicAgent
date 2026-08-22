@@ -4,7 +4,7 @@
 - 各层异常/取消/正常各恰一个 WORKFLOW_END 且 finalize 被调用（Property 12）
 - 三持久化事件不混类
 - gate 通过后取消不写；取消后源/undo 栈不变（Property 1）
-- span("run") 包裹；ROUTE_DECISION 等挂在 run span 下
+- span("run") 包裹；Planning 业务事件挂在 run span 下
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ _SRC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
 if _SRC not in sys.path:
     sys.path.insert(0, _SRC)
 
-from paper_agent.coordinator import Coordinator
+from paper_agent.coordinator import Coordinator, RunOutcome
 from paper_agent.errors import OperationCancelled
 from paper_agent.observability.events import Event, EventKind
 from paper_agent.observability.recorder import SimpleTraceRecorder
@@ -85,17 +85,17 @@ def test_failed_run_one_workflow_end_and_not_raised(tmp_path):
 
 def test_run_span_wraps_business_events(tmp_path):
     def fn(bus, ct):
-        bus.publish(EventKind.ROUTE_DECISION, intent="polish", section_id="intro")
+        bus.publish(EventKind.OPERATION_ANALYSIS, call_status="success", operation_count=1)
         return "ok"
 
     report, r, kinds = _run_and_capture(fn, tmp_path)
     # 有一对 run span 的 START/END
     span_starts = [e for e in r.events if e.kind is EventKind.SPAN_START]
     assert any(e.data.get("name") == "run" for e in span_starts)
-    # ROUTE_DECISION 挂在 run span 下（parent 为 run span）
-    route = next(e for e in r.events if e.kind is EventKind.ROUTE_DECISION)
+    # OPERATION_ANALYSIS 挂在 run span 下（parent 为 run span）
+    analysis = next(e for e in r.events if e.kind is EventKind.OPERATION_ANALYSIS)
     run_start = next(e for e in span_starts if e.data.get("name") == "run")
-    assert route.span_id == run_start.span_id
+    assert analysis.span_id == run_start.span_id
 
 
 def test_finalize_called_once_even_on_error(tmp_path):
@@ -123,6 +123,75 @@ def test_no_observability_uses_null_bus():
     assert report.value == "v"
     assert report.recorder is None
     assert report.trace_collection_status == "not_requested"
+
+
+def test_plain_ok_result_is_not_treated_as_a_document_write():
+    """``ok`` 也用于只读问答，Coordinator 不得据此猜测 Working_Copy 状态。"""
+    class ReadOnlyResult:
+        ok = True
+
+    report = _coord().run(lambda bus, ct: ReadOnlyResult())
+    assert report.working_copy_status == "unchanged"
+
+
+def test_explicit_run_outcome_sets_working_copy_status():
+    value = object()
+    report = _coord().run(
+        lambda bus, ct: RunOutcome(value=value, working_copy_status="updated")
+    )
+    assert report.value is value
+    assert report.working_copy_status == "updated"
+
+
+def test_working_copy_probe_records_update_after_cancel_or_failure():
+    """业务未返回 RunOutcome 时，finally 探针仍保留已经发生的写入事实。"""
+    def assert_failure(error, expected_run_status):
+        state = {"changed": False}
+        renderer = CaptureRenderer()
+
+        def write_then_fail(bus, cancel_token):
+            state["changed"] = True
+            raise error
+
+        report = _coord(renderer=renderer).run(
+            write_then_fail,
+            working_copy_probe=lambda: (
+                "updated" if state["changed"] else "unchanged"
+            ),
+        )
+
+        assert report.run_status == expected_run_status
+        assert report.working_copy_status == "updated"
+        end = next(
+            event for event in renderer.events
+            if event.kind is EventKind.WORKFLOW_END
+        )
+        assert end.data["working_copy_status"] == "updated"
+
+    assert_failure(OperationCancelled(), "cancelled")
+    assert_failure(RuntimeError("after write"), "failed")
+
+
+def test_explicit_run_outcome_takes_priority_over_probe():
+    report = _coord().run(
+        lambda bus, ct: RunOutcome(working_copy_status="rolled_back"),
+        working_copy_probe=lambda: "updated",
+    )
+    assert report.working_copy_status == "rolled_back"
+
+
+def test_working_copy_probe_failure_is_best_effort():
+    def broken_probe():
+        raise OSError("probe unavailable")
+
+    report = _coord().run(
+        lambda bus, ct: "ok",
+        working_copy_probe=broken_probe,
+    )
+
+    assert report.run_status == "completed"
+    assert report.value == "ok"
+    assert report.working_copy_status == "unchanged"
 
 
 # --- 持久化三事件不混类 + 原子写 ---

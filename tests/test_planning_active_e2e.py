@@ -1,11 +1,10 @@
-"""intent-planning Task 24 验收：Active 端到端 + 模式矩阵。
+"""Planning 自然语言管线端到端验收。
 
 专用 Fixture：含 Introduction / Method / Conclusion 的 tex。
 - 用例一：「新增 Discussion 章节讨论结果意义与局限，放 Conclusion 前」
   （依赖 Conclusion 存在）→ 正确拆解/抽槽/不重复追问/确认/执行/落 trace
 - 用例二：「先保守润色 Introduction、保留数字和引用，再转换为 docx」
   → 多操作按序 + convert 终止校验通过 + 直通不触发澄清
-- 模式矩阵 off / shadow / active × mock
 """
 
 from __future__ import annotations
@@ -21,6 +20,7 @@ if _SRC not in sys.path:
 from paper_agent.application.turn_service import TurnService
 from paper_agent.config import Config
 from paper_agent.coordinator import Coordinator
+from paper_agent.providers.llm.base import ToolCall
 from paper_agent.providers.llm.mock import MockLLMProvider
 from paper_agent.runtime.handlers import HandlerContext
 from paper_agent.session.file_session import FileBackedSession
@@ -91,16 +91,22 @@ def _extract(slots):
 
 
 _DISCUSSION_BODY = (
-    "Our findings suggest that the proposed approach generalises beyond the "
-    "specific benchmark considered here, and that the observed gains stem "
-    "primarily from the redesigned training objective rather than from added "
-    "capacity. This matters because it points to a direction that is cheap to "
-    "adopt in practice. At the same time, several limitations temper these "
-    "conclusions. The evaluation covers a single domain, so transfer to other "
-    "domains remains an open question. The comparison also assumes access to "
-    "clean annotations, which is often unrealistic in deployment settings. "
-    "Finally, we did not study robustness under distribution shift, and we "
-    "regard that as the most pressing item for future work."
+    "The Introduction reports that the method reaches 0.87 accuracy. The Method "
+    "section states that the manuscript describes the architecture and training "
+    "procedure, while the Conclusion records that the presented method achieves "
+    "strong results. On the basis of those statements, this discussion treats the "
+    "reported accuracy as the manuscript's current result and does not infer a new "
+    "evaluation setting, data source, mechanism, comparison, or causal explanation. "
+    "Any stronger interpretation requires additional evidence from the author."
+)
+
+_GROUNDED = ToolCall(
+    id="ground-1", name="verify_add_section_grounding",
+    arguments={
+        "supported": True,
+        "reason_code": "supported",
+        "unsupported_claims": [],
+    },
 )
 
 
@@ -118,10 +124,10 @@ def _collect_kinds(node) -> set[str]:
     return found
 
 
-def _svc(cfg_mode, llm, ctx, interactor, *, coordinator=None):
+def _svc(llm, ctx, interactor, *, coordinator=None):
     return TurnService(
-        config=Config(intent_planning_mode=cfg_mode),
-        llm=llm, coordinator=coordinator, shadow_coordinator=Coordinator(),
+        config=Config(),
+        llm=llm, coordinator=coordinator,
         handler_context=ctx, interactor=interactor,
     )
 
@@ -144,16 +150,15 @@ def test_case1_add_discussion_before_conclusion(tmp_path):
             "structure_desc": "意义 → 局限",
             "position": "before:conclusion",
         }),
-        # add_section 正文生成（须 ≥200 字符过 AddSectionGate，且不含新数字）
-        _DISCUSSION_BODY, _DISCUSSION_BODY, _DISCUSSION_BODY,
+        # add_section 正文生成 + 独立事实依据 Gate
+        _DISCUSSION_BODY, _GROUNDED,
     ])
     it = _Interactor()
     ctx = HandlerContext(session=session, llm=llm, facts=_facts(tmp_path))
-    svc = _svc("active", llm, ctx, it, coordinator=Coordinator())
+    svc = _svc(llm, ctx, it, coordinator=Coordinator())
 
-    out = svc.handle_turn(text, session=session, facts=ctx.facts, legacy=lambda: None)
+    out = svc.handle_turn(text, session=session, facts=ctx.facts)
 
-    assert out.mode == "active"
     assert out.report is not None, out.planning_exit
     assert out.report.plan_status is PlanStatus.DONE, out.report.operations[0].message
     assert out.report.operations[0].status is OperationStatus.SUCCEEDED
@@ -193,9 +198,9 @@ def test_case2_polish_then_convert_ordered_and_no_clarification(tmp_path):
     ])
     it = _Interactor()
     ctx = HandlerContext(session=session, llm=llm, output_dir=str(tmp_path / "out"))
-    svc = _svc("active", llm, ctx, it, coordinator=Coordinator())
+    svc = _svc(llm, ctx, it, coordinator=Coordinator())
 
-    out = svc.handle_turn(text, session=session, facts=None, legacy=lambda: None)
+    out = svc.handle_turn(text, session=session, facts=None)
 
     assert out.report is not None, out.planning_exit
     ops = out.report.operations
@@ -218,9 +223,8 @@ def test_case2_constraints_reach_polish_prompt(tmp_path):
     ])
     it = _Interactor()
     ctx = HandlerContext(session=session, llm=llm)
-    svc = _svc("active", llm, ctx, it, coordinator=Coordinator())
-    svc.handle_turn("润色 Introduction 保留数字", session=session, facts=None,
-                    legacy=lambda: None)
+    svc = _svc(llm, ctx, it, coordinator=Coordinator())
+    svc.handle_turn("润色 Introduction 保留数字", session=session, facts=None)
     prompt = "\n".join(m.content for call in llm.calls for m in call)
     assert "保留数字和引用" in prompt
 
@@ -236,46 +240,14 @@ def test_rejected_plan_does_not_write(tmp_path):
     ])
     it = _Interactor(confirm=[ConfirmDecision("reject")])
     ctx = HandlerContext(session=session, llm=llm)
-    svc = _svc("active", llm, ctx, it, coordinator=Coordinator())
-    out = svc.handle_turn("润色引言", session=session, facts=None, legacy=lambda: None)
+    svc = _svc(llm, ctx, it, coordinator=Coordinator())
+    out = svc.handle_turn("润色引言", session=session, facts=None)
     assert out.report is None
     assert out.planning_exit.status is PlanStatus.REJECTED
     assert session.read_working() == before        # 逐字节不变
 
 
-# ============ 模式矩阵 off / shadow / active ============
-
-def test_mode_matrix_off_runs_legacy_only(tmp_path):
-    session = _session(tmp_path)
-    llm = MockLLMProvider()
-    ctx = HandlerContext(session=session, llm=llm)
-    svc = _svc("off", llm, ctx, _Interactor())
-    calls = []
-    out = svc.handle_turn("润色引言", session=session, facts=None,
-                          legacy=lambda: calls.append(1) or "legacy")
-    assert out.mode == "off" and out.legacy_result == "legacy"
-    assert llm.calls == []                         # 理解层零调用
-    assert out.report is None
-
-
-def test_mode_matrix_shadow_readonly(tmp_path):
-    session = _session(tmp_path)
-    before = session.read_working()
-    llm = MockLLMProvider(scripted=[
-        _analyze([("polish", "润色引言", [])]),
-        _extract({"section_id": "introduction"}),
-    ])
-    ctx = HandlerContext(session=session, llm=llm)
-    svc = _svc("shadow", llm, ctx, _Interactor())
-    out = svc.handle_turn("润色引言", session=session, facts=None, legacy=lambda: "legacy")
-    assert out.mode == "shadow"
-    assert out.legacy_result == "legacy"
-    assert out.shadow is not None and out.shadow.ok is True
-    assert session.read_working() == before        # shadow 不写
-    assert out.report is None                      # shadow 不执行
-
-
-def test_mode_matrix_active_executes(tmp_path):
+def test_planning_executes(tmp_path):
     session = _session(tmp_path)
     body = "\nOur method reaches 0.87 accuracy, improving on prior work \\cite{smith2020}.\n\n"
     llm = MockLLMProvider(scripted=[
@@ -284,9 +256,8 @@ def test_mode_matrix_active_executes(tmp_path):
         body,
     ])
     ctx = HandlerContext(session=session, llm=llm)
-    svc = _svc("active", llm, ctx, _Interactor(), coordinator=Coordinator())
-    out = svc.handle_turn("润色引言", session=session, facts=None, legacy=lambda: None)
-    assert out.mode == "active"
+    svc = _svc(llm, ctx, _Interactor(), coordinator=Coordinator())
+    out = svc.handle_turn("润色引言", session=session, facts=None)
     assert out.report is not None and out.report.plan_status is PlanStatus.DONE
 
 
@@ -303,8 +274,8 @@ def test_active_trace_covers_whole_turn(tmp_path):
     ctx = HandlerContext(session=session, llm=llm)
     runs_dir = tmp_path / "runs"
     coordinator = Coordinator(enable_trace=True, runs_dir=str(runs_dir))
-    svc = _svc("active", llm, ctx, _Interactor(), coordinator=coordinator)
-    out = svc.handle_turn("润色引言", session=session, facts=None, legacy=lambda: None)
+    svc = _svc(llm, ctx, _Interactor(), coordinator=coordinator)
+    out = svc.handle_turn("润色引言", session=session, facts=None)
 
     assert out.run_report is not None
     trace_path = runs_dir / out.run_report.run_id / "trace.json"
@@ -316,8 +287,43 @@ def test_active_trace_covers_whole_turn(tmp_path):
     assert "operation_result" in kinds
     assert "plan_result" in kinds
     assert out.run_report.run_status == "completed"
+    assert out.run_report.working_copy_status == "updated"
+    assert data["working_copy_status"] == "updated"
     # 原始用户文本不落盘
     assert "润色引言" not in trace_path.read_text(encoding="utf-8")
+
+
+def test_readonly_fallback_stays_in_the_planning_run(tmp_path):
+    """一次自然语言消息只有一个 run，Planning 与 Ask 事件在同一棵 trace。"""
+    session = _session(tmp_path)
+    before = session.read_working()
+    question = "这篇论文有哪些章节？"
+    llm = MockLLMProvider(scripted=[
+        _analyze([], unmapped=[question]),
+        "这篇论文包含 Introduction、Method 和 Conclusion 三个章节。",
+    ])
+    ctx = HandlerContext(session=session, llm=llm)
+    runs_dir = tmp_path / "runs"
+    coordinator = Coordinator(enable_trace=True, runs_dir=str(runs_dir))
+    svc = _svc(llm, ctx, _Interactor(), coordinator=coordinator)
+
+    out = svc.handle_turn(question, session=session, facts=None)
+
+    assert out.planning_exit is not None
+    assert out.planning_exit.status is PlanStatus.NO_ACTION
+    assert out.readonly_result is not None and out.readonly_result.ok
+    assert "Introduction" in out.readonly_result.answer
+    assert session.read_working() == before
+    assert out.run_report.working_copy_status == "unchanged"
+
+    traces = list(runs_dir.glob("*/trace.json"))
+    assert len(traces) == 1, "一条自然语言消息不应拆成 Planning/Ask 两份 trace"
+    data = json.loads(traces[0].read_text(encoding="utf-8"))
+    kinds = _collect_kinds(data)
+    assert {"operation_analysis", "ask_turn_start", "ask_turn_end"} <= kinds
+    assert data["working_copy_status"] == "unchanged"
+    # 原始问句只出 hash/length，不进入 trace。
+    assert question not in traces[0].read_text(encoding="utf-8")
 
 
 # ============ P0：系统异常不得报成「用户取消」 ============
@@ -339,9 +345,9 @@ def test_system_exception_reported_as_failed_not_cancelled(tmp_path):
         _extract({"section_id": "introduction"}),
     ])
     ctx = HandlerContext(session=session, llm=llm)
-    svc = _svc("active", llm, ctx, _BoomInteractor(), coordinator=Coordinator())
+    svc = _svc(llm, ctx, _BoomInteractor(), coordinator=Coordinator())
 
-    out = svc.handle_turn("润色引言", session=session, facts=None, legacy=lambda: None)
+    out = svc.handle_turn("润色引言", session=session, facts=None)
 
     assert out.run_report.run_status == "failed"
     assert out.report is not None
@@ -363,12 +369,73 @@ def test_cancel_still_reported_as_cancelled(tmp_path):
         _extract({"section_id": "introduction"}),
     ])
     ctx = HandlerContext(session=session, llm=llm)
-    svc = _svc("active", llm, ctx, _CancelInteractor(), coordinator=Coordinator())
-    out = svc.handle_turn("润色引言", session=session, facts=None, legacy=lambda: None)
+    svc = _svc(llm, ctx, _CancelInteractor(), coordinator=Coordinator())
+    out = svc.handle_turn("润色引言", session=session, facts=None)
 
     assert out.run_report.run_status == "cancelled"
     assert out.report.plan_status is PlanStatus.CANCELLED
     assert out.warnings == []
+
+
+def _run_turn_that_writes_then_raises(tmp_path, monkeypatch, error):
+    """用真实 TurnService + Coordinator 覆盖执行器异常边界。"""
+    from paper_agent.runtime import plan_executor as plan_executor_module
+
+    session = _session(tmp_path)
+    before = session.read_working()
+    llm = MockLLMProvider(scripted=[
+        _analyze([("polish", "润色引言", [])]),
+        _extract({"section_id": "introduction"}),
+    ])
+    ctx = HandlerContext(session=session, llm=llm)
+    runs_dir = tmp_path / "runs"
+
+    def write_then_raise(plan, state, handler_context, **kwargs):
+        handler_context.session.write_working(
+            handler_context.session.read_working() + "\n% partial write\n",
+            bus=kwargs.get("bus"),
+        )
+        raise error
+
+    monkeypatch.setattr(plan_executor_module, "execute_plan", write_then_raise)
+    svc = _svc(
+        llm,
+        ctx,
+        _Interactor(),
+        coordinator=Coordinator(enable_trace=True, runs_dir=str(runs_dir)),
+    )
+
+    out = svc.handle_turn("润色引言", session=session, facts=None)
+    trace_path = runs_dir / out.run_report.run_id / "trace.json"
+    trace = json.loads(trace_path.read_text(encoding="utf-8"))
+    assert session.read_working() != before
+    return out, trace
+
+
+def test_write_then_cancel_keeps_updated_working_copy_status(tmp_path, monkeypatch):
+    from paper_agent.errors import OperationCancelled
+
+    out, trace = _run_turn_that_writes_then_raises(
+        tmp_path,
+        monkeypatch,
+        OperationCancelled(),
+    )
+
+    assert out.run_report.run_status == "cancelled"
+    assert out.run_report.working_copy_status == "updated"
+    assert trace["working_copy_status"] == "updated"
+
+
+def test_write_then_exception_keeps_updated_working_copy_status(tmp_path, monkeypatch):
+    out, trace = _run_turn_that_writes_then_raises(
+        tmp_path,
+        monkeypatch,
+        RuntimeError("failed after write"),
+    )
+
+    assert out.run_report.run_status == "failed"
+    assert out.run_report.working_copy_status == "updated"
+    assert trace["working_copy_status"] == "updated"
 
 
 # ============ P0：空计划端到端不报 done ============
@@ -378,12 +445,14 @@ def test_unsupported_request_reports_no_action(tmp_path):
     before = session.read_working()
     llm = MockLLMProvider(scripted=[
         _analyze([], unmapped=["帮我查一下这篇论文的重复率"]),
+        "当前只读工具无法计算重复率。",
     ])
     ctx = HandlerContext(session=session, llm=llm)
-    svc = _svc("active", llm, ctx, _Interactor(), coordinator=Coordinator())
-    out = svc.handle_turn("帮我查一下这篇论文的重复率", session=session, facts=None,
-                          legacy=lambda: None)
+    svc = _svc(llm, ctx, _Interactor(), coordinator=Coordinator())
+    out = svc.handle_turn("帮我查一下这篇论文的重复率", session=session, facts=None)
 
     assert out.report is None
     assert out.planning_exit.status is PlanStatus.NO_ACTION
+    assert out.planning_exit.route_to_readonly is True
+    assert out.readonly_result is not None
     assert session.read_working() == before        # 逐字节未变

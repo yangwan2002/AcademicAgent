@@ -9,7 +9,7 @@
 
 from __future__ import annotations
 
-from paper_agent.intents.router import Intent
+from paper_agent.intents.intent import Intent
 from paper_agent.tasking.contracts import SlotValue
 from paper_agent.tasking.extractors.base import PreExtractor, derive_want_search
 from paper_agent.tasking.intent_spec import REWRITE_SPEC, IntentSpec
