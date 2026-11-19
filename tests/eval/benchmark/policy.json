@@ -1,0 +1,10 @@
+{
+  "policy_id": "academic-agent-development-v1",
+  "note": "Provisional development thresholds; calibrate on an independently reviewed baseline before release use. Macro average gives each suite equal weight.",
+  "min_suite_success_rate": {"planning": 0.85, "ask": 0.8, "editing": 0.8, "relevance": 0.85},
+  "max_regression_pp": 5.0,
+  "max_hard_violations": 0,
+  "judge_min_score": 4,
+  "min_relevance_precision": 0.9,
+  "min_relevance_recall": 0.8
+}

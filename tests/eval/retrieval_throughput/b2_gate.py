@@ -1,4 +1,4 @@
-"""Offline paired B2 gate: Legacy vs B1 vs B1+B2.
+"""Offline paired gate: unified single-item vs batch vs experimental reorder.
 
 The replay uses deterministic providers and a simulated monotonic clock. It
 never touches network services and persists no raw query or candidate text.
@@ -24,7 +24,10 @@ for path in (str(SRC), str(HERE)):
     if path not in sys.path:
         sys.path.insert(0, path)
 
-from baseline import build_legacy_snapshot
+from baseline import build_single_item_snapshot
+from experimental_attempt import (
+    _run_attempt_b2_verify_first_reference, run_experimental_attempt,
+)
 from paper_agent.config import Config
 from paper_agent.literature.ledger import ReferenceLedger
 from paper_agent.literature.quota import (
@@ -42,7 +45,7 @@ from paper_agent.literature.relevance_runtime import (
 )
 from paper_agent.literature.retrieval.attempt import (
     AttemptDeps, RelevanceAcceptancePolicy,
-    _run_attempt_b2_verify_first_reference, run_attempt,
+    run_attempt,
 )
 from paper_agent.literature.retrieval.batch import (
     BatchDisposition, RetrievalBatch,
@@ -66,7 +69,7 @@ from paper_agent.workspace.models import RetrievalCandidate
 
 
 PROFILE_PATH = HERE / "benchmark_profile.json"
-REPORT_PATH = HERE / "b2_gate_report.json"
+REPORT_PATH = HERE / "b2_experiment_report.json"
 GOLDEN_PATH = HERE / "legacy_golden.json"
 RELEVANCE_MANIFEST = HERE.parent / "relevance_batch" / "manifest.json"
 
@@ -267,7 +270,7 @@ def _run_mode(mode: str, candidates=None) -> dict:
     }
     reviewer = _Reviewer(verdict_by_key, clock, events)
     budget = BudgetLedger(_limits(), clock=clock)
-    runtime = _runtime(reviewer) if mode != "legacy" else None
+    runtime = _runtime(reviewer) if mode != "single_item" else None
     deps = AttemptDeps(
         registry=registry, ledger=ReferenceLedger(),
         cross_verifier=CrossVerifier(
@@ -295,7 +298,12 @@ def _run_mode(mode: str, candidates=None) -> dict:
         research_question="How do agents retrieve and verify citation evidence?",
         section_purpose="introduction_background",
     )
-    run = _run_attempt_b2_verify_first_reference if mode == "b2_reference" else run_attempt
+    if mode == "b2_reference":
+        run = _run_attempt_b2_verify_first_reference
+    elif mode == "b1_b2":
+        run = run_experimental_attempt
+    else:
+        run = run_attempt
     result = run(
         "redacted-replay-query", criteria, _quota(), batch, deps, limit=100
     )
@@ -320,7 +328,7 @@ def _run_mode(mode: str, candidates=None) -> dict:
         {
             "disposition": item.disposition.value,
             "rejection_reasons": list(item.rejection_reasons),
-            # Reject target ids are diagnostic only: Legacy leaves them empty,
+            # Reject target ids are diagnostic only: single-item review leaves them empty,
             # while B2 knows the persistent subject id during prepare.  They do
             # not affect commit, quota, strictness or user-visible disposition.
             "target_reference_id": (
@@ -405,15 +413,15 @@ def build_b2_gate_report(profile_path: Path = PROFILE_PATH, *, runs: int | None 
     run_count = runs or int(profile["runs"]["replay_min"])
     mode_rows = {
         mode: [_run_mode(mode) for _ in range(run_count)]
-        for mode in ("legacy", "b1", "b1_b2")
+        for mode in ("single_item", "b1", "b1_b2")
     }
     reference_rows = [_run_mode("b2_reference") for _ in range(run_count)]
     paired_semantics = all(
-        legacy["semantic"] == b1["semantic"] == b2["semantic"] == reference["semantic"]
+        single_item["semantic"] == b1["semantic"] == b2["semantic"] == reference["semantic"]
         # strict=True：四臂必须等长。少了一臂就静默截断的话，"配对语义一致"会在
         # 只比了前几轮的情况下报 True —— 这是 gate 结论失真，不是小瑕疵。
-        for legacy, b1, b2, reference in zip(
-            mode_rows["legacy"], mode_rows["b1"],
+        for single_item, b1, b2, reference in zip(
+            mode_rows["single_item"], mode_rows["b1"],
             mode_rows["b1_b2"], reference_rows, strict=True,
         )
     )
@@ -434,7 +442,7 @@ def build_b2_gate_report(profile_path: Path = PROFILE_PATH, *, runs: int | None 
         and rollback_b1["judge_key"] == mode_rows["b1"][0]["judge_key"]
     )
     golden = json.loads(GOLDEN_PATH.read_text(encoding="utf-8"))
-    legacy_hash = canonical_hash(build_legacy_snapshot())
+    single_item_hash = canonical_hash(build_single_item_snapshot())
     checks = {
         "paired_final_semantics_equal": paired_semantics,
         "b2_verify_calls_not_above_survivors": b2_verify <= b2_survivors,
@@ -448,15 +456,18 @@ def build_b2_gate_report(profile_path: Path = PROFILE_PATH, *, runs: int | None 
             for rows in mode_rows.values() for row in rows
         ),
         "rollback_restores_b1_order_and_key": rollback_ok,
-        "legacy_golden_unchanged": legacy_hash == golden["snapshot_sha256"],
+        "legacy_golden_unchanged": single_item_hash == golden["snapshot_sha256"],
         "b2_default_off": Config().literature_pipeline_reorder_enabled is False,
         "replay_minimum_met": run_count >= int(profile["runs"]["replay_min"]),
     }
     engineering_go = all(checks.values())
     adjudicated = _adjudicated_count()
     return {
-        "schema_version": "retrieval-throughput-b2-gate-report-v1",
+        "schema_version": "retrieval-throughput-b2-gate-report-v2",
         "network_used": False, "profile_id": profile["profile_id"],
+        "production_modes": ["single_item", "b1"],
+        "experimental_modes": ["b1_b2", "b2_reference"],
+        "historical_profile_mode_mapping": {"legacy": "single_item"},
         "profile_hash": canonical_hash(profile), "runs_per_mode": run_count,
         "workload": {
             "candidates": 30, "expected_accepted": 20,

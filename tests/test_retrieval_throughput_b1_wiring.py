@@ -102,7 +102,7 @@ def test_b1_defaults_are_batch_on():
 
     `size` 必须 >=2：`_active_relevance_runtime` 对 size<2 抛
     `CompositionUnavailable`，所以「开了 batch 但 size=1」是不可装配的组合，
-    两个默认值得一起改。B2（`pipeline_reorder`）仍默认关 —— 它的收益待重估。
+    两个默认值得一起改。重排序已移入离线实验；生产装配拒绝旧 reorder 开关。
     """
     config = Config()
     assert config.literature_relevance_batch_enabled is True
@@ -113,7 +113,7 @@ def test_b1_defaults_are_batch_on():
 
 
 def test_disabled_b1_does_not_construct_active_runtime(tmp_path):
-    """显式关掉时不装 active runtime（回退单篇判定的逃生阀仍要可用）。
+    """显式关掉批量时，由同一生产 attempt 使用单篇判定策略。
 
     B1 默认已开，故此处必须**显式** `enabled=False`，不能依赖 `_config()` 的默认。
     """

@@ -15,7 +15,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from paper_agent.literature.bibkey import make_bibkey as _make_bibkey  # noqa: F401 (兼容再导出)
 from paper_agent.literature.ledger import UpsertAction
 from paper_agent.literature.migration import candidate_to_record
 from paper_agent.literature.verification import EventKind

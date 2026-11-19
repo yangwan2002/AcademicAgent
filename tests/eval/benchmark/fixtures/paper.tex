@@ -1,0 +1,11 @@
+\section{Introduction}
+We use a graph model for document classification. Our method achieves 0.87 accuracy, compared with a baseline of 0.84 \cite{smith2020}. We evaluate accuracy and inference latency. The current evidence is limited to one dataset.
+
+\section{Method}
+We use a graph neural network with 3 layers. We train for 20 epochs with a learning rate of 0.001. The loss is $L = L_c + 0.1 L_r$. We use the same training protocol for both systems \cite{lee2021}.
+
+\section{Results}
+We use the DocGraph dataset containing 1200 documents. The accuracy is 0.87 and the baseline accuracy is 0.84. Inference latency is 12 milliseconds per document. We report no significance test and no external validation.
+
+\section{Conclusion}
+We use a graph model that improves accuracy on DocGraph. The evaluation covers one dataset. Further evaluation on independent datasets is needed. The current experiment does not establish statistical significance.

@@ -1,0 +1,92 @@
+name: Academic benchmark
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      live:
+        description: 'Run paid real-model evaluation (requires benchmark secrets)'
+        type: boolean
+        default: false
+      relevance_manifest:
+        description: 'Repository path to the relevance manifest'
+        type: string
+        default: 'tests/eval/relevance_batch/manifest.json'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: academic-benchmark-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  benchmark-smoke:
+    name: benchmark-protocol-smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -e '.[all,dev]'
+      - run: python -m pytest tests/test_benchmark.py -q
+      - run: python -m tests.eval.benchmark run --smoke --output runs/benchmark/ci-smoke
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: benchmark-protocol-smoke
+          path: runs/benchmark/ci-smoke
+          retention-days: 14
+
+  benchmark-live:
+    name: benchmark-live-development-quality
+    if: github.event_name == 'workflow_dispatch' && inputs.live
+    needs: benchmark-smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    # Configure model credentials/variables in this environment. No fork PR
+    # executes this job. No pull_request_target or privileged PR checkout.
+    environment: benchmark
+    env:
+      PAPER_LLM: ${{ vars.BENCHMARK_LLM_PROVIDER }}
+      PAPER_LLM_MODEL: ${{ vars.BENCHMARK_LLM_MODEL }}
+      PAPER_BASE_URL: ${{ vars.BENCHMARK_BASE_URL }}
+      PAPER_KEY_ENV: BENCHMARK_WRITER_KEY
+      BENCHMARK_WRITER_KEY: ${{ secrets.BENCHMARK_WRITER_KEY }}
+      PAPER_REVIEWER_LLM: ${{ vars.BENCHMARK_JUDGE_PROVIDER }}
+      PAPER_REVIEWER_LLM_MODEL: ${{ vars.BENCHMARK_JUDGE_MODEL }}
+      PAPER_REVIEWER_BASE_URL: ${{ vars.BENCHMARK_JUDGE_BASE_URL }}
+      PAPER_REVIEWER_KEY_ENV: BENCHMARK_JUDGE_KEY
+      BENCHMARK_JUDGE_KEY: ${{ secrets.BENCHMARK_JUDGE_KEY }}
+      RELEVANCE_MANIFEST: ${{ inputs.relevance_manifest }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -e '.[all,dev]'
+      - name: Check model configuration
+        shell: bash
+        run: |
+          test -n "$PAPER_LLM"
+          test -n "$PAPER_LLM_MODEL"
+          test -n "$BENCHMARK_WRITER_KEY"
+          test -n "$PAPER_REVIEWER_LLM_MODEL"
+          test -n "$BENCHMARK_JUDGE_KEY"
+      - name: Run actual models and enforce development quality
+        run: >-
+          python -m tests.eval.benchmark run --live --allow-paid-provider
+          --relevance-manifest "$RELEVANCE_MANIFEST"
+          --output runs/benchmark/ci-live
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: benchmark-live-development-quality
+          path: runs/benchmark/ci-live
+          retention-days: 14

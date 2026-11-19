@@ -1,4 +1,4 @@
-"""Task 5 B1 legacy-order batching and active-key wiring tests."""
+"""Unified verify-before-review attempt: single-item and batch strategies."""
 
 from __future__ import annotations
 
@@ -133,7 +133,7 @@ class _BatchReviewer:
         )
 
 
-class _LegacyReviewer:
+class _SingleItemReviewer:
     def complete(self, messages, **opts):
         return LLMResponse(
             content="",
@@ -219,7 +219,7 @@ def _deps(candidates, reviewer, *, missing=(), store=None, limits=None):
         ledger=ReferenceLedger(),
         cross_verifier=CrossVerifier(registry.verify_pairs()),
         judge=RelevanceJudge(
-            _LegacyReviewer(), judge_version=JudgeVersion(model_id="legacy")
+            _SingleItemReviewer(), judge_version=JudgeVersion(model_id="legacy")
         ),
         relevance_store=store or RelevanceStore(),
         budget=ledger_budget.verify_budget_view(),
@@ -255,21 +255,27 @@ def _batch(quota=None):
     )
 
 
-def test_all_off_dispatches_directly_to_frozen_legacy(monkeypatch):
-    import paper_agent.literature.retrieval.attempt as module
-
-    sentinel = object()
-    called = []
-
-    def fake(*args, **kwargs):
-        called.append((args, kwargs))
-        return sentinel
-
-    monkeypatch.setattr(module, "_run_attempt_legacy", fake)
-    deps = object.__new__(AttemptDeps)
+def test_disabled_batch_uses_single_item_review_in_unified_attempt():
+    batch_reviewer = _BatchReviewer()
+    candidates = [_candidate(index) for index in range(3)]
+    deps, _budget, _search, verify = _deps(candidates, batch_reviewer)
     deps.active_relevance_runtime = None
-    assert module.run_attempt("q", CRITERIA, _quota(), object(), deps) is sentinel
-    assert len(called) == 1
+    single_calls = []
+    original_complete = deps.judge._llm.complete
+
+    def complete(messages, **options):
+        single_calls.append(messages)
+        return original_complete(messages, **options)
+
+    deps.judge._llm.complete = complete
+    result = run_attempt("agents", CRITERIA, _quota(), _batch(), deps)
+    assert [item.disposition for item in result.items] == [
+        BatchDisposition.ACCEPT_NEW
+    ] * 3
+    assert len(single_calls) == 3
+    assert batch_reviewer.calls == 0
+    assert verify.calls == 3
+    assert result.throughput is None
 
 
 def test_b1_batches_verified_candidates_into_one_physical_llm_call():

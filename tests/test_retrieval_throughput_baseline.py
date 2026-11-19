@@ -1,4 +1,4 @@
-"""Task 1: frozen Legacy characterization and benchmark-profile checks."""
+"""Unified single-item behavior against the frozen historical semantic golden."""
 
 from __future__ import annotations
 
@@ -73,9 +73,9 @@ def test_profile_hash_is_canonical_and_stable():
     assert first == second and len(first) == 64
 
 
-def test_legacy_characterization_matches_golden():
+def test_unified_single_item_characterization_matches_historical_golden():
     baseline = _load_module("throughput_baseline", EVAL / "baseline.py")
-    actual = baseline.build_legacy_snapshot()
+    actual = baseline.build_single_item_snapshot()
     golden = json.loads((EVAL / "legacy_golden.json").read_text(encoding="utf-8"))
     assert _canonical_hash(actual) == golden["snapshot_sha256"]
     assert _semantic_summary(actual) == golden["semantic_summary"]
@@ -92,6 +92,7 @@ def test_runner_is_offline_and_uses_same_golden_snapshot():
     runner = _load_module("throughput_runner_report", EVAL / "runner.py")
     report = runner.build_report(EVAL / "benchmark_profile.json")
     assert report["network_used"] is False
+    assert report["mode"] == "single-item-characterization"
     assert report["snapshot_hash"] == _canonical_hash(report["result"])
     assert report["snapshot_hash"] == json.loads(
         (EVAL / "legacy_golden.json").read_text(encoding="utf-8")

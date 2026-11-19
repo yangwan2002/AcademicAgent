@@ -8,7 +8,7 @@
 
 ## 现状
 
-- 293 个 Python 文件 / 约 5.2 万行 / **1816 个测试**（不含 `tests/eval`）
+- 正式源码位于 `src/paper_agent/`，常规测试位于 `tests/`，评测与实验位于 `tests/eval/`
 - CI：ruff + pytest（3.10 / 3.12）+ 无可选依赖时的可导入性检查
 - **尚未发布**：见下方「已知限制」。自然语言入口已收敛为单一 Planning 管线
 
@@ -93,6 +93,11 @@ python scripts/chat.py 你的论文.docx
 
 ## 架构
 
+普通自然语言统一进入 Planning。文献检索的生产源码也已收敛为一条
+“严格核验 → 相关性评审 → 结果归并”流程，单篇与批量评审共用实现；默认批量。
+独立 Legacy 检索实现已删除，B2 顺序实验移到 `tests/eval/retrieval_throughput/`，
+不再通过生产配置启用。阅读入口见 [源码阅读指南](docs/project_code_reading_guide.md#0-从当前主流程开始)。
+
 ```
 scripts/chat.py            REPL 入口
   ├─ application/          TurnService：自然语言统一进入 Planning
@@ -135,7 +140,18 @@ pytest tests/ -q --ignore=tests/eval   # 1816 个
 ruff check .                           # CI 同一套规则
 ```
 
-`tests/eval/` 下是要打真实 API 的 dogfood / A-B 脚本，不进 CI，需手动跑。
+`tests/eval/` 下保留真实 API dogfood / A-B 脚本。新增的
+[AcademicAgent Benchmark](tests/eval/benchmark/README.md) 统一了 101 条规划、问答、文档编辑和相关性样本，
+提供真实模型运行、逐条报告、基线对比和质量门禁：
+
+```bash
+python -m tests.eval.benchmark validate
+python -m tests.eval.benchmark run --smoke
+python -m tests.eval.benchmark run --live --allow-paid-provider
+```
+
+独立 benchmark CI 自动跑无网络自检；真实模型评测需要手动触发并配置模型密钥。
+自检成功不代表模型质量通过，待人工仲裁的相关性标签会阻止质量门禁放行。
 
 `docs/backlog.md` 记录跨 feature 的问题池与决策留痕（含已修问题的根因分析），
 `.kiro/specs/*` 是单个 feature 的 requirements / design / tasks。改动前值得先翻 backlog ——

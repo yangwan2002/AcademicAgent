@@ -1,0 +1,44 @@
+schema_version: "1.0"
+
+agent:
+  name: academic-agent
+  description: AcademicAgent evaluation adapter for EvalCaliper
+
+runtime:
+  type: docker
+  dockerfile: Dockerfile
+  build_context: .
+  workdir: /workspace
+
+execution:
+  mode: per_case
+  command:
+    - python
+    - /workspace/evalcaliper/run_case.py
+    - --input
+    - "{input_path}"
+    - --output
+    - "{output_path}"
+    - --trace
+    - "{trace_path}"
+  timeout_seconds: 300
+
+io:
+  input_path: /eval/input.json
+  output_path: /eval/output.json
+
+trace:
+  enabled: true
+  format: jsonl
+  path: /eval/trace.jsonl
+
+env:
+  required:
+    - PAPER_LLM
+    - PAPER_LLM_MODEL
+    - PAPER_KEY_ENV
+    - PAPER_API_KEY
+    - PAPER_REVIEWER_LLM
+    - PAPER_REVIEWER_LLM_MODEL
+    - PAPER_REVIEWER_KEY_ENV
+    - PAPER_REVIEWER_API_KEY

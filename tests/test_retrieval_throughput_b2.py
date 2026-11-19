@@ -1,4 +1,4 @@
-"""B2 serial reorder: relevance before strict verification, flag-off safe."""
+"""Offline reorder experiment; production remains verify-before-review."""
 
 from __future__ import annotations
 
@@ -6,7 +6,9 @@ import re
 
 import pytest
 
-from paper_agent.application.literature_composition import build_writing_orchestrator
+from paper_agent.application.literature_composition import (
+    CompositionUnavailable, build_writing_orchestrator,
+)
 from paper_agent.config import Config, load_config
 from paper_agent.literature.ledger import ReferenceLedger
 from paper_agent.literature.migration import candidate_to_record
@@ -37,8 +39,10 @@ from paper_agent.literature.relevance_runtime import (
 )
 from paper_agent.literature.retrieval.attempt import (
     AttemptDeps,
-    _run_attempt_b2_verify_first_reference,
-    run_attempt,
+    run_attempt as run_production_attempt,
+)
+from tests.eval.retrieval_throughput.experimental_attempt import (
+    _run_attempt_b2_verify_first_reference, run_experimental_attempt,
 )
 from paper_agent.literature.retrieval.batch import (
     BatchDisposition,
@@ -267,7 +271,7 @@ def _batch():
 def test_b2_unrelated_candidate_never_calls_strict_verifier():
     reviewer = _PerItemReviewer("unrelated")
     deps, verify, budget = _deps([_candidate(0)], reviewer)
-    result = run_attempt("agents", CRITERIA, _quota(), _batch(), deps)
+    result = run_experimental_attempt("agents", CRITERIA, _quota(), _batch(), deps)
     assert reviewer.calls == budget.llm_calls == 1
     assert verify.calls == 0
     assert result.items[0].disposition is BatchDisposition.REJECT
@@ -278,7 +282,7 @@ def test_b2_deterministic_filter_skips_judge_and_verifier():
     reviewer = _PerItemReviewer()
     year_filter = EligibilityFilter(FilterField.YEAR, FilterOperator.GTE, 2030)
     deps, verify, budget = _deps([_candidate(0, year=2020)], reviewer)
-    result = run_attempt(
+    result = run_experimental_attempt(
         "agents", CRITERIA, _quota(filters=(year_filter,)), _batch(), deps
     )
     assert reviewer.calls == budget.llm_calls == verify.calls == 0
@@ -289,7 +293,7 @@ def test_b2_relevance_precedes_verify_and_strict_success_accepts():
     events = []
     reviewer = _PerItemReviewer(events=events)
     deps, verify, _budget = _deps([_candidate(0)], reviewer, events=events)
-    result = run_attempt("agents", CRITERIA, _quota(), _batch(), deps)
+    result = run_experimental_attempt("agents", CRITERIA, _quota(), _batch(), deps)
     assert [kind for kind, _ in events] == ["judge", "verify"]
     assert verify.calls == 1
     assert result.items[0].disposition is BatchDisposition.ACCEPT_NEW
@@ -301,7 +305,7 @@ def test_b2_relevant_but_unverified_is_honestly_rejected():
     deps, verify, _budget = _deps(
         [candidate], reviewer, missing={"10.2000/b2-0"}
     )
-    result = run_attempt("agents", CRITERIA, _quota(), _batch(), deps)
+    result = run_experimental_attempt("agents", CRITERIA, _quota(), _batch(), deps)
     assert reviewer.calls == verify.calls == 1
     assert result.items[0].disposition is BatchDisposition.REJECT
     assert result.items[0].rejection_reasons == ("verify:unverified",)
@@ -314,7 +318,7 @@ def test_b1_b2_batches_relevance_then_verifies_only_survivors():
     deps, verify, budget = _deps(
         candidates, _PerItemReviewer(), batch_runtime=runtime
     )
-    result = run_attempt("agents", CRITERIA, _quota(), _batch(), deps)
+    result = run_experimental_attempt("agents", CRITERIA, _quota(), _batch(), deps)
     assert reviewer.calls == budget.llm_calls == 1
     assert verify.calls == 2
     assert [item.disposition for item in result.items] == [
@@ -335,7 +339,7 @@ def test_b2_same_work_selects_richer_representative_before_judging():
     )
     reviewer = _PerItemReviewer()
     deps, verify, _budget = _deps([sparse, rich], reviewer)
-    result = run_attempt("agents", CRITERIA, _quota(), _batch(), deps)
+    result = run_experimental_attempt("agents", CRITERIA, _quota(), _batch(), deps)
     assert reviewer.calls == verify.calls == 1
     assert "Richer evidence" in reviewer.last_user
     assert result.items[0].rejection_reasons == ("batch_duplicate",)
@@ -353,7 +357,7 @@ def test_b2_reuse_judges_ledger_subject_and_skips_verification():
     incoming = _candidate(0, doi="10.2000/existing", abstract="")
     reviewer = _PerItemReviewer()
     deps, verify, _budget = _deps([incoming], reviewer, ledger=ledger)
-    result = run_attempt("agents", CRITERIA, _quota(), _batch(), deps)
+    result = run_experimental_attempt("agents", CRITERIA, _quota(), _batch(), deps)
     assert "Authoritative ledger abstract" in reviewer.last_user
     assert verify.calls == 0
     assert result.items[0].disposition is BatchDisposition.REUSE_EXISTING
@@ -365,37 +369,61 @@ def test_b2_reuse_judges_ledger_subject_and_skips_verification():
     )
 
 
-def test_b2_config_and_snapshot_are_independent_from_batch(monkeypatch, tmp_path):
+@pytest.mark.parametrize("batch_enabled", [False, True])
+def test_reorder_setting_is_read_but_rejected_by_production_composition(
+    monkeypatch, tmp_path, batch_enabled
+):
     assert Config().literature_pipeline_reorder_enabled is False
     monkeypatch.setenv("PAPER_LIT_PIPELINE_REORDER_ENABLED", "true")
     assert load_config().literature_pipeline_reorder_enabled is True
-
     config = Config(
         literature_writing_integration=True,
         literature_pipeline_reorder_enabled=True,
-        # 本测试要证的是「两个 flag 相互独立」⇒ batch 必须显式关。
-        # B1 默认已开（2026-08-06），不显式关就测不到 reorder 单独生效的组合。
-        literature_relevance_batch_enabled=False,
+        literature_relevance_batch_enabled=batch_enabled,
         retrieval_provider="mock",
     )
-    facts = SessionFacts(path=str(tmp_path / "facts.json"))
-    reviewer = _PerItemReviewer()
-    orchestrator = build_writing_orchestrator(
-        config,
-        writer_llm=reviewer,
-        retrieval_provider=MockRetrievalProvider(),
-        facts=facts,
+    with pytest.raises(CompositionUnavailable, match="(?i)reorder|B2|experimental|实验"):
+        build_writing_orchestrator(
+            config, writer_llm=_PerItemReviewer(),
+            retrieval_provider=MockRetrievalProvider(),
+            facts=SessionFacts(path=str(tmp_path / "facts.json")),
+        )
+
+
+@pytest.mark.parametrize("batch_enabled", [False, True])
+def test_production_snapshot_keeps_verify_first_in_both_review_strategies(
+    tmp_path, batch_enabled
+):
+    config = Config(
+        literature_writing_integration=True,
+        literature_relevance_batch_enabled=batch_enabled,
+        retrieval_provider="mock",
     )
-    assert orchestrator._deps.pipeline_reorder_enabled is True
-    assert orchestrator._deps.active_relevance_runtime is None
+    orchestrator = build_writing_orchestrator(
+        config, writer_llm=_PerItemReviewer(),
+        retrieval_provider=MockRetrievalProvider(),
+        facts=SessionFacts(path=str(tmp_path / "facts.json")),
+    )
+    assert orchestrator._deps.pipeline_reorder_enabled is False
+    assert (orchestrator._deps.active_relevance_runtime is not None) is batch_enabled
     assert orchestrator._throughput_policy["flags"] == {
-        "batch": False,
-        "reorder": True,
-        "concurrency": False,
+        "batch": batch_enabled, "reorder": False, "concurrency": False,
     }
 
 
-def test_b2_loop_charges_per_item_llm_once_not_again_outside_attempt():
+def test_production_attempt_rejects_reorder_before_any_external_call():
+    reviewer = _PerItemReviewer()
+    deps, verify, budget = _deps([_candidate(0)], reviewer)
+    with pytest.raises(ValueError, match="(?i)reorder|B2|experimental|实验"):
+        run_production_attempt("agents", CRITERIA, _quota(), _batch(), deps)
+    assert reviewer.calls == verify.calls == budget.llm_calls == 0
+
+
+def test_b2_experimental_loop_charges_per_item_llm_once(monkeypatch):
+    import paper_agent.literature.retrieval.loop as loop_module
+
+    # Explicit test-only injection; production assembly never selects reorder.
+    monkeypatch.setattr(loop_module, "run_attempt", run_experimental_attempt)
     reviewer = _PerItemReviewer()
     deps, verify, budget = _deps([_candidate(0)], reviewer)
     quota = _quota(total_min=1)
@@ -432,7 +460,7 @@ def test_b2_reorder_matches_same_subject_verify_first_reference(verdict, missing
     reference_deps, reference_verify, _ = _deps(
         [candidate], _PerItemReviewer(verdict), missing=missing
     )
-    reordered = run_attempt(
+    reordered = run_experimental_attempt(
         "agents", CRITERIA, _quota(), _batch(), reordered_deps
     )
     reference = _run_attempt_b2_verify_first_reference(

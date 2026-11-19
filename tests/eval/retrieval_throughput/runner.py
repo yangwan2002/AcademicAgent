@@ -1,7 +1,7 @@
 """Offline-first retrieval-throughput benchmark entry point.
 
-Task 1 implements only deterministic Legacy characterization. Later tasks
-extend this report envelope with replay and live modes.
+Characterizes the single-item strategy in the same production attempt used
+for batched review. Historical golden payloads retain their original schema.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ for path in (str(SRC), str(HERE)):
     if path not in sys.path:
         sys.path.insert(0, path)
 
-from baseline import build_legacy_snapshot
+from baseline import build_single_item_snapshot
 
 
 def canonical_hash(value: dict) -> str:
@@ -34,10 +34,10 @@ def load_profile(path: Path) -> tuple[dict, str]:
 
 def build_report(profile_path: Path) -> dict:
     profile, profile_hash = load_profile(profile_path)
-    snapshot = build_legacy_snapshot()
+    snapshot = build_single_item_snapshot()
     return {
         "schema_version": "retrieval-throughput-report-v1",
-        "mode": "legacy-characterization",
+        "mode": "single-item-characterization",
         "network_used": False,
         "profile_id": profile["profile_id"],
         "profile_hash": profile_hash,

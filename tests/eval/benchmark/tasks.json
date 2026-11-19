@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "dataset_id": "academic-agent-tasks-v1",
+  "split": "development",
+  "label_status": "authored_fixture_specification",
+  "note": "Synthetic document and executable acceptance specifications. Not human-adjudicated writing quality labels or an independent holdout. All variants share one document family.",
+  "fixture": "fixtures/paper.tex",
+  "cases": [
+    {"id":"ask_accuracy","suite":"ask","question":"本文方法的准确率是多少？","patterns":["(?<![\\d.])0\\.87(?!\\d)|87\\s*%"],"forbidden":["0\\.97|97\\s*%"],"read_sections":["introduction","results"],"reference_answer":"准确率是 0.87，即 87%。"},
+    {"id":"ask_baseline","suite":"ask","question":"基线准确率是多少？","patterns":["(?<![\\d.])0\\.84(?!\\d)|84\\s*%"],"forbidden":[],"read_sections":["introduction","results"],"reference_answer":"基线准确率是 0.84。"},
+    {"id":"ask_training","suite":"ask","question":"训练用了多少轮，学习率是多少？","patterns":["(?<!\\d)20(?!\\d)","(?<![\\d.])0\\.001(?!\\d)"],"forbidden":[],"read_sections":["method"],"reference_answer":"训练 20 轮，学习率为 0.001。"},
+    {"id":"ask_dataset","suite":"ask","question":"实验数据集叫什么，包含多少文档？","patterns":["DocGraph","(?<!\\d)1[，,]?200(?!\\d)"],"forbidden":[],"read_sections":["results"],"reference_answer":"使用 DocGraph 数据集，包含 1200 篇文档。"},
+    {"id":"ask_latency","suite":"ask","question":"每篇文档的推理延迟是多少？","patterns":["(?<!\\d)12(?!\\d)","毫秒|milliseconds|ms"],"forbidden":[],"read_sections":["results"],"reference_answer":"每篇文档推理延迟为 12 毫秒。"},
+    {"id":"ask_layers","suite":"ask","question":"模型采用几层什么网络？","patterns":["3|三","图|graph"],"forbidden":[],"read_sections":["method"],"reference_answer":"使用 3 层图神经网络。"},
+    {"id":"ask_significance","suite":"ask","question":"论文提供了统计显著性检验吗？","patterns":["没有|未提供|未报告|未进行|未做|不包含"],"forbidden":["p\\s*[<＝=]\\s*0\\.05"],"read_sections":["results","conclusion"],"reference_answer":"没有，文档明确说明未报告显著性检验。"},
+    {"id":"ask_external","suite":"ask","question":"结果是否已通过独立外部数据集验证？","patterns":["没有|尚未|未进行|未验证|未通过|未做"],"forbidden":[],"read_sections":["results","conclusion"],"reference_answer":"没有，当前只评测了一个数据集，尚未做外部验证。"},
+    {"id":"ask_loss","suite":"ask","question":"方法中的损失函数是什么？","patterns":["L_c|L_\\{c\\}","0\\.1","L_r|L_\\{r\\}"],"forbidden":[],"read_sections":["method"],"reference_answer":"损失为 L = L_c + 0.1 L_r。"},
+    {"id":"ask_limitations","suite":"ask","question":"总结文档明确承认的实验局限，不要推测。","patterns":["一个|单一|单个|1 个","显著性|统计"],"forbidden":[],"read_sections":["results","conclusion"],"reference_answer":"只在一个数据集上验证，没有外部验证，也没有显著性检验。"},
+    {"id":"edit_intro_zh","suite":"editing","targets":["introduction"],"instruction":"保守润色 Introduction 章节，让语言更清晰。保留英文、全部数字、引用和公式，其他章节完全不变。"},
+    {"id":"edit_method_zh","suite":"editing","targets":["method"],"instruction":"保守润色 Method 章节，让语言更清晰。保留英文、全部数字、引用和公式，其他章节完全不变。"},
+    {"id":"edit_results_zh","suite":"editing","targets":["results"],"instruction":"保守润色 Results 章节，让语言更清晰。保留英文、全部数字、引用和公式，其他章节完全不变。"},
+    {"id":"edit_conclusion_zh","suite":"editing","targets":["conclusion"],"instruction":"保守润色 Conclusion 章节，让语言更清晰。保留英文、全部数字、引用和公式，其他章节完全不变。"},
+    {"id":"edit_intro_en","suite":"editing","targets":["introduction"],"instruction":"Conservatively polish Introduction for clarity. Keep English, all numbers, citations and equations. Leave every other section unchanged."},
+    {"id":"edit_method_en","suite":"editing","targets":["method"],"instruction":"Conservatively polish Method for clarity. Keep English, all numbers, citations and equations. Leave every other section unchanged."},
+    {"id":"edit_results_en","suite":"editing","targets":["results"],"instruction":"Conservatively polish Results for clarity. Keep English, all numbers, citations and equations. Leave every other section unchanged."},
+    {"id":"edit_conclusion_en","suite":"editing","targets":["conclusion"],"instruction":"Conservatively polish Conclusion for clarity. Keep English, all numbers, citations and equations. Leave every other section unchanged."},
+    {"id":"edit_intro_method","suite":"editing","targets":["introduction","method"],"instruction":"先保守润色 Introduction，再保守润色 Method，让语言更清晰。保留英文、全部数字、引用和公式，其余章节完全不变。"},
+    {"id":"edit_results_conclusion","suite":"editing","targets":["results","conclusion"],"instruction":"先保守润色 Results，再保守润色 Conclusion，让语言更清晰。保留英文、全部数字、引用和公式，其余章节完全不变。"}
+  ]
+}

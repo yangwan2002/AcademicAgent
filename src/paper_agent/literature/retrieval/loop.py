@@ -261,8 +261,7 @@ def run_retrieval_loop(
             res = run_attempt(q, criteria, quota, batch, attempt_deps, limit=search_limit)
             ledger_budget.charge_candidates(res.stats.candidates)
             if res.throughput is None:
-                # Legacy relevance is charged after the logical per-item calls.
-                # B1/B2 settle or charge calls inside their staged paths.
+                # 单篇策略在本轮结束后按逻辑调用记账；批量策略已在开窗时结算。
                 ledger_budget.charge_llm(res.stats.relevance_calls)
             tried_queries.append(q)
             record = _trace_record(q, res, ledger_budget, gaps)

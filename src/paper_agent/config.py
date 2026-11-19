@@ -162,7 +162,7 @@ class Config:
     # 上述阈值均在**全英文**语料上实测；中文摘要同字符装的信息更多，未验。
     literature_bundle_budget_chars: int = 40000
 
-    # ---- retrieval-throughput / B1（默认关；size=1 保持逐篇语义）----
+    # ---- 相关性评审：同一检索流程支持单篇与批量策略（默认批量）----
     # B1 默认开启（2026-08-06 受控 A/B）：单篇判定时 relevance LLM 占 125s 里的
     # 89.9s（72%），批量后 5 次调用 51.1s、LLM 秒/候选 4.50→2.15。省下的预算够多跑
     # 一轮检索 ⇒ 停止原因首次从 budget_exhausted 变 quota_satisfied、入库 6→17。
@@ -174,12 +174,8 @@ class Config:
     literature_relevance_batch_output_chars: int = 8000
     literature_relevance_batch_output_tokens: int | None = None
     literature_batch_retry_limit: int = 1
-    # ---- retrieval-throughput / B2（默认关；相关性先于严格核验）----
+    # 仅保留历史配置的识别能力。正式装配拒绝 True；B2 只在 tests/eval 中运行。
     literature_pipeline_reorder_enabled: bool = False
-
-
-# 向后兼容别名：V2 骨架代码里以 RuntimeConfig 指代同一对象。
-RuntimeConfig = Config
 
 
 def load_config() -> Config:
@@ -382,4 +378,4 @@ def _env_optional_int(name: str, *, minimum: int | None = None) -> int | None:
     return value
 
 
-__all__ = ["Config", "RuntimeConfig", "load_config"]
+__all__ = ["Config", "load_config"]

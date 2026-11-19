@@ -1,6 +1,31 @@
 # AcademicAgent 项目设计与源码阅读指南
 
-> 面向项目作者的面试准备文档。目标不是逐行记住约 2.7 万行源码，而是建立一套能解释、能追踪、能调试的项目心智模型。
+> 面向项目作者的源码阅读与面试准备文档。先追踪一条请求，再按需阅读各模块。
+
+## 0. 从当前主流程开始
+
+普通自然语言请求只有一个入口：
+
+```text
+scripts/chat.py → TurnService → Planning → PlanExecutor → Intent Handler → 具体写作操作
+```
+
+文献检索的生产实现统一在 `literature/retrieval/attempt.py` 的 `run_attempt()`：
+
+```text
+搜索 → 资格过滤与去重 → 严格核验 → 相关性评审 → 按输入顺序归并结果
+```
+
+- 单篇和批量只是相关性评审的策略，共用上述候选处理流程；默认使用批量策略。
+- 原来的独立 Legacy 候选循环已删除，不需要再对照两套生产算法阅读。
+- B2 的“先相关性、后核验”尚未作为默认方案发布，代码隔离在
+  `tests/eval/retrieval_throughput/experimental_attempt.py`，仅供显式实验调用。
+  生产配置开启 `PAPER_LIT_PIPELINE_REORDER_ENABLED` 会明确报错。
+- 只读 AskLoop、无配额写作，以及既有文档和账本的数据迁移仍是有效功能。
+  无配额但要求搜索时使用 `tools/literature.py` 的轻量搜索工具，不是被删除的 Legacy 检索循环。
+
+第一次阅读按入口、`application/turn_service.py`、`runtime/plan_executor.py`、
+`intents/polish.py` 的顺序，跑通“润色一个章节”后再看文献检索。
 
 ## 1. 先用一句话定义项目
 

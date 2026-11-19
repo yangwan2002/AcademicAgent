@@ -28,6 +28,8 @@ def test_b2_gate_small_run_is_honest_about_replay_minimum():
     gate = _load("retrieval_b2_gate_small", EVAL / "b2_gate.py")
     report = gate.build_b2_gate_report(runs=2)
     assert report["network_used"] is False
+    assert report["production_modes"] == ["single_item", "b1"]
+    assert report["experimental_modes"] == ["b1_b2", "b2_reference"]
     assert report["paired"]["final_semantics_equal"] is True
     assert report["paired"]["b1_b2_verify_calls"] < report["paired"]["b1_verify_calls"]
     assert report["checks"]["replay_minimum_met"] is False
@@ -56,10 +58,10 @@ def test_b2_reorder_matches_reference_for_100_deterministic_shuffles():
     for seed in range(100):
         candidates = list(source)
         random.Random(seed).shuffle(candidates)
-        legacy = gate._run_mode("legacy", candidates)
+        single_item = gate._run_mode("single_item", candidates)
         b1 = gate._run_mode("b1", candidates)
         b2 = gate._run_mode("b1_b2", candidates)
         reference = gate._run_mode("b2_reference", candidates)
-        assert legacy["semantic"] == b1["semantic"] == b2["semantic"] == reference["semantic"]
+        assert single_item["semantic"] == b1["semantic"] == b2["semantic"] == reference["semantic"]
         assert b2["accepted"] == reference["accepted"] == 20
         assert b2["calls"]["verify"] <= reference["calls"]["verify"]

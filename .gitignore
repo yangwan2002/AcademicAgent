@@ -31,3 +31,6 @@ tests/eval/**/bundle*.jsonl
 # 曾有 5 个这类文件被误提交，故按模式挡住。
 /_*.txt
 /_*.bak.json
+
+# Benchmark verification scratch directories and local lint dependency bundle.
+/tmp/benchmark*/

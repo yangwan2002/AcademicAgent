@@ -1,4 +1,4 @@
-"""Deterministic Legacy characterization harness for retrieval throughput Task 1.
+"""Deterministic single-item characterization of the unified production attempt.
 
 This module deliberately uses only in-memory stubs.  Volatile fields (UUIDs,
 timestamps and elapsed wall time) are excluded from the semantic snapshot.
@@ -354,8 +354,8 @@ def _run_cache_reuse() -> dict:
     }
 
 
-def build_legacy_snapshot() -> dict:
-    """Return a stable semantic snapshot of the current Legacy attempt path."""
+def build_single_item_snapshot() -> dict:
+    """Keep the historical golden format while running the unified single-item strategy."""
     return {
         "schema_version": "retrieval-throughput-legacy-characterization-v1",
         "normalization": {
@@ -377,4 +377,4 @@ def build_legacy_snapshot() -> dict:
     }
 
 
-__all__ = ["build_legacy_snapshot"]
+__all__ = ["build_single_item_snapshot"]

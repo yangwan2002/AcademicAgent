@@ -259,6 +259,11 @@ def build_writing_orchestrator(
     """
     if not config.literature_writing_integration:
         return None
+    if config.literature_pipeline_reorder_enabled:
+        raise CompositionUnavailable(
+            "B2 检索顺序实验已移出生产代码；请关闭 PAPER_LIT_PIPELINE_REORDER_ENABLED。"
+            "实验入口见 tests/eval/retrieval_throughput/experimental_attempt.py"
+        )
 
     from paper_agent.application.literature_flow import WritingLiteratureOrchestrator
 
@@ -292,7 +297,6 @@ def build_writing_orchestrator(
         language_thresholds=_thresholds(config),
         language_policy=config.literature_lang_policy,
         active_relevance_runtime=active_runtime,
-        pipeline_reorder_enabled=config.literature_pipeline_reorder_enabled,
     )
 
     thresholds = _thresholds(config)
