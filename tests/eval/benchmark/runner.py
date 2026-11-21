@@ -79,8 +79,11 @@ def runtime_identity(config):
     from paper_agent.providers.factory import resolved_llm_model, reviewer_model_is_diverse
 
     def git(*args):
-        result = subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True,
-                                encoding="utf-8", errors="replace", timeout=10, check=False)
+        try:
+            result = subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True,
+                                    encoding="utf-8", errors="replace", timeout=10, check=False)
+        except (OSError, subprocess.SubprocessError):
+            return ""
         return result.stdout.strip() if result.returncode == 0 else ""
 
     return {"commit": git("rev-parse", "HEAD"),
