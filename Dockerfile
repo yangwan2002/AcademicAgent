@@ -7,7 +7,7 @@ COPY src ./src
 COPY tests ./tests
 COPY evalcaliper ./evalcaliper
 
-RUN pip install --no-cache-dir -r requirements.lock \
+RUN pip install --no-cache-dir -r requirements.lock --index-url https://pypi.tuna.tsinghua.edu.cn/simple \
     && pip install --no-deps -e .
 
 ENV PYTHONPATH=/workspace/src:/workspace \
