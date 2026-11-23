@@ -33,14 +33,14 @@ trace:
   path: /eval/trace.jsonl
 
 env:
-  required:
-    - PAPER_LLM
-    - PAPER_LLM_MODEL
-    - PAPER_BASE_URL
-    - PAPER_KEY_ENV
+  fixed:
+    PAPER_LLM: deepseek
+    PAPER_LLM_MODEL: deepseek-flash
+    PAPER_BASE_URL: https://api.deepseek.com
+    PAPER_KEY_ENV: PAPER_API_KEY
+    PAPER_REVIEWER_LLM: deepseek
+    PAPER_REVIEWER_LLM_MODEL: deepseek-v4-pro
+    PAPER_REVIEWER_BASE_URL: https://api.deepseek.com
+    PAPER_REVIEWER_KEY_ENV: PAPER_API_KEY
+  secrets:
     - PAPER_API_KEY
-    - PAPER_REVIEWER_LLM
-    - PAPER_REVIEWER_LLM_MODEL
-    - PAPER_REVIEWER_BASE_URL
-    - PAPER_REVIEWER_KEY_ENV
-    - PAPER_REVIEWER_API_KEY
