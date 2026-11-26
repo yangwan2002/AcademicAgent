@@ -31,6 +31,26 @@ trace:
   enabled: true
   format: jsonl
   path: /eval/trace.jsonl
+  schema: academic.benchmark.v1
+  normalizer: generic_alias
+  rules:
+    record_selector:
+      - "$[*]"
+    field_aliases:
+      event_type: [type, event_type, event, kind]
+      span_id: [span_id, spanId, id, case_id]
+      trace_id: [trace_id, traceId, run_id]
+      parent_span_id: [parent_span_id, parentSpanId]
+      status: [status, outcome, result]
+      timestamp: [timestamp, time, "@timestamp"]
+      duration_ms: [duration_ms, duration, latency_ms, elapsed_ms]
+    event_aliases:
+      benchmark_result: agent_end
+      result: agent_end
+      final: agent_end
+      llm: llm_call
+      tool: tool_call
+      error: error
 
 env:
   fixed:
